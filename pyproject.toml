@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shuga"
-version = "0.1.0"
-description = "Standalone Antarctic fast-ice classification and metrics workflows for CICE Zarr output"
+version = "0.2.0"
+description = "Antarctic fast-ice classification, metrics, plotting, and observations workflows for CICE Zarr output"
 requires-python = ">=3.10"
 dependencies = [
   "numpy",
@@ -13,8 +13,12 @@ dependencies = [
   "xarray",
   "zarr",
   "dask",
+  "matplotlib",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["shuga*"]
+
+[tool.setuptools.package-data]
+shuga = ["cpt/*.cpt"]

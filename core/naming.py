@@ -56,3 +56,12 @@ def method_dirname(method: str, *, bin_window: int, bin_min_days: int, roll_wind
 
 def method_slug(method: str) -> str:
     return normalize_method(method).replace("-", "_")
+
+
+def filename_token(value: str) -> str:
+    """Return a filesystem-safe filename token."""
+    s = str(value).strip()
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"[^A-Za-z0-9_.-]+", "_", s)
+    s = re.sub(r"_+", "_", s)
+    return s.strip("_")

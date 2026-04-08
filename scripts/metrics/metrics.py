@@ -1,20 +1,31 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-
-import argparse
-
-from shugga import CICEMetrics, ClassificationSpec, MetricsSpec, RunSpec, ShuggaPaths
-from shugga.core.logging import build_file_logger
-
+import argparse, sys
+from pathlib import Path
+#####################################################################
+# make sure this reflects the correct location of mawsons-chest repo
+repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
+#####################################################################
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+from shuga import (CICEMetrics,
+                   CICEPlotter,
+                   ClassificationSpec,
+                   MetricsSpec,
+                   ObservationSpec,
+                   PlottingSpec,
+                   RunSpec,
+                   ShugaPaths)
+from shuga.core.naming  import normalize_method
+from shuga.core.logging import build_file_logger
 
 def _comma_split(value: str | None) -> list[str]:
     if value is None:
         return []
     return [v.strip() for v in value.split(",") if v.strip()]
 
-
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Compute fast-ice metrics from shugga classification outputs.")
+    p = argparse.ArgumentParser(description="Compute fast-ice metrics from shuga classification outputs.")
     p.add_argument("--sim-name", required=True)
     p.add_argument("--start-date", required=True)
     p.add_argument("--end-date", required=True)
@@ -22,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", default="gv90")
     p.add_argument("--user", default="da1339")
     p.add_argument("--ice-type", default="FI")
-    p.add_argument("--BorC2T-type", default="Tc")
+    p.add_argument("--grid-type", "--BorC2T-type", dest="grid_type", default="Tc")
     p.add_argument("--ispd-thresh", type=float, default=5e-4)
     p.add_argument("--methods", default="binary-days,rolling-mean")
     p.add_argument("--bin-window", type=int, default=11)
@@ -38,19 +49,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--obs-fia-var", default="FIA")
     p.add_argument("--obs-fit-var", default="FIT")
     p.add_argument("--coast-distance-var", default=None)
+    p.add_argument("--seaice-root", default=None)
+    p.add_argument("--nsidc-root", default=None)
+    p.add_argument("--nsidc-cellarea-root", default=None)
+    p.add_argument("--af2020-root", default=None)
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--plot-fip", action="store_true")
     p.add_argument("--plot-fia", action="store_true")
     p.add_argument("--plot-fit", action="store_true")
     p.add_argument("--plot-region", default="total")
+    p.add_argument("--fip-region", default=None)
+    p.add_argument("--fig-size", type=float, default=20.0)
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
 
 
 def main() -> None:
-    args = build_parser().parse_args()
-    methods = _comma_split(args.methods)
-
+    args    = build_parser().parse_args()
+    methods = [normalize_method(m) for m in _comma_split(args.methods)]
     run = RunSpec(
         sim_name=args.sim_name,
         start_date=args.start_date,
@@ -61,7 +77,7 @@ def main() -> None:
     )
     classify = ClassificationSpec(
         ice_type=args.ice_type,
-        grid_type=args.BorC2T_type,
+        grid_type=args.grid_type,
         ispd_thresh=args.ispd_thresh,
         methods=tuple(methods),
         bin_window=args.bin_window,
@@ -69,14 +85,22 @@ def main() -> None:
         roll_window=args.roll_window,
     )
     metrics = MetricsSpec(
+        methods=tuple(methods),
         obs_metrics_store=args.obs_metrics_store,
         obs_fia_var=args.obs_fia_var,
         obs_fit_var=args.obs_fit_var,
         coast_distance_var=args.coast_distance_var,
     )
-    paths = ShuggaPaths(
-        run=run,
-        classify=classify,
+    obs = ObservationSpec(
+        seaice_root=args.seaice_root,
+        nsidc_root=args.nsidc_root,
+        nsidc_cellarea_root=args.nsidc_cellarea_root,
+        af2020_root=args.af2020_root,
+    )
+    plotting = PlottingSpec(fig_size=args.fig_size, fip_fig_size=args.fig_size, region_fig_size=args.fig_size)
+    paths    = ShugaPaths(run=run,
+                          classify=classify,
+        observations=obs,
         afim_output_root=args.afim_output_root,
         graphics_root=args.graphics_root,
         cice_store=args.cice_store,
@@ -85,24 +109,24 @@ def main() -> None:
         logs_root=args.logs_root,
     )
 
-    logger = build_file_logger("shugga.metrics", paths.metrics_log_path(), level=args.log_level)
+    logger = build_file_logger("shuga.metrics", paths.metrics_log_path(), level=args.log_level)
     logger.info("Logging to: %s", paths.metrics_log_path())
     logger.info("Resolved CICE store: %s", paths.resolve_cice_store())
     static_store = paths.resolve_static_store()
     if static_store is not None:
         logger.info("Resolved static store: %s", static_store)
     logger.info("Resolved classification root: %s", paths.classification_root_path)
-
     runner = CICEMetrics(run=run, classify=classify, metrics=metrics, paths=paths, logger=logger)
+    plotter = CICEPlotter(run=run, classify=classify, metrics=metrics, plotting=plotting, observations=obs, paths=paths, logger=logger)
     for method in methods:
         logger.info("Processing class method: %s", method)
         runner.compute_metrics(method, overwrite=args.overwrite)
         if args.plot_fip:
-            logger.info("Wrote FIP plot: %s", runner.plot_fip(method))
+            logger.info("Wrote FIP plot(s): %s", plotter.plot_fip(method, region_name=args.fip_region if args.fip_region not in {None, '', 'total'} else None))
         if args.plot_fia:
-            logger.info("Wrote FIA plot: %s", runner.plot_timeseries("FIA", method, region=args.plot_region))
+            logger.info("Wrote FIA plot: %s", plotter.plot_timeseries("FIA", method, region=args.plot_region))
         if args.plot_fit:
-            logger.info("Wrote FIT plot: %s", runner.plot_timeseries("FIT", method, region=args.plot_region))
+            logger.info("Wrote FIT plot: %s", plotter.plot_timeseries("FIT", method, region=args.plot_region, add_f2020=False))
 
 
 if __name__ == "__main__":

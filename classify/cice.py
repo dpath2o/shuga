@@ -1,19 +1,38 @@
 
-from __future__ import annotations
-
+from __future__            import annotations
 import shutil
-from collections.abc import Callable
-
-import numpy as np
-import xarray as xr
-
-from shuga.core.logging import build_file_logger
-from shuga.core.naming import normalize_method
-from shuga.core.paths import ShugaPaths
-from shuga.core.types import ClassificationSpec, RunSpec
-from shuga.io.zarr_loading import open_cice_history
+from collections.abc       import Callable
+import numpy               as np
+import pandas              as pd
+import xarray              as xr
+from shuga.core.logging    import build_file_logger
+from shuga.core.naming     import normalize_method
+from shuga.core.paths      import ShugaPaths
+from shuga.core.types      import ClassificationSpec, RunSpec
+from shuga.io.zarr_loading import load_cice
 from shuga.regridding.cice import compute_tgrid_speed, parse_grid_selection
 
+def _sanitize_for_zarr_write(ds: xr.Dataset) -> xr.Dataset:
+    ds = ds.copy()
+    # Drop inherited backend encoding that can poison writes.
+    for name in ds.variables:
+        ds[name].encoding = {}
+    # Dataset-level encoding can also carry backend state.
+    ds.encoding = {}
+    return ds
+
+def _strip_to_classification_coords(mask: xr.DataArray) -> xr.DataArray:
+    """
+    Keep only the minimal coordinates needed for classification output.
+    Retain time coordinate if present; drop all spatial/static coords.
+    """
+    time_coord = mask["time"] if "time" in mask.coords else None
+    clean = xr.DataArray(mask.data,
+                         dims   = mask.dims,
+                         coords = {"time": time_coord} if time_coord is not None else None,
+                         name   = mask.name or "FI_mask",
+                         attrs  = mask.attrs)
+    return clean
 
 class CICEClassifier:
     """Standalone fast-ice classification for CICE Zarr history output.
@@ -75,19 +94,24 @@ class CICEClassifier:
         return vars_keep
 
     def load_cice(self, methods: list[str] | tuple[str, ...] | None = None) -> xr.Dataset:
-        methods = list(methods or self.classify.methods)
+        methods     = list(methods or self.classify.methods)
         extend_days = self._required_padding_days(methods)
         if self._ds_cache is None:
-            vars_keep = [self.classify.aice_var, *self._required_velocity_vars(), "TLON", "TLAT"]
+            vars_keep    = [self.classify.aice_var, *self._required_velocity_vars(), "TLON", "TLAT"]
             self.logger.info("Resolved CICE store: %s", self.paths.resolve_cice_store())
             static_store = self.paths.resolve_static_store()
             if static_store is not None:
                 self.logger.info("Resolved static store: %s", static_store)
-            self._ds_cache = open_cice_history(self.paths,
-                                               variables   = vars_keep,
-                                               extend_days = extend_days,
-                                               chunks      = self.chunks,
-                                               logger      = self.logger)
+            dt0            = (pd.to_datetime(self.run.start_date) - pd.Timedelta(days=int(extend_days))).strftime("%Y-%m-%d")
+            dtN            = (pd.to_datetime(self.run.end_date)   + pd.Timedelta(days=int(extend_days))).strftime("%Y-%m-%d")
+            self._ds_cache = load_cice(run        = self.run,
+                                       classify   = self.classify,
+                                       paths      = self.paths,
+                                       dt0_str    = dt0,
+                                       dtN_str    = dtN,
+                                       variables  = vars_keep,
+                                       hemisphere = self.run.hemisphere,
+                                       chunks     = self.chunks)
         return self._ds_cache
 
     def compute_speed(self, ds: xr.Dataset) -> xr.DataArray:
@@ -187,24 +211,37 @@ class CICEClassifier:
                 self.logger.info("Classification store exists and overwrite=False, skipping: %s", store)
                 return str(store)
             shutil.rmtree(store)
-        ds_out = mask.to_dataset(name=self.mask_var_name)
-        ds_out.attrs.update({"sim_name"   : self.run.sim_name,
-                             "start_date" : self.run.start_date,
-                             "end_date"   : self.run.end_date,
-                             "hemisphere" : self.run.hemisphere,
-                             "ice_type"   : self.classify.ice_type,
-                             "grid_type"  : " ".join(self.grid_selection),
-                             "ispd_thresh": float(self.classify.ispd_thresh)})
+        mask  = _strip_to_classification_coords(mask)
+        t_org = mask["time"] if "time" in mask.coords else None
+        mask  = xr.DataArray(mask.data,
+                             dims   = mask.dims,
+                             coords = {"time": t_org} if t_org is not None else None,
+                             name   =  "FI_mask",
+                             attrs  = mask.attrs)
+        ds_out = xr.Dataset({"FI_mask": mask})
+        ds_out.attrs.update({"sim_name": self.run.sim_name,
+                             "start_date": self.run.start_date,
+                             "end_date": self.run.end_date,
+                             "hemisphere": self.run.hemisphere,
+                             "ice_type": self.classify.ice_type,
+                             "grid_type": self.classify.grid_type,
+                             "method": normalize_method(method)})
         chunk_map = self._output_chunk_map(ds_out)
         if chunk_map:
             self.logger.info("Rechunking classification output with chunks: %s", chunk_map)
             ds_out = ds_out.chunk(chunk_map)
+        # IMPORTANT: strip inherited encodings before setting fresh ones
+        ds_out = _sanitize_for_zarr_write(ds_out)
         encoding = {}
         for name, var in ds_out.data_vars.items():
             if getattr(var.data, "chunks", None) is not None:
                 encoding[name] = {"chunks": tuple(int(c[0]) for c in var.chunks)}
+        # coordinates should not carry stale backend encoding either
+        for name, var in ds_out.coords.items():
+            if getattr(var.data, "chunks", None) is not None:
+                encoding[name] = {"chunks": tuple(int(c[0]) for c in var.chunks)}
         self.logger.info("Writing %s classification to %s", normalize_method(method), store)
-        ds_out.to_zarr(store, mode="w", consolidated=False, encoding=encoding)
+        ds_out.to_zarr(store, mode="w", consolidated=False, encoding=encoding, zarr_format=2) #enforce 2
         return str(store)
 
     def run_methods(self, methods: list[str] | tuple[str, ...] | None = None, *,
@@ -221,13 +258,3 @@ class CICEClassifier:
             out[method] = self.write_classification(method, mask, overwrite=overwrite)
         return out
 
-    def load_classification(self, method: str) -> xr.DataArray:
-        store = self.paths.classification_store(method)
-        if not store.exists():
-            raise FileNotFoundError(f"Classification store does not exist: {store}")
-        ds = xr.open_zarr(store, consolidated=False, chunks=self.chunks)
-        if self.mask_var_name in ds.data_vars:
-            return ds[self.mask_var_name]
-        if len(ds.data_vars) == 1:
-            return next(iter(ds.data_vars.values()))
-        raise KeyError(f"Could not find {self.mask_var_name!r} in {store}. Data variables: {list(ds.data_vars)}")

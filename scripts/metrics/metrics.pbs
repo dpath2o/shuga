@@ -10,10 +10,35 @@
 
 set -euo pipefail
 
+PROJECT="${PROJECT:-gv90}"
+RUN_USER="${RUN_USER:-da1339}"
+SIM_NAME="${SIM_NAME:?SIM_NAME not set}"
+START_DATE="${START_DATE:?START_DATE not set}"
+END_DATE="${END_DATE:?END_DATE not set}"
+HEMISPHERE="${HEMISPHERE:-SH}"
+ICE_TYPE="${ICE_TYPE:-FI}"
+GRID_TYPE="${GRID_TYPE:-Tc}"
+ISPD_THRESH="${ISPD_THRESH:-5e-4}"
+METHODS="${METHODS:-binary-days|rolling-mean}"
+BIN_WINDOW="${BIN_WINDOW:-11}"
+BIN_MIN_DAYS="${BIN_MIN_DAYS:-9}"
+ROLL_WINDOW="${ROLL_WINDOW:-15}"
+OVERWRITE="${OVERWRITE:-false}"
+PLOT_FIP="${PLOT_FIP:-false}"
+PLOT_FIA="${PLOT_FIA:-false}"
+PLOT_FIT="${PLOT_FIT:-false}"
+PLOT_REGION="${PLOT_REGION:-total}"
+OBS_FIA_VAR="${OBS_FIA_VAR:-FIA}"
+OBS_FIT_VAR="${OBS_FIT_VAR:-FIT}"
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
+# Decode PBS-safe delimiter back to comma-separated list for Python CLI.
+METHODS="${METHODS//|/,}"
+
 module use /g/data/xp65/public/modules
 module load conda/analysis3-25.12
 
-REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/shugga_package}"
+REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest/shuga}"
 PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/scripts/metrics/metrics.py}"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 
@@ -21,7 +46,8 @@ export DASK_TEMPORARY_DIRECTORY="/scratch/${PROJECT}/${RUN_USER}/dask_tmp/${PBS_
 export TMPDIR="/scratch/${PROJECT}/${RUN_USER}/tmp/${PBS_JOBID}"
 mkdir -p "$DASK_TEMPORARY_DIRECTORY" "$TMPDIR"
 
-CMD=(python "$PY_SCRIPT"
+CMD=(
+  python "$PY_SCRIPT"
   --sim-name "$SIM_NAME"
   --start-date "$START_DATE"
   --end-date "$END_DATE"
@@ -49,10 +75,10 @@ CMD=(python "$PY_SCRIPT"
 [[ -n "${LOGS_ROOT:-}" ]] && CMD+=(--logs-root "$LOGS_ROOT")
 [[ -n "${OBS_METRICS_STORE:-}" ]] && CMD+=(--obs-metrics-store "$OBS_METRICS_STORE")
 [[ -n "${COAST_DISTANCE_VAR:-}" ]] && CMD+=(--coast-distance-var "$COAST_DISTANCE_VAR")
-[[ "${OVERWRITE:-false}" == "true" ]] && CMD+=(--overwrite)
-[[ "${PLOT_FIP:-false}" == "true" ]] && CMD+=(--plot-fip)
-[[ "${PLOT_FIA:-false}" == "true" ]] && CMD+=(--plot-fia)
-[[ "${PLOT_FIT:-false}" == "true" ]] && CMD+=(--plot-fit)
+[[ "$OVERWRITE" == "true" ]] && CMD+=(--overwrite)
+[[ "$PLOT_FIP" == "true" ]] && CMD+=(--plot-fip)
+[[ "$PLOT_FIA" == "true" ]] && CMD+=(--plot-fia)
+[[ "$PLOT_FIT" == "true" ]] && CMD+=(--plot-fit)
 
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"

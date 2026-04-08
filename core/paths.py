@@ -3,14 +3,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .naming import method_dirname, method_slug, threshold_tag_compact, threshold_tag_dir
-from .types import ClassificationSpec, RunSpec
+from .naming import filename_token, method_dirname, method_slug, normalize_method, threshold_tag_compact, threshold_tag_dir
+from .types import (
+    ClassificationSpec,
+    MetricsSpec,
+    ObservationSpec,
+    PlottingSpec,
+    RunSpec,
+)
 
 
 @dataclass(slots=True)
 class ShugaPaths:
     run: RunSpec
     classify: ClassificationSpec
+    metrics: MetricsSpec | None = None
+    plotting: PlottingSpec | None = None
+    observations: ObservationSpec | None = None
+
     afim_output_root: str | Path | None = None
     graphics_root: str | Path | None = None
     logs_root: str | Path | None = None
@@ -73,6 +83,34 @@ class ShugaPaths:
             return Path(self.logs_root).expanduser()
         return Path.home() / "logs"
 
+    @property
+    def seaice_root_path(self) -> Path:
+        obs = self.observations or ObservationSpec()
+        if obs.seaice_root is not None:
+            return Path(obs.seaice_root).expanduser()
+        return Path(f"/g/data/{self.run.project}/{self.run.user}/SeaIce")
+
+    @property
+    def fi_obs_root_path(self) -> Path:
+        obs = self.observations or ObservationSpec()
+        if obs.af2020_root is not None:
+            return Path(obs.af2020_root).expanduser()
+        return self.seaice_root_path / "FI_obs"
+
+    @property
+    def nsidc_root_path(self) -> Path:
+        obs = self.observations or ObservationSpec()
+        if obs.nsidc_root is not None:
+            return Path(obs.nsidc_root).expanduser()
+        return self.seaice_root_path / "NSIDC" / obs.nsidc_version
+
+    @property
+    def nsidc_aux_root_path(self) -> Path:
+        obs = self.observations or ObservationSpec()
+        if obs.nsidc_cellarea_root is not None:
+            return Path(obs.nsidc_cellarea_root).expanduser()
+        return self.seaice_root_path / "NSIDC" / obs.nsidc_cellarea_product
+
     def resolve_cice_store(self) -> Path:
         if self.cice_store is not None:
             path = Path(self.cice_store).expanduser()
@@ -122,6 +160,13 @@ class ShugaPaths:
             roll_window=self.classify.roll_window,
         ) / "mets.zarr"
 
+    # backward-compatible aliases for newer callers
+    def resolve_class_store(self, method: str) -> Path:
+        return self.classification_store(method)
+
+    def resolve_metrics_store(self, method: str) -> Path:
+        return self.metrics_store(method)
+
     def classification_log_path(self) -> Path:
         stem = (
             f"classify_{self.run.sim_name}_{self.classify.ice_type}_{self.classify.grid_type}"
@@ -138,16 +183,58 @@ class ShugaPaths:
         )
         return self.logs_root_path / "metrics" / stem
 
-    def fip_plot_path(self, method: str) -> Path:
+    def figure_root(self, region: str | None = None) -> Path:
+        parts = [self.graphics_root_path, self.run.sim_name]
+        if region is not None:
+            parts.append(str(region))
+        path = parts[0]
+        for part in parts[1:]:
+            path = path / part
+        return path
+
+    def fip_plot_path(self, method: str, region: str = "TOTAL") -> Path:
         method_part = method_slug(method)
-        name = f"{self.run.start_date}_{self.run.end_date}_FIP_{method_part}.png"
-        return self.graphics_root_path / self.run.sim_name / "FIP" / name
+        name = f"{self.run.start_date}_{self.run.end_date}_{self.run.sim_name}_FIP_{method_part}.png"
+        return self.figure_root(region=region) / "FIP" / name
 
     def timeseries_plot_path(self, variable: str, method: str, region: str = "total") -> Path:
         method_part = method_slug(method)
-        region_part = str(region).lower()
-        name = (
-            f"{self.run.start_date}_{self.run.end_date}_{self.run.sim_name}_"
-            f"{variable}_{method_part}_{region_part}.png"
-        )
+        name = f"{self.run.start_date}_{self.run.end_date}_{self.run.sim_name}_{variable}_{method_part}.png"
+        return self.figure_root(region=region) / "timeseries" / name
+
+
+    def multi_timeseries_plot_path(
+        self,
+        variable: str,
+        method: str,
+        simulations,
+        *,
+        region: str = "total",
+        dt0_str: str | None = None,
+        dtN_str: str | None = None,
+    ) -> Path:
+        var = filename_token(str(variable).upper())
+        norm = filename_token(normalize_method(method))
+        region_key = filename_token("total" if str(region).strip().lower() == "total" else str(region))
+        dt0 = filename_token(dt0_str or self.run.start_date)
+        dtN = filename_token(dtN_str or self.run.end_date)
+        sim_tokens: list[str] = []
+        for spec in simulations:
+            if isinstance(spec, str):
+                sim_name = spec
+            elif isinstance(spec, dict):
+                sim_name = spec.get("sim_name")
+            else:
+                sim_name = getattr(spec, "sim_name", None)
+            if not sim_name:
+                raise ValueError(f"Could not resolve sim_name from simulation spec: {spec!r}")
+            sim_tokens.append(filename_token(sim_name))
+        sim_part = "_".join(sim_tokens)
+        name = f"{var}_{sim_part}_{dt0}_{dtN}_{norm}_{region_key}.png"
         return self.graphics_root_path / "timeseries" / name
+
+    def split_hemisphere_plot_path(self, variable: str, date_str: str) -> Path:
+        return self.figure_root() / variable / f"{date_str}.png"
+
+    def regional_var_plot_path(self, variable: str, date_str: str, region: str) -> Path:
+        return self.figure_root(region=region) / variable / f"{date_str}.png"

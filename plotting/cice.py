@@ -1,0 +1,935 @@
+from __future__ import annotations
+
+from importlib.resources import files as resource_files
+from dataclasses import replace
+from pathlib import Path
+from typing import Mapping, Sequence
+
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+from shuga.classify.cice import CICEClassifier
+from shuga.io import load_cice, load_classified, load_metrics
+from shuga.core.logging import build_file_logger
+from shuga.core.naming import normalize_method
+from shuga.core.paths import ShugaPaths
+from shuga.core.regions import ANTARCTIC_8_REGIONS
+from shuga.core.types import ClassificationSpec, MetricsSpec, ObservationSpec, PlottingSpec, RunSpec
+from shuga.metrics.cice import CICEMetrics
+from shuga.observations import SeaIceObservations
+
+def _any_not_none(*vals) -> bool:
+    return any(v is not None for v in vals)
+
+class CICEPlotter:
+    """PyGMT plotting helpers for shuga classification, metrics, and observations."""
+
+    def __init__(
+        self,
+        run: RunSpec,
+        classify: ClassificationSpec,
+        metrics: MetricsSpec | None = None,
+        plotting: PlottingSpec | None = None,
+        observations: ObservationSpec | None = None,
+        paths: ShugaPaths | None = None,
+        *,
+        chunks: dict | None = None,
+        logger=None,
+    ) -> None:
+        self.run = run
+        self.classify = classify
+        self.metrics = metrics or MetricsSpec()
+        self.plotting = plotting or PlottingSpec()
+        self.observations = observations or ObservationSpec()
+        self.paths = paths or ShugaPaths(run=run, classify=classify, observations=self.observations)
+        self.chunks = chunks or {"time": 31}
+        self.logger = logger or build_file_logger("shuga.plotting", self.paths.logs_root_path / "plotting" / f"plotting_{run.sim_name}.log")
+        self.metrics_runner = CICEMetrics(run=run, classify=classify, metrics=self.metrics, paths=self.paths, chunks=self.chunks, logger=self.logger)
+        self.classifier = CICEClassifier(run=run, classify=classify, paths=self.paths, chunks=self.chunks, logger=self.logger)
+        self.obs = SeaIceObservations(run=run, observations=self.observations, paths=self.paths, chunks=self.chunks, logger=self.logger)
+
+    def _require_pygmt(self):
+        try:
+            import pygmt
+        except Exception as exc:  # pragma: no cover
+            raise ImportError("PyGMT is required for plotting methods.") from exc
+        return pygmt
+
+    @staticmethod
+    def _detect_lonlat(ds: xr.Dataset) -> tuple[xr.DataArray, xr.DataArray]:
+        lon_name = next((n for n in ("TLON", "ULON", "lon", "longitude", "ELON", "NLON") if n in ds.variables or n in ds.coords), None)
+        lat_name = next((n for n in ("TLAT", "ULAT", "lat", "latitude", "ELAT", "NLAT") if n in ds.variables or n in ds.coords), None)
+        if lon_name is None or lat_name is None:
+            raise KeyError("Could not find longitude/latitude fields in dataset.")
+        return ds[lon_name], ds[lat_name]
+
+    @staticmethod
+    def _lon_to_180(lon: xr.DataArray) -> xr.DataArray:
+        return ((lon + 180.0) % 360.0) - 180.0
+
+    @staticmethod
+    def meridian_center_from_region(region: Sequence[float]) -> float:
+        lon_min, lon_max, *_ = region
+        a = ((float(lon_min) + 180.0) % 360.0) - 180.0
+        b = ((float(lon_max) + 180.0) % 360.0) - 180.0
+        if a <= b:
+            mc = 0.5 * (a + b)
+        else:
+            width = (b + 360.0) - a
+            mc = a + 0.5 * width
+            if mc > 180.0:
+                mc -= 360.0
+        return mc
+
+    @classmethod
+    def projection_from_region(cls, region: Sequence[float], fig_size: float = 20.0) -> str:
+        _, _, lat_min, lat_max = region
+        mc = cls.meridian_center_from_region(region)
+        lat_center = 0.5 * (float(lat_min) + float(lat_max))
+        pole = -90 if lat_center < 0 else 90
+        return f"S{mc}/{pole}/{fig_size}c"
+
+    @staticmethod
+    def _region_mask(lon: xr.DataArray, lat: xr.DataArray, region: Sequence[float]) -> xr.DataArray:
+        lon180 = ((lon + 180.0) % 360.0) - 180.0
+        lon_min, lon_max, lat_min, lat_max = [float(v) for v in region]
+        if lon_min <= lon_max:
+            lon_mask = (lon180 >= lon_min) & (lon180 <= lon_max)
+        else:
+            lon_mask = (lon180 >= lon_min) | (lon180 <= lon_max)
+        lat_mask = (lat >= lat_min) & (lat <= lat_max)
+        return lon_mask & lat_mask
+
+    def _load_static_lonlat(self, sim_name: str | None = None) -> xr.Dataset:
+        """
+        Load only the static grid dataset needed for lon/lat detection.
+        This avoids calling load_cice() just to get TLON/TLAT.
+        """
+        target_sim = sim_name or self.run.sim_name
+        # Prefer a dedicated paths helper if you already have one.
+        if hasattr(self.paths, "iceh_static_path"):
+            static_path = Path(self.paths.iceh_static_path(sim_name=target_sim)).expanduser()
+        else:
+            # Fallback path pattern; adjust if your ShugaPaths API differs.
+            static_path = Path(self.paths.output_root).expanduser() / "zarr" / "iceh_static.zarr"
+        if not static_path.exists():
+            raise FileNotFoundError(f"Could not find static grid store: {static_path}")
+        ds = xr.open_zarr(static_path, chunks=self.chunks, consolidated=False)
+        wanted = [v for v in ("TLON", "TLAT", "ULON", "ULAT") if v in ds.variables]
+        if not wanted:
+            raise KeyError(f"No recognised lon/lat variables found in {static_path}. "
+                           "Expected one or more of TLON, TLAT, ULON, ULAT.")
+        return ds[wanted]
+
+    def pygmt_da_prep(
+        self,
+        da: xr.DataArray,
+        lon: xr.DataArray | None = None,
+        lat: xr.DataArray | None = None,
+        *,
+        mask_zero: bool = False,
+        region: Sequence[float] | None = None,
+    ) -> pd.DataFrame:
+        if lon is None or lat is None:
+            if "lon" in da.coords and "lat" in da.coords:
+                lon, lat = da["lon"], da["lat"]
+            else:
+                raise ValueError("lon/lat must be supplied when not present on the DataArray.")
+        lon_da = self._lon_to_180(lon)
+        work = da
+        if region is not None:
+            mask = self._region_mask(lon_da, lat, region)
+            work = work.where(mask)
+        if mask_zero:
+            work = work.where(np.abs(work) > 0)
+        lon_flat = lon_da.values.ravel()
+        lat_flat = lat.values.ravel()
+        z_flat = work.values.ravel()
+        good = np.isfinite(lon_flat) & np.isfinite(lat_flat) & np.isfinite(z_flat)
+        return pd.DataFrame({"lon": lon_flat[good], "lat": lat_flat[good], "z": z_flat[good]})
+
+    def pygmt_base_layer(
+        self,
+        fig,
+        region: Sequence[float],
+        projection: str,
+        *,
+        title: str | None = None,
+        shorelines: str | None = None,
+        land: str | None = None,
+        water: str | None = None,
+    ):
+        frame = ["af"]
+        if title:
+            frame.append(f'+t{title}')
+        fig.basemap(region=list(region), projection=projection, frame=frame)
+        fig.coast(
+            shorelines=shorelines or self.plotting.shorelines,
+            land=land or self.plotting.land,
+            water=water or self.plotting.water,
+        )
+
+    def _default_fip_cmap(self) -> str:
+        if self.plotting.fip_cmap is not None:
+            return str(Path(self.plotting.fip_cmap).expanduser())
+        return str(resource_files("shuga").joinpath("cpt", "FIP.cpt"))
+
+    def _resolve_regions(
+        self,
+        region_name: str | None = None,
+        region: Sequence[float] | None = None,
+        regions: Mapping[str, Sequence[float]] | None = None,
+    ) -> dict[str, Sequence[float]]:
+        if region is not None:
+            key = region_name or "custom"
+            return {key: region}
+        if region_name is not None:
+            if region_name not in ANTARCTIC_8_REGIONS:
+                raise KeyError(f"Unknown default region {region_name!r}")
+            return {region_name: ANTARCTIC_8_REGIONS[region_name].get("plot_region", ANTARCTIC_8_REGIONS[region_name]["geo_region"])}
+        if regions is not None:
+            return dict(regions)
+        return {k: v.get("plot_region", v["geo_region"]) for k, v in ANTARCTIC_8_REGIONS.items()}
+
+    def _nsidc_contours(self, date_str: str, hemisphere: str, threshold: float | None = None) -> list[np.ndarray]:
+        ds = self.obs.load_nsidc_daily(start_date=date_str, end_date=date_str, hemisphere=hemisphere)
+        sic = ds[self.observations.nsidc_sic_var].isel(time=0).astype(float)
+        x = ds["x"].values
+        y = ds["y"].values
+        import matplotlib.pyplot as plt  # local import to avoid hard dependency outside plotting use
+
+        fig, ax = plt.subplots()
+        cs = ax.contour(x, y, sic.values, levels=[float(threshold if threshold is not None else self.observations.nsidc_threshold)])
+        plt.close(fig)
+        lines: list[np.ndarray] = []
+        lonlat = xr.open_dataset(self.obs.nsidc_latlon_file(self.obs.canonical_hemisphere(hemisphere)))[["longitude", "latitude"]]
+        lon = lonlat["longitude"].values
+        lat = lonlat["latitude"].values
+        x0, y0 = x[0], y[0]
+        dx = x[1] - x[0]
+        dy = y[1] - y[0]
+        ny, nx = lon.shape
+        for coll in cs.collections:
+            for path in coll.get_paths():
+                verts = path.vertices
+                ix = np.clip(np.rint((verts[:, 0] - x0) / dx).astype(int), 0, nx - 1)
+                iy = np.clip(np.rint((verts[:, 1] - y0) / dy).astype(int), 0, ny - 1)
+                line = np.column_stack([(((lon[iy, ix] + 180.0) % 360.0) - 180.0), lat[iy, ix]])
+                lines.append(line)
+        return lines
+
+    @staticmethod
+    def _resolve_plot_window(dt0_str: str | None = None, dtN_str: str | None = None) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+        dt0 = pd.Timestamp(dt0_str) if dt0_str is not None else None
+        dtN = pd.Timestamp(dtN_str) if dtN_str is not None else None
+        if dt0 is not None and dtN is not None and dtN < dt0:
+            raise ValueError(f"dtN_str ({dtN.date()}) must be on or after dt0_str ({dt0.date()}).")
+        return dt0, dtN
+
+    @staticmethod
+    def _validate_f2020_window(
+        dt0: pd.Timestamp | None,
+        dtN: pd.Timestamp | None,
+        *,
+        add_f2020: bool,
+        f2020_mode: str,
+    ) -> None:
+        if not add_f2020:
+            return
+        if str(f2020_mode).strip().lower() != "climatology":
+            return
+        if dt0 is None or dtN is None:
+            return
+        ndays = (dtN - dt0).days + 1
+        if ndays < 15:
+            raise ValueError(
+                f"When add_f2020=True and f2020_mode='climatology', the requested window must be at least 15 days. "
+                f"Got {ndays} days ({dt0.strftime('%Y-%m-%d')} to {dtN.strftime('%Y-%m-%d')})."
+            )
+
+    def _load_field(self, variable: str, date_str: str | None = None, method: str | None = None) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
+        var = variable
+        if var == self.classifier.mask_var_name or var.lower() == "fi_mask":
+            if method is None:
+                raise ValueError("method is required when plotting FI_mask")
+            ds_mask = load_classified(
+                run=self.run,
+                classify=self.classify,
+                metrics=self.metrics,
+                plotting=self.plotting,
+                observations=self.observations,
+                paths=self.paths,
+                classification=method,
+                hemisphere=self.run.hemisphere,
+                chunks=self.chunks,
+                logger=self.logger,
+            )
+            da = ds_mask["FI_mask"]
+            ds = load_cice(
+                run=self.run,
+                classify=self.classify,
+                metrics=self.metrics,
+                plotting=self.plotting,
+                observations=self.observations,
+                paths=self.paths,
+                variables=["TLON", "TLAT"],
+                hemisphere=self.run.hemisphere,
+                chunks=self.chunks,
+                logger=self.logger,
+            )
+            lon, lat = self._detect_lonlat(ds)
+        elif var.lower() in {"ispd", "ice_speed"}:
+            ds = self.classifier.load_cice(methods=(method or "raw",))
+            da = self.classifier.compute_speed(ds)
+            lon, lat = self._detect_lonlat(ds)
+        else:
+            ds = load_cice(
+                run=self.run,
+                classify=self.classify,
+                metrics=self.metrics,
+                plotting=self.plotting,
+                observations=self.observations,
+                paths=self.paths,
+                variables=[var, "TLON", "TLAT"],
+                hemisphere=self.run.hemisphere,
+                chunks=self.chunks,
+                logger=self.logger,
+            )
+            if var not in ds:
+                raise KeyError(f"Variable {var!r} not found in CICE history")
+            da = ds[var]
+            lon, lat = self._detect_lonlat(ds)
+        if date_str is not None and "time" in da.dims:
+            da = da.sel(time=date_str)
+        return da, lon, lat
+
+    def plot_fip(self, method: str,
+                 sim_name: str | None = None,
+                 dt0_str: str | None = None,
+                 dtN_str: str | None = None,
+                 grid_type: str | None = None,
+                 FIP_plot_thresh : float = 0.05,
+                 output_path: str | None = None,
+                 output_root: str | Path | None = None,
+                 region_name: str | None = None,
+                 region: Sequence[float] | None = None,
+                 regions: Mapping[str, Sequence[float]] | None = None,
+                 fig_size: float | None = None,
+                 cmap: str | Path | None = None,
+                 title: str | None = None,
+                 shorelines: str | None = None,
+                 land: str | None = None,
+                 water: str | None = None,
+                 grid_style: str | None = None,
+                 colorbar_position: str | None = "JMB+w8c/0.4c+o0.8c/0c",
+                 colorbar_xlabel: str | None = "Fast Ice Persistence",
+                 colorbar_ylabel: str | None = None,
+                 show: bool = False,
+    ) -> str | dict[str, str]:
+        """
+        Plot fast-ice persistence (FIP).
+
+        Two modes are supported:
+
+        1) Default mode:
+           Uses self.run/self.classify and attempts to load metrics["FIP"].
+
+        2) Alternate mode:
+           If sim_name, dt0_str, and dtN_str are all provided, loads the
+           classification dataset for that simulation/date window, subsets
+           the requested dates, computes FIP from FI_mask, and plots that.
+        """
+        pygmt = self._require_pygmt()
+        norm = normalize_method(method)
+
+        explicit_mode = _any_not_none(sim_name, dt0_str, dtN_str)
+        if explicit_mode and not all(v is not None for v in (sim_name, dt0_str, dtN_str)):
+            raise ValueError(
+                "For alternate plot_fip mode, provide sim_name, dt0_str, and dtN_str together."
+            )
+
+        target_sim = sim_name or self.run.sim_name
+        target_dt0 = dt0_str or self.run.start_date
+        target_dtN = dtN_str or self.run.end_date
+        target_grid = grid_type or self.classify.grid_type
+
+        # --- branch 1: use precomputed metrics['FIP'] from the plotter's own run
+        if not explicit_mode:
+            self.logger.info(
+                f"plot_fip: loading precomputed FIP from metrics store for "
+                f"{self.run.sim_name} ({norm})"
+            )
+
+            ds = load_metrics(
+                run=self.run,
+                classify=self.classify,
+                metrics=self.metrics,
+                plotting=self.plotting,
+                observations=self.observations,
+                paths=self.paths,
+                classification=norm,
+                hemisphere=self.run.hemisphere,
+                chunks=self.chunks,
+            )
+
+            if "FIP" not in ds:
+                raise KeyError(
+                    f"metrics store does not contain 'FIP' for "
+                    f"{self.run.sim_name} / {norm}"
+                )
+
+            static_ds = self._load_static_lonlat(sim_name=self.run.sim_name)
+            lon, lat = self._detect_lonlat(static_ds)
+            fip = ds["FIP"]
+
+        # --- branch 2: load classification for requested sim/date range and compute FIP
+        else:
+            self.logger.info(
+                f"plot_fip: computing FIP from classification for "
+                f"{target_sim} ({target_dt0} to {target_dtN}, {norm}, grid={target_grid})"
+            )
+
+            run = replace(self.run, sim_name=target_sim)
+            classify = replace(self.classify, grid_type=target_grid)
+
+            cls = load_classification(
+                run=run,
+                classify=classify,
+                metrics=self.metrics,
+                plotting=self.plotting,
+                observations=self.observations,
+                paths=self.paths,
+                classification=norm,
+                hemisphere=run.hemisphere,
+                chunks=self.chunks,
+            )
+
+            if "FI_mask" not in cls:
+                raise KeyError(
+                    f"classification store does not contain 'FI_mask' for "
+                    f"{target_sim} / {norm} / {target_grid}"
+                )
+
+            if "time" not in cls["FI_mask"].dims:
+                raise ValueError("FI_mask must have a 'time' dimension to compute FIP.")
+
+            fi_mask = cls["FI_mask"].sel(time=slice(target_dt0, target_dtN))
+            if fi_mask.sizes.get("time", 0) == 0:
+                raise ValueError(
+                    f"No classification data found for {target_sim} between "
+                    f"{target_dt0} and {target_dtN}."
+                )
+
+            fip = compute_fip(fi_mask)
+
+            static_ds = self._load_static_lonlat(sim_name=target_sim)
+            lon, lat = self._detect_lonlat(static_ds)
+
+        region_map = self._resolve_regions(
+            region_name=region_name,
+            region=region,
+            regions=regions,
+        )
+
+        saved: dict[str, str] = {}
+
+        fip_plot = fip.where(fip > FIP_plot_thresh)   # choose your threshold
+        for name, reg in region_map.items():
+            data = self.pygmt_da_prep(
+                fip_plot,
+                lon=lon,
+                lat=lat,
+                mask_zero=False,
+                region=reg,
+            )
+
+            if output_path and len(region_map) == 1:
+                path = Path(output_path).expanduser()
+
+            elif output_root:
+                path = (
+                    Path(output_root).expanduser()
+                    / target_sim
+                    / name
+                    / "FIP"
+                    / f"{target_dt0}_{target_dtN}_{target_sim}_FIP_{norm.replace('-', '_')}.png"
+                )
+
+            else:
+                # Best option is to make paths.fip_plot_path accept overrides.
+                # If your current helper is fixed to self.run, add kwargs there.
+                try:
+                    path = self.paths.fip_plot_path(
+                        norm,
+                        region=name,
+                        sim_name=target_sim,
+                        start_date=target_dt0,
+                        end_date=target_dtN,
+                    )
+                except TypeError:
+                    # Backward-compatible fallback for existing helper.
+                    if (
+                        target_sim == self.run.sim_name
+                        and target_dt0 == self.run.start_date
+                        and target_dtN == self.run.end_date
+                    ):
+                        path = self.paths.fip_plot_path(norm, region=name)
+                    else:
+                        raise TypeError(
+                            "paths.fip_plot_path() does not accept sim/date overrides. "
+                            "Either provide output_root/output_path here, or extend "
+                            "fip_plot_path() to accept sim_name/start_date/end_date."
+                        )
+
+            path = Path(path).expanduser()
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            self.logger.info(f"creating figure: {path}")
+            fig = pygmt.Figure()
+
+            proj = self.projection_from_region(
+                reg,
+                fig_size=fig_size or self.plotting.fip_fig_size,
+            )
+
+            pygmt.makecpt(
+                cmap=str(cmap or self._default_fip_cmap()),
+                series=[0, 1, 0.05],
+                continuous=True,
+            )
+
+            plot_title = name#title or f"{target_sim} {name} FIP ({norm})"
+
+            self.pygmt_base_layer(
+                fig,
+                reg,
+                proj,
+                title=plot_title,
+                shorelines=shorelines,
+                land=land,
+                water=water,
+            )
+
+            fig.plot(
+                x=data["lon"],
+                y=data["lat"],
+                style=grid_style or self.plotting.grid_style,
+                fill=data["z"],
+                cmap=True,
+            )
+
+            frames = [f'xaf+l{colorbar_xlabel or self.plotting.colorbar_xlabel}']
+            ylabel = (
+                colorbar_ylabel
+                if colorbar_ylabel is not None
+                else self.plotting.colorbar_ylabel
+            )
+            if ylabel:
+                frames.append(f'y+l{ylabel}')
+
+            fig.colorbar(
+                position=colorbar_position or self.plotting.colorbar_position,
+                frame=frames,
+            )
+
+            fig.savefig(path)
+            self.logger.info("\tsaved")
+
+            if show:
+                fig.show()
+
+            saved[name] = str(path)
+
+        return next(iter(saved.values())) if len(saved) == 1 else saved
+
+    def plot_timeseries(self, variable: str, method: str,
+                        region      : str = "total",
+                        output_path : str | None = None,
+                        add_f2020   : bool = True,
+                        f2020_mode  : str = "climatology",
+                        title       : str | None = None,
+                        obs_pen     : str = "1p,black",
+                        model_pen   : str = "1p,blue",
+                        show        : bool = False,
+                        dt0_str     : str | None = None,
+                        dtN_str     : str | None = None) -> str:
+        pygmt = self._require_pygmt()
+        norm = normalize_method(method)
+        var = variable.upper()
+        ds = load_metrics(
+            run=self.run,
+            classify=self.classify,
+            metrics=self.metrics,
+            plotting=self.plotting,
+            observations=self.observations,
+            paths=self.paths,
+            classification=norm,
+            dt0_str=dt0_str,
+            dtN_str=dtN_str,
+            hemisphere=self.run.hemisphere,
+            chunks=self.chunks)
+        if region.lower() == "total":
+            series = ds[var]
+            region_key = "total"
+        else:
+            series = ds[f"{var}_by_region"].sel(region=region)
+            region_key = region
+        model = pd.DataFrame({"time": pd.to_datetime(series["time"].values), "value": np.asarray(series.values, dtype=float)}).dropna()
+        if model.empty:
+            raise ValueError("No model time series available for plotting.")
+
+        plot_dt0 = pd.Timestamp(dt0_str) if dt0_str is not None else model["time"].min()
+        plot_dtN = pd.Timestamp(dtN_str) if dtN_str is not None else model["time"].max()
+        self._validate_f2020_window(plot_dt0, plot_dtN, add_f2020=add_f2020, f2020_mode=f2020_mode)
+
+        obs_df = None
+        if add_f2020:
+            if var != "FIA":
+                raise ValueError("AF2020 overlay is currently implemented for FIA only.")
+            mode = str(f2020_mode).strip().lower()
+            if mode not in {"climatology", "overlap"}:
+                raise ValueError(f"f2020_mode must be 'climatology' or 'overlap', got {f2020_mode!r}")
+            if mode == "climatology":
+                obs_da = self.obs.repeat_af2020_fia_daily_climatology(plot_dt0.strftime("%Y-%m-%d"), plot_dtN.strftime("%Y-%m-%d"))
+            else:
+                obs_da = self.obs.subset_af2020_fia_daily(plot_dt0.strftime("%Y-%m-%d"), plot_dtN.strftime("%Y-%m-%d"))
+            obs_df = pd.DataFrame({"time": pd.to_datetime(obs_da["time"].values), "value": np.asarray(obs_da.values, dtype=float)}).dropna()
+            if obs_df.empty:
+                obs_df = None
+        yvals = [model["value"].to_numpy()]
+        if obs_df is not None and not obs_df.empty:
+            yvals.append(obs_df["value"].to_numpy())
+        ymin = float(min(np.nanmin(v) for v in yvals))
+        ymax = float(max(np.nanmax(v) for v in yvals))
+        if ymin == ymax:
+            ymin -= 1.0
+            ymax += 1.0
+        else:
+            pad = 0.08 * (ymax - ymin)
+            ymin -= pad
+            ymax += pad
+        path = Path(output_path).expanduser() if output_path else self.paths.timeseries_plot_path(var, norm, region_key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig = pygmt.Figure()
+        title_str = title or (self.run.sim_name + " " + var + (" " + region_key if region_key != "total" else "") + f" ({norm})")
+        fig.basemap(
+            region=[plot_dt0, plot_dtN, ymin, ymax],
+            projection="X16c/6c",
+            frame=["WSen", "xaf", f'yaf+l{variable}'],
+        )
+        if obs_df is not None and not obs_df.empty:
+            fig.plot(x=obs_df["time"], y=obs_df["value"], pen=obs_pen)
+        fig.plot(x=model["time"], y=model["value"], pen=model_pen)
+        fig.savefig(path)
+        if show:
+            fig.show()
+        return str(path)
+
+    def plot_timeseries_multi(
+        self,
+        variable: str,
+        method: str,
+        simulations,
+        region: str = "total",
+        output_path: str | None = None,
+        add_f2020: bool = True,
+        f2020_mode: str = "climatology",
+        title: str | None = None,
+        obs_pen: str = "1.2p,black",
+        default_pens: tuple[str, ...] = (
+            "1.2p,blue",
+            "1.2p,red",
+            "1.2p,green3",
+            "1.2p,orange",
+            "1.2p,purple",
+            "1.2p,brown",
+            "1.2p,cyan4",
+            "1.2p,magenta",
+        ),
+        legend_position: str = "JTR+jTR+o0.2c",
+        show: bool = False,
+        *,
+        dt0_str: str | None = None,
+        dtN_str: str | None = None,
+        grid_type: str | None = None,
+        grid_type_map: dict[str, str] | None = None,
+    ) -> str:
+        pygmt = self._require_pygmt()
+        var = variable.upper()
+        norm = normalize_method(method)
+        req_dt0, req_dtN = self._resolve_plot_window(dt0_str=dt0_str, dtN_str=dtN_str)
+
+        series_list = []
+        yvals = []
+
+        for i, spec in enumerate(simulations):
+            if isinstance(spec, str):
+                spec = {"sim_name": spec}
+
+            sim_name = spec["sim_name"]
+            label = spec.get("label", sim_name)
+            pen = spec.get("pen", default_pens[i % len(default_pens)])
+            sim_grid_type = spec.get("grid_type") or (grid_type_map or {}).get(sim_name, grid_type)
+
+            ds, resolved = load_metrics(
+                run=self.run,
+                classify=self.classify,
+                metrics=self.metrics,
+                plotting=self.plotting,
+                observations=self.observations,
+                paths=self.paths,
+                classification=norm,
+                sim_name=sim_name,
+                dt0_str=dt0_str,
+                dtN_str=dtN_str,
+                hemisphere=self.run.hemisphere,
+                grid_type=sim_grid_type,
+                chunks=self.chunks,
+                logger=self.logger,
+                return_resolved=True,
+            )
+
+            if region.lower() == "total":
+                da = ds[var]
+            else:
+                da = ds[f"{var}_by_region"].sel(region=region)
+
+            df = pd.DataFrame({"time": pd.to_datetime(da["time"].values), "value": np.asarray(da.values, dtype=float)}).dropna()
+            if req_dt0 is not None:
+                df = df[df["time"] >= req_dt0]
+            if req_dtN is not None:
+                df = df[df["time"] <= req_dtN]
+            if df.empty:
+                continue
+
+            if self.logger is not None:
+                self.logger.info("Loaded %s for %s using grid_type=%s", var, sim_name, resolved["grid_type"])
+
+            series_list.append({"sim_name": sim_name, "label": label, "pen": pen, "df": df, "grid_type": resolved["grid_type"]})
+            yvals.append(df["value"].to_numpy())
+
+        if not series_list:
+            raise ValueError("No model time series available for plotting.")
+
+        model_xmin = min(s["df"]["time"].min() for s in series_list)
+        model_xmax = max(s["df"]["time"].max() for s in series_list)
+        plot_dt0 = req_dt0 if req_dt0 is not None else model_xmin
+        plot_dtN = req_dtN if req_dtN is not None else model_xmax
+        self._validate_f2020_window(plot_dt0, plot_dtN, add_f2020=add_f2020, f2020_mode=f2020_mode)
+
+        obs_df = None
+        if add_f2020:
+            if var != "FIA":
+                raise ValueError("AF2020 overlay is currently implemented for FIA only.")
+            mode = str(f2020_mode).strip().lower()
+            if mode not in {"climatology", "overlap"}:
+                raise ValueError(f"f2020_mode must be 'climatology' or 'overlap', got {f2020_mode!r}")
+
+            if mode == "climatology":
+                obs_da = self.obs.repeat_af2020_fia_daily_climatology(plot_dt0.strftime("%Y-%m-%d"), plot_dtN.strftime("%Y-%m-%d"))
+            else:
+                obs_da = self.obs.subset_af2020_fia_daily(plot_dt0.strftime("%Y-%m-%d"), plot_dtN.strftime("%Y-%m-%d"))
+
+            obs_df = pd.DataFrame({"time": pd.to_datetime(obs_da["time"].values), "value": np.asarray(obs_da.values, dtype=float)}).dropna()
+            if not obs_df.empty:
+                yvals.append(obs_df["value"].to_numpy())
+            else:
+                obs_df = None
+
+        xmin = plot_dt0
+        xmax = plot_dtN
+        ymin = float(min(np.nanmin(v) for v in yvals))
+        ymax = float(max(np.nanmax(v) for v in yvals))
+
+        if ymin == ymax:
+            ymin -= 1.0
+            ymax += 1.0
+        else:
+            pad = 0.08 * (ymax - ymin)
+            ymin -= pad
+            ymax += pad
+
+        region_key = region if region.lower() != "total" else "total"
+
+        if output_path is None:
+            path = self.paths.multi_timeseries_plot_path(
+                variable=var,
+                method=norm,
+                simulations=series_list,
+                region=region_key,
+                dt0_str=plot_dt0.strftime("%Y-%m-%d"),
+                dtN_str=plot_dtN.strftime("%Y-%m-%d"),
+            )
+        else:
+            path = Path(output_path).expanduser()
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        fig = pygmt.Figure()
+
+        title_str = title or (f"{var} {region_key} ({norm})" if region_key != "total" else f"{var} ({norm})")
+
+        fig.basemap(
+            region=[xmin, xmax, ymin, ymax],
+            projection="X16c/6c",
+            frame=["WSen", "xaf", f'yaf+l"{var}"', f'+t"{title_str}"'],
+        )
+
+        if obs_df is not None:
+            fig.plot(x=obs_df["time"], y=obs_df["value"], pen=obs_pen, label="F2020")
+
+        for srec in series_list:
+            fig.plot(x=srec["df"]["time"], y=srec["df"]["value"], pen=srec["pen"], label=srec["label"])
+
+        fig.legend(position=legend_position, box="+gwhite+p0.5p")
+        fig.savefig(path)
+        if show:
+            fig.show()
+        return str(path)
+
+    def plot_var_split_hemisphere(
+        self,
+        date_str: str,
+        variable: str,
+        *,
+        method: str | None = None,
+        add_nsidc_south: bool = True,
+        add_nsidc_north: bool = False,
+        output_path: str | None = None,
+        fig_size: float | None = None,
+        cmap: str = "viridis",
+        series: Sequence[float] | None = None,
+        title: str | None = None,
+        grid_style: str | None = None,
+    ) -> str:
+        pygmt = self._require_pygmt()
+        da, lon, lat = self._load_field(variable, date_str=date_str, method=method)
+        path = Path(output_path).expanduser() if output_path else self.paths.split_hemisphere_plot_path(variable, date_str)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        south = self.pygmt_da_prep(da.where(lat < 0), lon=lon, lat=lat, mask_zero=False)
+        north = self.pygmt_da_prep(da.where(lat > 0), lon=lon, lat=lat, mask_zero=False)
+        fig = pygmt.Figure()
+        with pygmt.config(MAP_FRAME_TYPE="plain"):
+            fig.subplot(nrows=1, ncols=2, figsize=(f"{2*(fig_size or self.plotting.split_fig_size)}c", f"{fig_size or self.plotting.split_fig_size}c"), margins=["0.3c", "0.3c"])
+            with fig.set_panel(panel=0):
+                reg = [-180, 180, -90, -45]
+                proj = "S0/-90/12c"
+                self.pygmt_base_layer(fig, reg, proj, title=(title or f"{variable} {date_str}") + " (SH)")
+                pygmt.makecpt(cmap=cmap, series=series, continuous=True)
+                fig.plot(x=south["lon"], y=south["lat"], style=grid_style or self.plotting.grid_style, fill=south["z"], cmap=True)
+                if add_nsidc_south:
+                    for line in self._nsidc_contours(date_str, "south"):
+                        fig.plot(x=line[:, 0], y=line[:, 1], pen=self.plotting.nsidc_pen)
+            with fig.set_panel(panel=1):
+                reg = [-180, 180, 45, 90]
+                proj = "S0/90/12c"
+                self.pygmt_base_layer(fig, reg, proj, title=(title or f"{variable} {date_str}") + " (NH)")
+                pygmt.makecpt(cmap=cmap, series=series, continuous=True)
+                fig.plot(x=north["lon"], y=north["lat"], style=grid_style or self.plotting.grid_style, fill=north["z"], cmap=True)
+                if add_nsidc_north:
+                    for line in self._nsidc_contours(date_str, "north"):
+                        fig.plot(x=line[:, 0], y=line[:, 1], pen=self.plotting.nsidc_pen)
+        fig.savefig(path)
+        return str(path)
+
+    def plot_var_by_region(
+        self,
+        date_str: str,
+        variable: str,
+        *,
+        method: str | None = None,
+        region_name: str | None = None,
+        region: Sequence[float] | None = None,
+        regions: Mapping[str, Sequence[float]] | None = None,
+        output_path: str | None = None,
+        output_root: str | Path | None = None,
+        fig_size: float | None = None,
+        cmap: str = "viridis",
+        series: Sequence[float] | None = None,
+        title: str | None = None,
+        grid_style: str | None = None,
+        add_nsidc: bool | None = None,
+    ) -> str | dict[str, str]:
+        pygmt = self._require_pygmt()
+        da, lon, lat = self._load_field(variable, date_str=date_str, method=method)
+        region_map = self._resolve_regions(region_name=region_name, region=region, regions=regions)
+        out: dict[str, str] = {}
+        for name, reg in region_map.items():
+            data = self.pygmt_da_prep(da, lon=lon, lat=lat, region=reg)
+            path = Path(output_path).expanduser() if output_path and len(region_map) == 1 else (
+                Path(output_root).expanduser() / self.run.sim_name / name / variable / f"{date_str}.png"
+                if output_root is not None else self.paths.regional_var_plot_path(variable, date_str, name)
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fig = pygmt.Figure()
+            proj = self.projection_from_region(reg, fig_size=fig_size or self.plotting.region_fig_size)
+            pygmt.makecpt(cmap=cmap, series=series, continuous=True)
+            self.pygmt_base_layer(fig, reg, proj, title=title or f"{self.run.sim_name} {name} {variable} {date_str}")
+            fig.plot(x=data["lon"], y=data["lat"], style=grid_style or self.plotting.grid_style, fill=data["z"], cmap=True)
+            if add_nsidc or (add_nsidc is None and float(np.mean(reg[2:])) < 0):
+                for line in self._nsidc_contours(date_str, "south"):
+                    lonline = line[:, 0]
+                    latline = line[:, 1]
+                    keep = self._region_mask(xr.DataArray(lonline, dims="p"), xr.DataArray(latline, dims="p"), reg).values
+                    if np.any(keep):
+                        fig.plot(x=lonline[keep], y=latline[keep], pen=self.plotting.nsidc_pen)
+            fig.colorbar(position=self.plotting.colorbar_position)
+            fig.savefig(path)
+            out[name] = str(path)
+        return next(iter(out.values())) if len(out) == 1 else out
+
+    def plot_triptych(
+        self,
+        region: Sequence[float],
+        panels: Sequence[Mapping],
+        *,
+        fig_size: float = 20.0,
+        output_path: str | Path | None = None,
+        panel_gap: str = "1.5c",
+    ) -> str:
+        """Generic 3-panel regional plotter with per-panel layer stacks.
+
+        Each panel dict may contain:
+        - title: str
+        - layers: list of layer dicts with keys:
+            data: pandas.DataFrame or xarray.DataArray
+            lon/lat: optional DataArray when data is xarray
+            mask_zero: bool
+            style: str
+            fill: color string or 'z'
+            cmap: cmap path/name
+            series: list/tuple for makecpt
+            colorbar: dict(position=..., frame=[...])
+            pen: optional outline pen
+        """
+        pygmt = self._require_pygmt()
+        if len(panels) != 3:
+            raise ValueError("plot_triptych currently expects exactly three panels.")
+        path = Path(output_path).expanduser() if output_path is not None else self.paths.figure_root() / "comparison" / f"{self.run.start_date}_{self.run.end_date}_triptych.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        proj = self.projection_from_region(region, fig_size=fig_size)
+        fig = pygmt.Figure()
+        for i, panel in enumerate(panels):
+            if i == 0:
+                self.pygmt_base_layer(fig, region, proj, title=panel.get("title"))
+            else:
+                fig.shift_origin(xshift=f"1w+{panel_gap}")
+                self.pygmt_base_layer(fig, region, proj, title=panel.get("title"))
+            for layer in panel.get("layers", []):
+                layer_data = layer.get("data")
+                if isinstance(layer_data, pd.DataFrame):
+                    data = layer_data
+                elif isinstance(layer_data, xr.DataArray):
+                    data = self.pygmt_da_prep(layer_data, lon=layer.get("lon"), lat=layer.get("lat"), mask_zero=layer.get("mask_zero", False), region=region)
+                else:
+                    raise TypeError("Layer data must be a pandas.DataFrame or xarray.DataArray")
+                if layer.get("cmap") is not None:
+                    pygmt.makecpt(cmap=layer["cmap"], series=layer.get("series"), continuous=True)
+                fill = data["z"] if layer.get("fill", "z") == "z" else layer.get("fill")
+                fig.plot(x=data["lon"], y=data["lat"], style=layer.get("style", self.plotting.grid_style), fill=fill, cmap=bool(layer.get("cmap")), pen=layer.get("pen"))
+                cbar = layer.get("colorbar")
+                if cbar:
+                    fig.colorbar(**cbar)
+        fig.savefig(path)
+        return str(path)
