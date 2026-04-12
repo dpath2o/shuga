@@ -35,23 +35,114 @@ def _strip_to_classification_coords(mask: xr.DataArray) -> xr.DataArray:
     return clean
 
 class CICEClassifier:
-    """Standalone fast-ice classification for CICE Zarr history output.
+    """
+    Standalone fast-ice classifier for CICE Zarr history output.
 
-    This implementation mirrors the AFIM classification logic more closely than the
-    earlier shuga draft by reconstructing a T-grid ice-speed field before thresholding.
-    Supported `grid_type` tokens are:
+    This class loads CICE history fields, reconstructs sea-ice speed on the
+    target T grid, applies one or more fast-ice classification methods, and
+    writes the resulting masks to method-specific Zarr stores.
 
-    - ``Tc``: C-grid edge east/north components ``uvelE,uvelN,vvelE,vvelN`` -> T-grid speed.
-      This mode is exclusive.
-    - ``Ta``: B-grid 2x2 corner mean with NaNs propagating.
-    - ``Tb``: B-grid 2x2 corner mean with NaNs->0.0 (no-slip-like near coast).
-    - ``Tx``: explicit B-grid->T-grid regridding, only when a regridder callable is supplied.
+    The implementation is designed to follow the AFIM classification workflow
+    closely by reconstructing a T-grid speed field before thresholding. The
+    classifier supports several grid-handling modes via
+    ``self.classify.grid_type``:
+
+    - ``"Tc"``
+        Reconstruct T-grid speed from C-grid edge components
+        ``uvelE``, ``uvelN``, ``vvelE``, and ``vvelN``. This mode is exclusive.
+    - ``"Ta"``
+        Reconstruct T-grid speed from a B-grid 2x2 corner mean, with missing
+        values propagating through the average.
+    - ``"Tb"``
+        Reconstruct T-grid speed from a B-grid 2x2 corner mean, with missing
+        values filled as ``0.0`` before averaging. This behaves more like a
+        no-slip treatment near coasts.
+    - ``"Tx"``
+        Use an explicit B-grid to T-grid regridding path. This mode requires a
+        ``regridder`` callable to be supplied at initialisation.
+
+    Parameters
+    ----------
+    run : RunSpec
+        Run-level configuration describing the simulation, analysis period, and
+        hemisphere.
+    classify : ClassificationSpec
+        Classification configuration defining variables, thresholds, grid type,
+        methods, and rolling/window parameters.
+    paths : ShugaPaths | None, optional
+        Path bundle used to locate input stores and classification outputs. If
+        omitted, a new ``ShugaPaths`` instance is built from ``run`` and
+        ``classify``.
+    chunks : dict | None, optional
+        Dask chunking used when loading CICE history data. Defaults to
+        ``{"time": 31}``.
+    regridder : Callable[[xr.DataArray], xr.DataArray] | None, optional
+        Optional callable used for explicit B-grid to T-grid remapping when the
+        selected grid mode requires it.
+    logger : logging.Logger | None, optional
+        Logger used for progress and write messages. If omitted, a file logger
+        is created using the classification log path.
+
+    Attributes
+    ----------
+    run : RunSpec
+        Active run configuration.
+    classify : ClassificationSpec
+        Active classification configuration.
+    paths : ShugaPaths
+        Resolved path bundle for inputs and outputs.
+    chunks : dict
+        Chunking policy used when opening history data.
+    regridder : callable | None
+        Optional explicit regridder for ``"Tx"``-style workflows.
+    logger : logging.Logger
+        Logger for classification progress and diagnostics.
+
+    Notes
+    -----
+    - All classification methods ultimately derive from a reconstructed T-grid
+      speed magnitude.
+    - Raw, binary-days, and rolling-mean classification products are supported.
+    - Output stores are written as Zarr version 2 with a canonical variable
+      name of ``FI_mask``.
     """
 
-    def __init__(self, run: RunSpec, classify: ClassificationSpec, paths: ShugaPaths | None = None, *,
+    def __init__(self, run: RunSpec, classify: ClassificationSpec,
+                 paths    : ShugaPaths | None                             = None, *,
                  chunks   : dict | None                                   = None,
                  regridder: Callable[[xr.DataArray], xr.DataArray] | None = None,
                  logger                                                   = None) -> None:
+        """
+        Initialise a fast-ice classifier for a single simulation and
+        classification configuration.
+
+        Parameters
+        ----------
+        run : RunSpec
+            Run-level configuration describing the simulation and requested time
+            window.
+        classify : ClassificationSpec
+            Classification settings, including thresholds, variables, methods, and
+            grid reconstruction mode.
+        paths : ShugaPaths | None, optional
+            Path bundle for locating model history input and classification output
+            stores. If omitted, one is constructed from ``run`` and ``classify``.
+        chunks : dict | None, optional
+            Chunking to use when reading CICE history data. Defaults to
+            ``{"time": 31}``.
+        regridder : Callable[[xr.DataArray], xr.DataArray] | None, optional
+            Optional callable for explicit B-grid to T-grid remapping.
+        logger : logging.Logger | None, optional
+            Logger for status and diagnostic messages. If not supplied, a file
+            logger is created automatically.
+
+        Notes
+        -----
+        - A dataset cache attribute ``_ds_cache`` is initialised to ``None`` for
+          reuse of loaded history data.
+        - The logger defaults to a file-backed classifier logger when not
+          explicitly provided.
+        """
         self.run       = run
         self.classify  = classify
         self.paths     = paths or ShugaPaths(run=run, classify=classify)
@@ -115,6 +206,32 @@ class CICEClassifier:
         return self._ds_cache
 
     def compute_speed(self, ds: xr.Dataset) -> xr.DataArray:
+        """
+        Reconstruct sea-ice speed magnitude on the target T grid.
+
+        This method delegates the grid-specific reconstruction to
+        ``compute_tgrid_speed()``, using the variable names and grid settings from
+        the active ``ClassificationSpec``. The returned speed field is renamed to
+        ``"ice_speed"``, annotated with standard metadata, and cast to
+        ``float32``.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Input CICE history dataset containing the velocity fields required by
+            the configured grid-reconstruction mode.
+
+        Returns
+        -------
+        xr.DataArray
+            T-grid sea-ice speed magnitude with name ``"ice_speed"``.
+
+        Notes
+        -----
+        - The exact velocity inputs used depend on ``self.classify.grid_type``.
+        - ``grid_type`` metadata is written from ``self.grid_selection``.
+        - The output units are metres per second.
+        """
         target = self._target_da(ds)
         speed = compute_tgrid_speed(ds, target,
                                     grid_type     = self.classify.grid_type,
@@ -135,6 +252,36 @@ class CICEClassifier:
         return speed.astype(np.float32)
 
     def compute_raw_mask(self, ds: xr.Dataset) -> xr.DataArray:
+        """
+        Compute the raw daily fast-ice mask from instantaneous speed and ice
+        concentration.
+
+        A cell is classified as fast ice when all of the following hold:
+
+        - concentration exceeds ``aice_thresh``,
+        - reconstructed speed is finite,
+        - speed is greater than zero,
+        - speed is less than or equal to ``ispd_thresh``.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Input CICE history dataset containing the fields required for speed
+            reconstruction and concentration thresholding.
+
+        Returns
+        -------
+        xr.DataArray
+            Boolean raw classification mask with the classifier's configured mask
+            variable name.
+
+        Notes
+        -----
+        - The mask is based on the reconstructed T-grid speed from
+          :meth:`compute_speed`.
+        - Metadata records the ice-speed threshold, concentration threshold,
+          classification method, and grid selection.
+        """
         speed     = self.compute_speed(ds)
         aice      = ds[self.classify.aice_var]
         mask      = ((aice > float(self.classify.aice_thresh))
@@ -153,10 +300,59 @@ class CICEClassifier:
         return da.sel(time=slice(self.run.start_date, self.run.end_date))
 
     def classify_raw(self, ds: xr.Dataset | None = None) -> xr.DataArray:
+        """
+        Generate the raw fast-ice classification mask for the requested analysis
+        window.
+
+        Parameters
+        ----------
+        ds : xr.Dataset | None, optional
+            Preloaded CICE history dataset. If omitted, history data are loaded
+            internally for the ``"raw"`` method.
+
+        Returns
+        -------
+        xr.DataArray
+            Boolean raw fast-ice mask cropped to the requested output time window.
+
+        Notes
+        -----
+        - This is the direct threshold-based classification with no temporal
+          persistence or smoothing.
+        - If ``ds`` is not supplied, history data are loaded via ``load_cice()``.
+        """
         ds = ds if ds is not None else self.load_cice(methods=("raw",))
         return self._crop_requested_window(self.compute_raw_mask(ds))
 
     def classify_binary_days(self, ds: xr.Dataset | None = None) -> xr.DataArray:
+        """
+        Generate a binary-days fast-ice mask using a centred rolling persistence
+        test.
+
+        The raw daily mask is first converted to integer form and then summed over
+        a centred rolling time window. A day is classified as fast ice when the
+        number of raw fast-ice days within the window is greater than or equal to
+        ``bin_min_days``.
+
+        Parameters
+        ----------
+        ds : xr.Dataset | None, optional
+            Preloaded CICE history dataset. If omitted, history data are loaded
+            internally for the ``"binary-days"`` method.
+
+        Returns
+        -------
+        xr.DataArray
+            Boolean binary-days fast-ice mask cropped to the requested output time
+            window.
+
+        Notes
+        -----
+        - The rolling window uses ``center=True``.
+        - ``min_periods`` is set to ``bin_min_days``.
+        - Output metadata records the classification method and the binary-days
+          window settings.
+        """
         ds        = ds if ds is not None else self.load_cice(methods=("binary-days",))
         raw       = self.compute_raw_mask(ds).astype("int16")
         mask      = raw.rolling(time=self.classify.bin_window, center=True, min_periods=self.classify.bin_min_days).sum() >= self.classify.bin_min_days
@@ -170,6 +366,34 @@ class CICEClassifier:
         return mask
 
     def classify_rolling_mean(self, ds: xr.Dataset | None = None) -> xr.DataArray:
+        """
+        Generate a rolling-mean fast-ice mask using temporally averaged ice speed.
+
+        Speed is first reconstructed on the T grid and then smoothed with a
+        centred rolling mean over ``roll_window`` days. The classification is then
+        applied using the smoothed speed field together with the concentration
+        threshold.
+
+        Parameters
+        ----------
+        ds : xr.Dataset | None, optional
+            Preloaded CICE history dataset. If omitted, history data are loaded
+            internally for the ``"rolling-mean"`` method.
+
+        Returns
+        -------
+        xr.DataArray
+            Boolean rolling-mean fast-ice mask cropped to the requested output time
+            window.
+
+        Notes
+        -----
+        - The rolling average uses ``center=True``.
+        - ``min_periods`` is set equal to ``roll_window``, so full temporal support
+          is required.
+        - Output metadata records the classification method and rolling window
+          length.
+        """
         ds         = ds if ds is not None else self.load_cice(methods=("rolling-mean",))
         speed      = self.compute_speed(ds)
         aice       = ds[self.classify.aice_var]
@@ -187,6 +411,30 @@ class CICEClassifier:
         return mask
 
     def classify_method(self, method: str, ds: xr.Dataset | None = None) -> xr.DataArray:
+        """
+        Dispatch to the requested classification method.
+
+        Parameters
+        ----------
+        method : str
+            Classification method name. This is normalised via
+            ``normalize_method()`` before dispatch.
+        ds : xr.Dataset | None, optional
+            Preloaded CICE history dataset to reuse across method calls. If
+            omitted, the selected method will load data as needed.
+
+        Returns
+        -------
+        xr.DataArray
+            Boolean fast-ice mask for the requested method.
+
+        Notes
+        -----
+        - Supported normalised methods are ``"raw"``, ``"binary-days"``, and
+          ``"rolling-mean"``.
+        - Any normalised method other than ``"raw"`` and ``"binary-days"``
+          currently falls through to ``classify_rolling_mean()``.
+        """
         norm = normalize_method(method)
         if norm == "raw":
             return self.classify_raw(ds)
@@ -204,6 +452,42 @@ class CICEClassifier:
         return chunk_map
 
     def write_classification(self, method: str, mask: xr.DataArray, *, overwrite: bool = False) -> str:
+        """
+        Write a classified fast-ice mask to its method-specific Zarr store.
+
+        The output is normalised to a dataset containing a single variable named
+        ``FI_mask``. Non-essential coordinates and stale backend encodings are
+        stripped before writing, and dataset-appropriate chunk encodings are
+        rebuilt for Zarr output.
+
+        Parameters
+        ----------
+        method : str
+            Classification method name. This is normalised before being recorded in
+            output metadata and used in the output path.
+        mask : xr.DataArray
+            Classified mask to write.
+        overwrite : bool, optional
+            If ``True``, remove any existing store before writing. If ``False`` and
+            the store already exists, writing is skipped and the existing path is
+            returned.
+
+        Returns
+        -------
+        str
+            Path to the written or reused Zarr store.
+
+        Notes
+        -----
+        - Output is always written as a dataset with a canonical variable name
+          ``FI_mask``.
+        - Zarr output is written with ``consolidated=False`` and
+          ``zarr_format=2``.
+        - Inherited encodings are sanitised before new chunk encodings are
+          attached.
+        - Dataset-level metadata include simulation name, analysis dates,
+          hemisphere, ice type, grid type, and classification method.
+        """
         store = self.paths.classification_store(method)
         store.parent.mkdir(parents=True, exist_ok=True)
         if store.exists():
@@ -219,13 +503,13 @@ class CICEClassifier:
                              name   =  "FI_mask",
                              attrs  = mask.attrs)
         ds_out = xr.Dataset({"FI_mask": mask})
-        ds_out.attrs.update({"sim_name": self.run.sim_name,
-                             "start_date": self.run.start_date,
-                             "end_date": self.run.end_date,
-                             "hemisphere": self.run.hemisphere,
-                             "ice_type": self.classify.ice_type,
-                             "grid_type": self.classify.grid_type,
-                             "method": normalize_method(method)})
+        ds_out.attrs.update({"sim_name"   : self.run.sim_name,
+                             "start_date" : self.run.start_date,
+                             "end_date"   : self.run.end_date,
+                             "hemisphere" : self.run.hemisphere,
+                             "ice_type"   : self.classify.ice_type,
+                             "grid_type"  : self.classify.grid_type,
+                             "method"     : normalize_method(method)})
         chunk_map = self._output_chunk_map(ds_out)
         if chunk_map:
             self.logger.info("Rechunking classification output with chunks: %s", chunk_map)
@@ -246,15 +530,44 @@ class CICEClassifier:
 
     def run_methods(self, methods: list[str] | tuple[str, ...] | None = None, *,
                     overwrite: bool = False) -> dict[str, str]:
+        """
+        Run one or more classification methods and write their outputs.
+
+        This is the main orchestration entry point for the classifier. It resolves
+        the requested methods, loads the necessary CICE history data once, applies
+        each classification method in turn, writes each result to its method-
+        specific store, and returns the output paths.
+
+        Parameters
+        ----------
+        methods : list[str] | tuple[str, ...] | None, optional
+            Methods to run. If omitted, the methods configured in
+            ``self.classify.methods`` are used.
+        overwrite : bool, optional
+            If ``True``, existing classification stores are replaced. If ``False``,
+            existing stores are left in place and may be skipped during writing.
+
+        Returns
+        -------
+        dict[str, str]
+            Mapping from normalised method name to output store path.
+
+        Notes
+        -----
+        - Method names are normalised before execution.
+        - CICE history is loaded once and reused across all requested methods.
+        - The resolved classification root and speed-reconstruction mode are logged
+          before processing begins.
+        """
         methods = list(methods or self.classify.methods)
         methods = [normalize_method(m) for m in methods]
         self.logger.info("Resolved classification root: %s", self.paths.classification_root_path)
         self.logger.info("Classification speed reconstruction mode(s): %s", ", ".join(self.grid_selection))
-        ds = self.load_cice(methods=methods)
+        ds                  = self.load_cice(methods=methods)
         out: dict[str, str] = {}
         for method in methods:
             self.logger.info("Classifying method: %s", method)
-            mask = self.classify_method(method, ds)
+            mask        = self.classify_method(method, ds)
             out[method] = self.write_classification(method, mask, overwrite=overwrite)
         return out
 

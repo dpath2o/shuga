@@ -1,9 +1,8 @@
-from __future__ import annotations
-
+# shuga/core/types.py
+from __future__  import annotations
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Iterable, Sequence
-
+from pathlib     import Path
+from typing      import Iterable, Sequence
 
 @dataclass(slots=True)
 class RunSpec:
@@ -23,15 +22,12 @@ class ClassificationSpec:
     bin_window: int = 11
     bin_min_days: int = 9
     roll_window: int = 15
-    # B-grid / already-on-native-u-v outputs
     speed_var_u: str = "uvel"
     speed_var_v: str = "vvel"
-    # C-grid east/north edge outputs
     uvelE_var: str = "uvelE"
     uvelN_var: str = "uvelN"
     vvelE_var: str = "vvelE"
     vvelN_var: str = "vvelN"
-    # common thresholds / behavior
     aice_var: str = "aice"
     aice_thresh: float = 0.15
     wrap_x: bool = True
@@ -42,7 +38,6 @@ class ClassificationSpec:
         if methods is not None:
             obj.methods = tuple(methods)
         return obj
-
 
 @dataclass(slots=True)
 class MetricsSpec:
@@ -67,9 +62,8 @@ class PlottingSpec:
     nsidc_pen: str = "1p,green"
     fip_cmap: str | Path | None = None
     colorbar_position: str = "JMB+w8c/0.4c+v+o0.8c/0c"
-    colorbar_xlabel: str | None = None #"Fast Ice Persistence"
+    colorbar_xlabel: str | None = None
     colorbar_ylabel: str | None = None
-
 
 @dataclass(slots=True)
 class ObservationSpec:
@@ -90,3 +84,62 @@ class ObservationSpec:
     af2020_climatology_var: str = "FI_OBS_GRD"
     af2020_time_var: str = "t_FI_obs"
     af2020_doy_var: str = "doy"
+    # CAWCR raw observational input
+    cawcr_root: str | Path | None = None
+    cawcr_org_subdir: str = "org"
+    cawcr_filename_template: str = "ww3.{year:04d}{month:02d}_spec.nc"
+    # CAWCR variable / dimension names
+    cawcr_spectrum_var: str = "Efth"
+    cawcr_lon_var: str = "longitude"
+    cawcr_lat_var: str = "latitude"
+    cawcr_time_var: str = "time"
+    cawcr_station_dim: str = "station"
+    cawcr_frequency_dim: str = "frequency"
+    cawcr_direction_dim: str = "direction"
+    cawcr_frequency_var: str = "frequency"
+    cawcr_frequency_lower_var: str = "frequency1"
+    cawcr_frequency_upper_var: str = "frequency2"
+# optional alias if you want the plural spelling in new code
+ObservationsSpec = ObservationSpec
+
+@dataclass(slots=True)
+class CICEGridSpec:
+    grid_file: str | Path | None = None
+    kmt_file: str | Path | None = None
+    bathymetry_file: str | Path | None = None
+    f2_file: str | Path | None = None
+    gridcpl_file: str | Path | None = None
+    ice_in_file: str | Path | None = None
+    experiment_root: str | Path | None = None
+    grid_format: str = "nc"
+    grid_type: str | None = None
+    lon_type: str = "-180-180"
+    default_grid_file: str | Path | None = None
+    default_kmt_file: str | Path | None = None
+    default_bathymetry_file: str | Path | None = None
+    default_f2_file: str | Path | None = None
+
+@dataclass(slots=True)
+class WaveForcingSpec:
+    regridded_wave_root: str | Path | None = None
+    weights_root: str | Path | None = None
+    regridded_wave_filename_template: str = "CAWCR_efreq_for_CICE6_{year:04d}{month:02d}.nc"
+    cawcr2cice_weight_template: str = "cawcr2cice_{year:04d}{month:02d}.npz"
+    nsidc2cice_weight_name: str = "nsidc2cice_nearest.npz"
+    figure_subdir: str = "LD-waves/CAWCR"
+
+@dataclass(slots=True)
+class LateralDragSpec:
+    f2_map_method: str = "max"
+    lat_subset_max: float = -30.0
+    proj_crs: str = "EPSG:3031"
+    max_assign_km: float = 50.0
+    coast_buffer_cells: int = 1
+    use_coastal_ocean_kdtree: bool = True
+    chunk_segments: int = 2_000_000
+    netcdf_compression: int = 4
+    grounded_iceberg_file: str | Path | None = None
+    high_res_coast_file: str | Path | None = None
+    coast_form_factors_file: str | Path | None = None
+    grounded_iceberg_form_factors_file: str | Path | None = None
+    combined_form_factors_file: str | Path | None = None

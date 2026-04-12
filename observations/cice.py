@@ -11,24 +11,18 @@ from shuga.core.logging import build_file_logger
 from shuga.core.paths import ShugaPaths
 from shuga.core.types import ObservationSpec, RunSpec
 
-
 class SeaIceObservations:
     """Load NSIDC concentration and AF2020 fast-ice products for shuga workflows."""
-
-    def __init__(
-        self,
-        run: RunSpec,
-        observations: ObservationSpec | None = None,
-        paths: ShugaPaths | None = None,
-        *,
-        chunks: dict | None = None,
-        logger=None,
-    ) -> None:
-        self.run = run
+    def __init__(self, run: RunSpec,
+                 observations : ObservationSpec | None = None,
+                 paths        : ShugaPaths | None      = None, *,
+                 chunks       : dict | None            = None,
+                 logger                                = None) -> None:
+        self.run          = run
         self.observations = observations or ObservationSpec()
-        self.paths = paths or ShugaPaths(run=run, classify=None, observations=self.observations)  # type: ignore[arg-type]
-        self.chunks = chunks or {"time": 31}
-        self.logger = logger or build_file_logger("shuga.observations", Path.home() / "logs" / "observations" / "shuga_observations.log")
+        self.paths        = paths or ShugaPaths(run=run, classify=None, observations=self.observations)  # type: ignore[arg-type]
+        self.chunks       = chunks or {"time": 31}
+        self.logger       = logger or build_file_logger("shuga.observations", Path.home() / "logs" / "observations" / "shuga_observations.log")
         self._nsidc_cache: dict[tuple[str, str, str], xr.Dataset] = {}
         self._af2020_cache: dict[str, xr.Dataset] = {}
 
@@ -63,43 +57,42 @@ class SeaIceObservations:
             raise FileNotFoundError(f"No NSIDC daily files found in {root} between {start_date} and {end_date}")
         return files
 
-    def load_nsidc_daily(self, start_date: str | None = None, end_date: str | None = None, hemisphere: str | None = None) -> xr.Dataset:
+    def load_nsidc_daily(self,
+                         start_date : str | None = None,
+                         end_date   : str | None = None,
+                         hemisphere : str | None = None) -> xr.Dataset:
         start_date = start_date or self.run.start_date
-        end_date = end_date or self.run.end_date
-        hemi = self.canonical_hemisphere(hemisphere or self.run.hemisphere)
-        key = (start_date, end_date, hemi)
+        end_date   = end_date or self.run.end_date
+        hemi       = self.canonical_hemisphere(hemisphere or self.run.hemisphere)
+        key        = (start_date, end_date, hemi)
         if key in self._nsidc_cache:
             return self._nsidc_cache[key]
         files = self._nsidc_daily_files(start_date, end_date, hemi)
         self.logger.info("Opening %s NSIDC daily files for %s hemisphere", len(files), hemi)
-
         def _prep(ds: xr.Dataset) -> xr.Dataset:
             keep = [v for v in (self.observations.nsidc_sic_var,) if v in ds]
             if keep:
                 ds = ds[keep]
             return ds
-
-        ds = xr.open_mfdataset(files, combine="by_coords", parallel=True, preprocess=_prep, chunks=self.chunks)
+        ds     = xr.open_mfdataset(files, combine="by_coords", parallel=True, preprocess=_prep, chunks=self.chunks)
         latlon = xr.open_dataset(self.nsidc_latlon_file(hemi))[["latitude", "longitude"]]
-        area = xr.open_dataset(self.nsidc_area_file(hemi))[["cell_area"]]
-        ds = xr.merge([ds, latlon, area], compat="override", combine_attrs="drop_conflicts")
+        area   = xr.open_dataset(self.nsidc_area_file(hemi))[["cell_area"]]
+        ds     = xr.merge([ds, latlon, area], compat="override", combine_attrs="drop_conflicts")
         self._nsidc_cache[key] = ds
         return ds
 
-    def compute_nsidc_sia_sie(
-        self,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        hemisphere: str | None = None,
-        threshold: float | None = None,
-    ) -> xr.Dataset:
-        ds = self.load_nsidc_daily(start_date=start_date, end_date=end_date, hemisphere=hemisphere)
-        sic = ds[self.observations.nsidc_sic_var].astype("float32")
+    def compute_nsidc_sia_sie(self,
+                              start_date : str | None = None,
+                              end_date   : str | None = None,
+                              hemisphere : str | None = None,
+                              threshold  : float | None = None) -> xr.Dataset:
+        ds   = self.load_nsidc_daily(start_date=start_date, end_date=end_date, hemisphere=hemisphere)
+        sic  = ds[self.observations.nsidc_sic_var].astype("float32")
         mask = sic >= float(threshold if threshold is not None else self.observations.nsidc_threshold)
         area = ds["cell_area"].astype("float64")
-        sia = (sic.where(mask, 0.0) * area).sum(dim=("y", "x")) / 1e12
-        sie = (mask.astype("float32") * area).sum(dim=("y", "x")) / 1e12
-        out = xr.Dataset({"SIA": sia, "SIE": sie})
+        sia  = (sic.where(mask, 0.0) * area).sum(dim=("y", "x")) / 1e12
+        sie  = (mask.astype("float32") * area).sum(dim=("y", "x")) / 1e12
+        out  = xr.Dataset({"SIA": sia, "SIE": sie})
         out["SIA"].attrs.update({"long_name": "Sea Ice Area", "units": "10^6 km^2"})
         out["SIE"].attrs.update({"long_name": "Sea Ice Extent", "units": "10^6 km^2"})
         return out
@@ -112,9 +105,7 @@ class SeaIceObservations:
                 raise FileNotFoundError(f"AF2020 FIA daily file does not exist: {path}")
             ds = xr.open_dataset(path, chunks=self.chunks)
             if self.observations.af2020_fia_daily_var not in ds:
-                raise KeyError(
-                    f"Variable {self.observations.af2020_fia_daily_var!r} not found in AF2020 FIA daily file: {path}"
-                )
+                raise KeyError(f"Variable {self.observations.af2020_fia_daily_var!r} not found in AF2020 FIA daily file: {path}")
             self._af2020_cache[key] = ds
         return self._af2020_cache[key]
 
@@ -138,20 +129,18 @@ class SeaIceObservations:
         clim.attrs.update({"long_name": "Observed Fast Ice Area Climatology", "units": "10^3 km^2"})
         return clim
 
-    def repeat_af2020_fia_daily_climatology(
-        self,
-        start_date: str | None = None,
-        end_date: str | None = None,
-    ) -> xr.DataArray:
+    def repeat_af2020_fia_daily_climatology(self,
+                                            start_date : str | None = None,
+                                            end_date   : str | None = None) -> xr.DataArray:
         start_date = start_date or self.run.start_date
-        end_date = end_date or self.run.end_date
-        clim = self.compute_af2020_fia_daily_climatology()
-        t = pd.date_range(start_date, end_date, freq="D")
-        doy_vals = np.asarray(clim["doy"].values).astype(int)
-        clim_vals = np.asarray(clim.values, dtype=float)
-        lut = {int(d): float(v) for d, v in zip(doy_vals, clim_vals)}
-        values = np.array([lut.get(365 if d == 366 else int(d), np.nan) for d in t.dayofyear], dtype=float)
-        out = xr.DataArray(values, dims=("time",), coords={"time": t}, name="FIA_clim_repeat")
+        end_date   = end_date or self.run.end_date
+        clim       = self.compute_af2020_fia_daily_climatology()
+        t          = pd.date_range(start_date, end_date, freq="D")
+        doy_vals   = np.asarray(clim["doy"].values).astype(int)
+        clim_vals  = np.asarray(clim.values, dtype=float)
+        lut        = {int(d): float(v) for d, v in zip(doy_vals, clim_vals)}
+        values     = np.array([lut.get(365 if d == 366 else int(d), np.nan) for d in t.dayofyear], dtype=float)
+        out        = xr.DataArray(values, dims=("time",), coords={"time": t}, name="FIA_clim_repeat")
         out.attrs.update(clim.attrs)
         return out
 
@@ -178,8 +167,8 @@ class SeaIceObservations:
         return area.isel(time=0, drop=True) if "time" in area.dims else area
 
     def compute_af2020_fia_from_regridded(self, area: xr.DataArray, var_name: str | None = None) -> xr.Dataset:
-        ds = self.load_af2020_regridded()
-        area2d = self._ensure_2d_area(area)
+        ds       = self.load_af2020_regridded()
+        area2d   = self._ensure_2d_area(area)
         var_name = var_name or self.observations.af2020_regridded_var
         if var_name not in ds:
             raise KeyError(f"Variable {var_name!r} not found in AF2020 regridded store.")
@@ -199,14 +188,11 @@ class SeaIceObservations:
         """
         return xr.Dataset({"FIA_clim": self.compute_af2020_fia_daily_climatology()})
 
-    def repeat_daily_climatology(
-        self,
-        clim: xr.DataArray,
-        start_date: str | None = None,
-        end_date: str | None = None,
-    ) -> xr.DataArray:
+    def repeat_daily_climatology(self, clim: xr.DataArray,
+                                 start_date : str | None = None,
+                                 end_date   : str | None = None) -> xr.DataArray:
         start_date = start_date or self.run.start_date
-        end_date = end_date or self.run.end_date
+        end_date   = end_date or self.run.end_date
         if clim.name == "FIA_clim" or clim.attrs.get("long_name", "").startswith("Observed Fast Ice Area"):
             # treat as a day-of-year climatology on a doy axis
             t = pd.date_range(start_date, end_date, freq="D")
@@ -214,30 +200,29 @@ class SeaIceObservations:
                 raise ValueError(f"repeat_daily_climatology expected a 'doy' axis; got dims={clim.dims}")
             if "doy" not in clim.dims:
                 src_dim = clim.dims[0]
-                clim = clim.swap_dims({src_dim: "doy"}).drop_vars(src_dim, errors="ignore")
-            doy_vals = np.asarray(clim["doy"].values).astype(int)
+                clim    = clim.swap_dims({src_dim: "doy"}).drop_vars(src_dim, errors="ignore")
+            doy_vals  = np.asarray(clim["doy"].values).astype(int)
             clim_vals = np.asarray(clim.values, dtype=float)
-            lut = {int(d): float(v) for d, v in zip(doy_vals, clim_vals)}
-            values = np.array([lut.get(365 if d == 366 else int(d), np.nan) for d in t.dayofyear], dtype=float)
-            out = xr.DataArray(values, dims=("time",), coords={"time": t}, name=f"{clim.name}_repeat")
+            lut       = {int(d): float(v) for d, v in zip(doy_vals, clim_vals)}
+            values    = np.array([lut.get(365 if d == 366 else int(d), np.nan) for d in t.dayofyear], dtype=float)
+            out       = xr.DataArray(values, dims=("time",), coords={"time": t}, name=f"{clim.name}_repeat")
             out.attrs.update(clim.attrs)
             return out
-
         # sparse climatologies on doy-like coordinates: interpolate to daily
         t = pd.date_range(start_date, end_date, freq="D")
         if "doy" not in clim.dims and "doy" not in clim.coords:
             raise ValueError(f"repeat_daily_climatology expected a climatology with 'doy'; got dims={clim.dims}")
         if "doy" not in clim.dims:
             src_dim = clim.dims[0]
-            clim = clim.swap_dims({src_dim: "doy"}).drop_vars(src_dim, errors="ignore")
-        clim = clim.sortby("doy")
-        src_doy = np.asarray(clim["doy"].values).astype(int)
-        src_val = np.asarray(clim.values, dtype=float)
-        xp = np.r_[src_doy[0] - 365, src_doy, src_doy[-1] + 365]
-        fp = np.r_[src_val[-1], src_val, src_val[0]]
+            clim    = clim.swap_dims({src_dim: "doy"}).drop_vars(src_dim, errors="ignore")
+        clim       = clim.sortby("doy")
+        src_doy    = np.asarray(clim["doy"].values).astype(int)
+        src_val    = np.asarray(clim.values, dtype=float)
+        xp         = np.r_[src_doy[0] - 365, src_doy, src_doy[-1] + 365]
+        fp         = np.r_[src_val[-1], src_val, src_val[0]]
         target_doy = t.dayofyear.to_numpy().astype(int)
         target_doy = np.where(target_doy == 366, 365, target_doy)
-        values = np.interp(target_doy, xp, fp)
-        out = xr.DataArray(values, dims=("time",), coords={"time": t}, name=f"{clim.name}_repeat")
+        values     = np.interp(target_doy, xp, fp)
+        out        = xr.DataArray(values, dims=("time",), coords={"time": t}, name=f"{clim.name}_repeat")
         out.attrs.update(clim.attrs)
         return out

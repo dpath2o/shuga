@@ -3,7 +3,7 @@
 #PBS -q normalbw
 #PBS -l walltime=08:00:00
 #PBS -l ncpus=24
-#PBS -l mem=190GB
+#PBS -l mem=256GB
 #PBS -l jobfs=5GB
 #PBS -j oe
 #PBS -l storage=gdata/xp65+gdata/gv90+gdata/ik11+scratch/gv90
@@ -24,9 +24,15 @@ BIN_WINDOW="${BIN_WINDOW:-11}"
 BIN_MIN_DAYS="${BIN_MIN_DAYS:-9}"
 ROLL_WINDOW="${ROLL_WINDOW:-15}"
 OVERWRITE="${OVERWRITE:-false}"
+UPDATE_MISSING_ONLY="${UPDATE_MISSING_ONLY:-true}"
+REBUILD_ON_INDEX_MISMATCH="${REBUILD_ON_INDEX_MISMATCH:-false}"
+METRIC_GROUPS="${METRIC_GROUPS:-default}"
+METRIC_NAMES="${METRIC_NAMES:-}"
 PLOT_FIP="${PLOT_FIP:-false}"
 PLOT_FIA="${PLOT_FIA:-false}"
 PLOT_FIT="${PLOT_FIT:-false}"
+PLOT_SIA="${PLOT_SIA:-false}"
+PLOT_SIT="${PLOT_SIT:-false}"
 PLOT_REGION="${PLOT_REGION:-total}"
 OBS_FIA_VAR="${OBS_FIA_VAR:-FIA}"
 OBS_FIT_VAR="${OBS_FIT_VAR:-FIT}"
@@ -34,6 +40,8 @@ LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
 # Decode PBS-safe delimiter back to comma-separated list for Python CLI.
 METHODS="${METHODS//|/,}"
+METRIC_GROUPS="${METRIC_GROUPS//|/,}"
+METRIC_NAMES="${METRIC_NAMES//|/,}"
 
 module use /g/data/xp65/public/modules
 module load conda/analysis3-25.12
@@ -61,12 +69,17 @@ CMD=(
   --bin-window "$BIN_WINDOW"
   --bin-min-days "$BIN_MIN_DAYS"
   --roll-window "$ROLL_WINDOW"
+  --metric-groups "$METRIC_GROUPS"
   --log-level "$LOG_LEVEL"
   --obs-fia-var "$OBS_FIA_VAR"
   --obs-fit-var "$OBS_FIT_VAR"
   --plot-region "$PLOT_REGION"
 )
 
+if [[ "${REBUILD_ON_INDEX_MISMATCH}" == "true" ]]; then
+    CMD+=(--rebuild-on-index-mismatch)
+fi
+[[ -n "$METRIC_NAMES" ]] && CMD+=(--metric-names "$METRIC_NAMES")
 [[ -n "${CICE_STORE:-}" ]] && CMD+=(--cice-store "$CICE_STORE")
 [[ -n "${STATIC_STORE:-}" ]] && CMD+=(--static-store "$STATIC_STORE")
 [[ -n "${CLASSIFICATION_ROOT:-}" ]] && CMD+=(--classification-root "$CLASSIFICATION_ROOT")
@@ -75,10 +88,13 @@ CMD=(
 [[ -n "${LOGS_ROOT:-}" ]] && CMD+=(--logs-root "$LOGS_ROOT")
 [[ -n "${OBS_METRICS_STORE:-}" ]] && CMD+=(--obs-metrics-store "$OBS_METRICS_STORE")
 [[ -n "${COAST_DISTANCE_VAR:-}" ]] && CMD+=(--coast-distance-var "$COAST_DISTANCE_VAR")
+[[ "$UPDATE_MISSING_ONLY" == "true" ]] && CMD+=(--update-missing-only)
 [[ "$OVERWRITE" == "true" ]] && CMD+=(--overwrite)
 [[ "$PLOT_FIP" == "true" ]] && CMD+=(--plot-fip)
 [[ "$PLOT_FIA" == "true" ]] && CMD+=(--plot-fia)
 [[ "$PLOT_FIT" == "true" ]] && CMD+=(--plot-fit)
+[[ "$PLOT_SIA" == "true" ]] && CMD+=(--plot-sia)
+[[ "$PLOT_SIT" == "true" ]] && CMD+=(--plot-sit)
 
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"

@@ -1,0 +1,91 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q hugemembw
+#PBS -l ncpus=7
+#PBS -l mem=750GB
+#PBS -l walltime=06:00:00
+#PBS -l storage=gdata/gv90+gdata/xp65+gdata/ik11+gdata/vk83
+#PBS -l wd
+#PBS -j oe
+#PBS -r y
+#PBS -N shuga_cawcr_regrid
+
+set -euo pipefail
+
+YEAR="${YEAR:?YEAR not set}"
+MONTH="${MONTH:?MONTH not set}"
+
+PROJECT="${PROJECT:-gv90}"
+RUN_USER="${RUN_USER:-da1339}"
+SIM_NAME="${SIM_NAME:-LD-waves-exp01}"
+HEMISPHERE="${HEMISPHERE:-SH}"
+
+SIC_THRESHOLD="${SIC_THRESHOLD:-0.15}"
+K_NEAREST="${K_NEAREST:-5}"
+IDW_POWER="${IDW_POWER:-2.5}"
+RADIUS_KM="${RADIUS_KM:-1000.0}"
+TIME_CHUNK="${TIME_CHUNK:-4}"
+
+OW_NC="${OW_NC:-false}"
+OW_WGT="${OW_WGT:-false}"
+OW_SIC_WGT="${OW_SIC_WGT:-false}"
+
+SCRIPT_ROOT="${SCRIPT_ROOT:-/home/581/da1339/AFIM/src/mawsons-chest}"
+PY_SCRIPT="${PY_SCRIPT:-${SCRIPT_ROOT}/shuga/scripts/waves/cawcr_regrid.py}"
+
+echo "YEAR=${YEAR}"
+echo "MONTH=${MONTH}"
+echo "PROJECT=${PROJECT}"
+echo "RUN_USER=${RUN_USER}"
+echo "SIM_NAME=${SIM_NAME}"
+echo "HEMISPHERE=${HEMISPHERE}"
+echo "SIC_THRESHOLD=${SIC_THRESHOLD}"
+echo "K_NEAREST=${K_NEAREST}"
+echo "IDW_POWER=${IDW_POWER}"
+echo "RADIUS_KM=${RADIUS_KM}"
+echo "TIME_CHUNK=${TIME_CHUNK}"
+echo "OW_NC=${OW_NC}"
+echo "OW_WGT=${OW_WGT}"
+echo "OW_SIC_WGT=${OW_SIC_WGT}"
+echo "HOST=$(hostname)"
+echo "START=$(date)"
+
+OUTFILE="/g/data/${PROJECT}/${RUN_USER}/afim_input/CAWCR/CAWCR_efreq_for_CICE6_${YEAR}${MONTH}.nc"
+if [[ "${OW_NC}" != "true" && -s "${OUTFILE}" ]]; then
+  echo "Output exists, skipping: ${OUTFILE}"
+  exit 0
+fi
+
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.01
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${SCRIPT_ROOT}:${PYTHONPATH:-}"
+
+PY_ARGS=(
+  "${YEAR}"
+  "${MONTH}"
+  "--project" "${PROJECT}"
+  "--user" "${RUN_USER}"
+  "--sim-name" "${SIM_NAME}"
+  "--hemisphere" "${HEMISPHERE}"
+  "--sic-threshold" "${SIC_THRESHOLD}"
+  "--k-nearest" "${K_NEAREST}"
+  "--idw-power" "${IDW_POWER}"
+  "--radius-km" "${RADIUS_KM}"
+  "--time-chunk" "${TIME_CHUNK}"
+)
+
+if [[ "${OW_NC}" == "true" ]]; then
+  PY_ARGS+=("--overwrite-nc")
+fi
+if [[ "${OW_WGT}" == "true" ]]; then
+  PY_ARGS+=("--overwrite-weights")
+fi
+if [[ "${OW_SIC_WGT}" == "true" ]]; then
+  PY_ARGS+=("--overwrite-sic-weights")
+fi
+
+python "${PY_SCRIPT}" "${PY_ARGS[@]}"
+
+echo "END=$(date)"

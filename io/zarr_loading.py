@@ -2,6 +2,7 @@ from __future__ import annotations
 import re
 import pandas           as pd
 import xarray           as xr
+import numpy            as np
 from dataclasses        import replace
 from pathlib            import Path
 from typing             import Any
@@ -9,6 +10,22 @@ from shuga.core.logging import resolve_logger
 from shuga.core.naming  import method_dirname, normalize_method
 from shuga.core.paths   import ShugaPaths
 from shuga.core.types   import ClassificationSpec, MetricsSpec, ObservationSpec, PlottingSpec, RunSpec
+
+"""
+Zarr loading utilities for CICE history, classified fast-ice masks, and
+derived metrics.
+
+Design notes
+------------
+- ``load_cice()`` reads dynamic fields from the grouped history store and
+  merges static fields from the static store when needed.
+- ``load_classified()`` normalises classified outputs to a single variable
+  named ``FI_mask``.
+- ``load_metrics()`` reads ``mets.zarr`` products and uses overlap-aware time
+  slicing, which is important for rolling/windowed metrics.
+- Most loaders can resolve context from either spec objects or explicit
+  keyword overrides.
+"""
 
 _MONTH_RE          = re.compile(r"^\d{4}-\d{2}$")
 _CANONICAL_METHODS = ("raw", "binary-days", "rolling-mean")
@@ -18,8 +35,24 @@ def _slice_time(ds: xr.Dataset, dt0: str | None, dtN: str | None) -> xr.Dataset:
     if "time" not in ds.coords or (dt0 is None and dtN is None):
         return ds
     start = pd.to_datetime(dt0) if dt0 is not None else None
-    end = pd.to_datetime(dtN) if dtN is not None else None
+    end   = pd.to_datetime(dtN) if dtN is not None else None
     return ds.sel(time=slice(start, end))
+
+def _slice_time_overlap(ds: xr.Dataset, dt0_str: str | None, dtN_str: str | None) -> xr.Dataset:
+    if "time" not in ds.coords or ds.sizes.get("time", 0) == 0:
+        return ds
+    t0_avail = ds.time.values[0]
+    tN_avail = ds.time.values[-1]
+    t0_req   = np.datetime64(dt0_str) if dt0_str is not None else t0_avail
+    tN_req   = np.datetime64(dtN_str) if dtN_str is not None else tN_avail
+    if t0_req > tN_req:
+        raise ValueError(f"Requested time range is reversed: {dt0_str} -> {dtN_str}")
+    t0_use = max(t0_req, t0_avail)
+    tN_use = min(tN_req, tN_avail)
+    if t0_use > tN_use:
+        LOGGER.warning("Requested time range %s -> %s has no overlap with metrics store %s -> %s", dt0_str, dtN_str, str(t0_avail), str(tN_avail))
+        return ds.isel(time=slice(0, 0))
+    return ds.sel(time=slice(t0_use, tN_use))
 
 def _find_lat_name(ds: xr.Dataset) -> str | None:
     for name in ("TLAT", "ULAT", "lat", "latitude"):
@@ -291,163 +324,264 @@ def _resolve_class_store_path(paths: ShugaPaths, classify: ClassificationSpec, *
     match_lines = "\n".join(str(m["path"]) for m in matches)
     raise ValueError(f"Ambiguous store resolution for sim={paths.run.sim_name!r}. Matching stores:\n{match_lines}")
 
-def load_cice(run: RunSpec | None = None,
-              classify: ClassificationSpec | None = None,
-              metrics: MetricsSpec | None = None,
-              plotting: PlottingSpec | None = None,
-              observations: ObservationSpec | None = None,
-              paths: ShugaPaths | None = None,
-              *,
-              sim_name: str | None = None,
-              dt0_str: str | None = None,
-              dtN_str: str | None = None,
-              variables=None,
-              hemisphere: str | None = None,
-              project: str | None = None,
+def load_cice(run              : RunSpec | None = None,
+              classify         : ClassificationSpec | None = None,
+              metrics          : MetricsSpec | None = None,
+              plotting         : PlottingSpec | None = None,
+              observations     : ObservationSpec | None = None,
+              paths            : ShugaPaths | None = None, *,
+              sim_name         : str | None = None,
+              dt0_str          : str | None = None,
+              dtN_str          : str | None = None,
+              variables                     = None,
+              hemisphere       : str | None = None,
+              project          : str | None = None,
               user             : str | None = None,
               afim_output_root : str | Path | None = None,
               cice_store       : str | Path | None = None,
               static_store     : str | Path | None = None,
               chunks           : dict | None = None) -> xr.Dataset:
+    """
+    Load CICE history output from the grouped daily Zarr store, optionally
+    merging in static variables from a separate static store.
+
+    This is the primary loader for model history data. It resolves the run
+    context from either a supplied ``RunSpec``/``ShugaPaths`` or from explicit
+    keyword overrides such as ``sim_name``, ``dt0_str``, ``dtN_str``,
+    ``hemisphere``, ``project``, and ``user``. Dynamic variables are opened
+    from the grouped CICE history store, while static variables are merged from
+    the static store when requested.
+
+    Parameters
+    ----------
+    run : RunSpec | None, optional
+        Run configuration describing the simulation, date range, hemisphere,
+        and user/project context.
+    classify, metrics, plotting, observations : spec objects, optional
+        Optional companion spec objects used when resolving paths via
+        ``_build_paths``.
+    paths : ShugaPaths | None, optional
+        Pre-built path bundle. When provided, its attributes may be used as
+        defaults for missing run/classification context.
+    sim_name : str | None, optional
+        Simulation name override.
+    dt0_str, dtN_str : str | None, optional
+        Start and end date overrides in ``YYYY-MM-DD`` format.
+    variables : str | list[str] | None, optional
+        Variable name or list of variable names to load. If ``None``, all
+        variables are requested from the dynamic store, which may be expensive
+        for long periods.
+    hemisphere : str | None, optional
+        Hemisphere selection passed through to the hemisphere masking helper.
+    project, user : str | None, optional
+        Project and username overrides used during run/path resolution.
+    afim_output_root : str | Path | None, optional
+        Root AFIM output directory override.
+    cice_store : str | Path | None, optional
+        Explicit path to the grouped CICE history Zarr store.
+    static_store : str | Path | None, optional
+        Explicit path to the static Zarr store containing non-time-varying
+        fields.
+    chunks : dict | None, optional
+        Dask chunk mapping passed to the grouped store opener. Defaults to
+        ``{"time": 31}``.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset containing the requested CICE variables, with static variables
+        merged in when relevant and the final result masked to the requested
+        hemisphere.
+
+    Raises
+    ------
+    ValueError
+        If ``variables`` was provided but none of the requested variables are
+        present after dynamic/static merging.
+
+    Notes
+    -----
+    - Requested variables are split into dynamic and static groups before
+      opening stores.
+    - If only static variables are requested, the grouped monthly dynamic open
+      is allowed to return empty.
+    - A final subset is applied after static merging so the returned dataset
+      contains only the variables actually requested.
+    """
     if chunks is None:
         chunks = {"time": 31}
     variables_list = _maybe_listify_variables(variables)
     if variables_list is None:
         LOGGER.warning("load_cice() called with variables=None; loading all variables from iceh_daily.zarr "
                        "can be very memory-intensive for long date ranges.")
-    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(
-        run,
-        sim_name=sim_name,
-        dt0_str=dt0_str,
-        dtN_str=dtN_str,
-        hemisphere=hemisphere,
-        project=project,
-        user=user,
-    )
+    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run,
+                                                                     sim_name   = sim_name,
+                                                                     dt0_str    = dt0_str,
+                                                                     dtN_str    = dtN_str,
+                                                                     hemisphere = hemisphere,
+                                                                     project    = project,
+                                                                     user       = user)
     classify_eff = classify or (paths.classify if paths is not None else ClassificationSpec())
-    paths_eff = _build_paths(
-        run=run_eff,
-        classify=classify_eff,
-        metrics=metrics,
-        plotting=plotting,
-        observations=observations,
-        paths=paths,
-        afim_output_root=afim_output_root,
-        cice_store=cice_store,
-        static_store=static_store,
-    )
-    zarr_root = paths_eff.resolve_cice_store()
-    static_eff = Path(static_store).expanduser() if static_store is not None else paths_eff.resolve_static_store()
-    dynamic_requested, static_requested = _split_requested_variables(
-        variables_list,
-        static_eff,
-    )
+    paths_eff    = _build_paths(run              = run_eff,
+                                classify         = classify_eff,
+                                metrics          = metrics,
+                                plotting         = plotting,
+                                observations     = observations,
+                                paths            = paths,
+                                afim_output_root = afim_output_root,
+                                cice_store       = cice_store,
+                                static_store     = static_store)
+    zarr_root    = paths_eff.resolve_cice_store()
+    static_eff   = Path(static_store).expanduser() if static_store is not None else paths_eff.resolve_static_store()
+    dynamic_requested, static_requested = _split_requested_variables(variables_list, static_eff)
     # If user requested only static variables, allow grouped monthly open to return empty
     allow_empty_dynamic = variables_list is not None and dynamic_requested is None
-    ds_all = _open_grouped_cice_store(
-        zarr_root,
-        dt0_str=dt0_eff,
-        dtN_str=dtN_eff,
-        variables=dynamic_requested,
-        chunks=chunks,
-        allow_empty=allow_empty_dynamic,
-    )
+    ds_all = _open_grouped_cice_store(zarr_root,
+                                      dt0_str     = dt0_eff,
+                                      dtN_str     = dtN_eff,
+                                      variables   = dynamic_requested,
+                                      chunks      = chunks,
+                                      allow_empty = allow_empty_dynamic)
     ds_all = _merge_static(ds_all, static_eff, variables_list)
     ds_all = _apply_hemisphere_mask(ds_all, hemisphere_eff)
     # Final subset on merged dataset
     if variables_list is not None:
         present = [v for v in variables_list if v in ds_all.data_vars or v in ds_all.coords]
         if not present:
-            raise ValueError(
-                f"None of the requested variables were found after merging static/dynamic stores: {variables_list}"
-            )
+            raise ValueError(f"None of the requested variables were found after merging static/dynamic stores: {variables_list}")
         ds_all = ds_all[present]
     return ds_all
-    # zarr_root = paths_eff.resolve_cice_store()
-    # static_eff = Path(static_store).expanduser() if static_store is not None else paths_eff.resolve_static_store()
-    # ds_all = _open_grouped_cice_store(
-    #     zarr_root,
-    #     dt0_str=dt0_eff,
-    #     dtN_str=dtN_eff,
-    #     variables=variables_list,
-    #     chunks=chunks
-    # )
-    # ds_all = _merge_static(ds_all, static_eff, variables_list)
-    # ds_all = _apply_hemisphere_mask(ds_all, hemisphere_eff)
-    # ds_all = _slice_time(ds_all, dt0_eff, dtN_eff)
-    # return ds_all
 
-def load_classified(
-    run: RunSpec | None = None,
-    classify: ClassificationSpec | None = None,
-    metrics: MetricsSpec | None = None,
-    plotting: PlottingSpec | None = None,
-    observations: ObservationSpec | None = None,
-    paths: ShugaPaths | None = None,
-    *,
-    classification: str | None = None,
-    sim_name: str | None = None,
-    dt0_str: str | None = None,
-    dtN_str: str | None = None,
-    hemisphere: str | None = None,
-    project: str | None = None,
-    user: str | None = None,
-    grid_type: str | None = None,
-    grid_type_map: dict[str, str] | None = None,
-    ice_type: str | None = None,
-    ispd_thresh: float | None = None,
-    bin_window: int | None = None,
-    bin_min_days: int | None = None,
-    roll_window: int | None = None,
-    afim_output_root: str | Path | None = None,
-    classification_root: str | Path | None = None,
-    chunks: dict | None = None,
-    return_resolved: bool = False,
-):
-    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(
-        run,
-        sim_name=sim_name,
-        dt0_str=dt0_str,
-        dtN_str=dtN_str,
-        hemisphere=hemisphere,
-        project=project,
-        user=user,
-    )
+def load_classified(run                 : RunSpec | None = None,
+                    classify            : ClassificationSpec | None = None,
+                    metrics             : MetricsSpec | None = None,
+                    plotting            : PlottingSpec | None = None,
+                    observations        : ObservationSpec | None = None,
+                    paths               : ShugaPaths | None = None, *,
+                    classification      : str | None = None,
+                    sim_name            : str | None = None,
+                    dt0_str             : str | None = None,
+                    dtN_str             : str | None = None,
+                    hemisphere          : str | None = None,
+                    project             : str | None = None,
+                    user                : str | None = None,
+                    grid_type           : str | None = None,
+                    grid_type_map       : dict[str, str] | None = None,
+                    ice_type            : str | None = None,
+                    ispd_thresh         : float | None = None,
+                    bin_window          : int | None = None,
+                    bin_min_days        : int | None = None,
+                    roll_window         : int | None = None,
+                    afim_output_root    : str | Path | None = None,
+                    classification_root : str | Path | None = None,
+                    chunks              : dict | None = None,
+                    return_resolved     : bool = False):
+    """
+    Load a classified fast-ice store and return a dataset containing a single
+    ``FI_mask`` variable.
+
+    This loader resolves the run and classification context, constructs the
+    classification-store path, opens ``data.zarr``, and normalises the output
+    so that the returned dataset always contains a variable named
+    ``FI_mask``. If the source dataset contains exactly one data variable with
+    a different name, that variable is renamed to ``FI_mask``.
+
+    Parameters
+    ----------
+    run : RunSpec | None, optional
+        Run configuration used as the primary source of simulation/date
+        context.
+    classify : ClassificationSpec | None, optional
+        Classification configuration describing classification method, grid,
+        thresholds, and window lengths.
+    metrics, plotting, observations : spec objects, optional
+        Optional companion specs used for path construction.
+    paths : ShugaPaths | None, optional
+        Pre-built path bundle whose ``classify`` section may provide defaults.
+    classification : str | None, optional
+        Classification method name override, for example a raw, binary-days,
+        or rolling-mean classification label.
+    sim_name : str | None, optional
+        Simulation name override.
+    dt0_str, dtN_str : str | None, optional
+        Start and end date overrides in ``YYYY-MM-DD`` format.
+    hemisphere : str | None, optional
+        Hemisphere selection used during masking.
+    project, user : str | None, optional
+        Project and username overrides used during run/path resolution.
+    grid_type : str | None, optional
+        Grid-type override used when resolving the classification store path.
+    grid_type_map : dict[str, str] | None, optional
+        Optional mapping from simulation name to grid type. If provided, this
+        takes precedence over ``grid_type`` for matching simulations.
+    ice_type : str | None, optional
+        Ice-type override used in classification resolution.
+    ispd_thresh : float | None, optional
+        Speed-threshold override for the classification context.
+    bin_window, bin_min_days, roll_window : int | None, optional
+        Classification window parameters used when resolving binary-days or
+        rolling-mean stores.
+    afim_output_root : str | Path | None, optional
+        Root AFIM output directory override.
+    classification_root : str | Path | None, optional
+        Explicit classification-root override.
+    chunks : dict | None, optional
+        Dask chunk mapping passed to ``xr.open_zarr``.
+    return_resolved : bool, optional
+        If ``True``, also return the resolved path/context dictionary produced
+        by ``_resolve_class_store_path``.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset containing a single data variable named ``FI_mask``, masked to
+        the requested hemisphere and sliced to the requested time range.
+    tuple[xr.Dataset, dict]
+        Returned when ``return_resolved=True``. The second element contains the
+        resolved classification metadata/path dictionary.
+
+    Raises
+    ------
+    KeyError
+        If the opened classified store does not contain ``FI_mask`` and does
+        not contain exactly one alternative data variable that can be renamed.
+
+    Notes
+    -----
+    - The function opens ``data.zarr`` under the resolved classification path.
+    - Time slicing uses ``_slice_time`` rather than overlap-based slicing.
+    - This loader is intentionally strict about returning a single canonical
+      mask variable.
+    """
+    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run,
+                                                                     sim_name   = sim_name,
+                                                                     dt0_str    = dt0_str,
+                                                                     dtN_str    = dtN_str,
+                                                                     hemisphere = hemisphere,
+                                                                     project    = project,
+                                                                     user       = user)
     grid_type_eff = (grid_type_map or {}).get(run_eff.sim_name, grid_type)
-    classify_eff = _resolve_classify_context(
-        classify or (paths.classify if paths is not None else None),
-        classification=classification,
-        grid_type=grid_type_eff,
-        ice_type=ice_type,
-        ispd_thresh=ispd_thresh,
-        bin_window=bin_window,
-        bin_min_days=bin_min_days,
-        roll_window=roll_window,
-    )
-    paths_eff = _build_paths(
-        run=run_eff,
-        classify=classify_eff,
-        metrics=metrics,
-        plotting=plotting,
-        observations=observations,
-        paths=paths,
-        afim_output_root=afim_output_root,
-        classification_root=classification_root,
-    )
-    resolved = _resolve_class_store_path(
-        paths_eff,
-        classify_eff,
-        classification=classification,
-        grid_type=grid_type_eff,
-        store_name="data.zarr",
-    )
-    LOGGER.info(
-        "Opening classified store for %s [%s/%s]: %s",
-        run_eff.sim_name,
-        resolved["grid_type"],
-        resolved["classification"],
-        resolved["path"],
-    )
+    classify_eff  = _resolve_classify_context(classify or (paths.classify if paths is not None else None),
+                                             classification = classification,
+                                             grid_type      = grid_type_eff,
+                                             ice_type       = ice_type,
+                                             ispd_thresh    = ispd_thresh,
+                                             bin_window     = bin_window,
+                                             bin_min_days   = bin_min_days,
+                                             roll_window    = roll_window)
+    paths_eff     = _build_paths(run                 = run_eff,
+                                 classify            = classify_eff,
+                                 metrics             = metrics,
+                                 plotting            = plotting,
+                                 observations        = observations,
+                                 paths               = paths,
+                                 afim_output_root    = afim_output_root,
+                                 classification_root = classification_root)
+    resolved      = _resolve_class_store_path(paths_eff, classify_eff,
+                                              classification = classification,
+                                              grid_type      = grid_type_eff,
+                                              store_name     = "data.zarr")
+    LOGGER.info("Opening classified store for %s [%s/%s]: %s", run_eff.sim_name, resolved["grid_type"], resolved["classification"], resolved["path"])
     ds = xr.open_zarr(resolved["path"], consolidated=False, chunks=chunks)
     if "FI_mask" in ds.data_vars:
         ds = ds[["FI_mask"]]
@@ -462,109 +596,203 @@ def load_classified(
         return ds, resolved
     return ds
 
-def load_metrics(
-    run: RunSpec | None = None,
-    classify: ClassificationSpec | None = None,
-    metrics: MetricsSpec | None = None,
-    plotting: PlottingSpec | None = None,
-    observations: ObservationSpec | None = None,
-    paths: ShugaPaths | None = None,
-    *,
-    classification: str | None = None,
-    sim_name: str | None = None,
-    dt0_str: str | None = None,
-    dtN_str: str | None = None,
-    variables=None,
-    hemisphere: str | None = None,
-    project: str | None = None,
-    user: str | None = None,
-    grid_type: str | None = None,
-    grid_type_map: dict[str, str] | None = None,
-    ice_type: str | None = None,
-    ispd_thresh: float | None = None,
-    bin_window: int | None = None,
-    bin_min_days: int | None = None,
-    roll_window: int | None = None,
-    afim_output_root: str | Path | None = None,
-    classification_root: str | Path | None = None,
-    chunks: dict | None = None,
-    return_resolved: bool = False,
-):
+def load_metrics(run                 : RunSpec | None         = None,
+                 classify            : ClassificationSpec | None = None,
+                 metrics             : MetricsSpec | None     = None,
+                 plotting            : PlottingSpec | None    = None,
+                 observations        : ObservationSpec | None = None,
+                 paths               : ShugaPaths | None      = None, *,
+                 classification      : str | None             = None,
+                 sim_name            : str | None             = None,
+                 dt0_str             : str | None             = None,
+                 dtN_str             : str | None             = None,
+                 variables                                    = None,
+                 hemisphere          : str | None             = None,
+                 project             : str | None             = None,
+                 user                : str | None             = None,
+                 grid_type           : str | None             = None,
+                 grid_type_map       : dict[str, str] | None  = None,
+                 ice_type            : str | None             = None,
+                 ispd_thresh         : float | None           = None,
+                 bin_window          : int | None             = None,
+                 bin_min_days        : int | None             = None,
+                 roll_window         : int | None             = None,
+                 afim_output_root    : str | Path | None      = None,
+                 classification_root : str | Path | None      = None,
+                 chunks              : dict | None            = None,
+                 return_resolved     : bool                   = False):
+    """
+    Load a classification metrics store from ``mets.zarr``.
+
+    This function resolves run and classification context, opens the resolved
+    metrics Zarr store, optionally subsets variables, applies a hemisphere
+    mask, and slices the dataset to the requested time window using overlap-
+    aware time slicing.
+
+    Parameters
+    ----------
+    run : RunSpec | None, optional
+        Run configuration used as the primary source of simulation/date
+        context.
+    classify : ClassificationSpec | None, optional
+        Classification configuration describing classification method, grid,
+        thresholds, and window lengths.
+    metrics, plotting, observations : spec objects, optional
+        Optional companion specs used during path construction.
+    paths : ShugaPaths | None, optional
+        Pre-built path bundle whose ``classify`` section may supply defaults.
+    classification : str | None, optional
+        Classification method override used to resolve the metrics store path.
+    sim_name : str | None, optional
+        Simulation name override.
+    dt0_str, dtN_str : str | None, optional
+        Start and end date overrides in ``YYYY-MM-DD`` format.
+    variables : str | list[str] | None, optional
+        Metric variable or variables to keep after opening the store. If
+        omitted, all variables are returned.
+    hemisphere : str | None, optional
+        Hemisphere selection used during masking.
+    project, user : str | None, optional
+        Project and username overrides used during run/path resolution.
+    grid_type : str | None, optional
+        Grid-type override used to resolve the metrics store path.
+    grid_type_map : dict[str, str] | None, optional
+        Optional mapping from simulation name to grid type. If provided, it is
+        checked before the direct ``grid_type`` argument.
+    ice_type : str | None, optional
+        Ice-type override used in classification resolution.
+    ispd_thresh : float | None, optional
+        Speed-threshold override used in classification resolution.
+    bin_window, bin_min_days, roll_window : int | None, optional
+        Classification window parameters used to resolve method-specific metric
+        stores.
+    afim_output_root : str | Path | None, optional
+        Root AFIM output directory override.
+    classification_root : str | Path | None, optional
+        Explicit classification-root override.
+    chunks : dict | None, optional
+        Dask chunk mapping passed to ``xr.open_zarr``.
+    return_resolved : bool, optional
+        If ``True``, also return the resolved path/context dictionary produced
+        by ``_resolve_class_store_path``.
+
+    Returns
+    -------
+    xr.Dataset
+        Metrics dataset, optionally variable-subset, hemisphere-masked, and
+        overlap-sliced in time.
+    tuple[xr.Dataset, dict]
+        Returned when ``return_resolved=True``. The second element contains the
+        resolved classification metadata/path dictionary.
+
+    Notes
+    -----
+    - The function opens ``mets.zarr`` under the resolved classification path.
+    - Variable subsetting is applied before hemisphere masking and time slicing.
+    - Time slicing uses ``_slice_time_overlap()``, which is useful for metrics
+      generated from rolling or windowed methods whose effective support may
+      extend beyond the nominal target range.
+    - Extensive logging is emitted describing the resolved context, opened
+      store, retained variables, and dataset sizes before and after slicing.
+    """
     variables_list = _maybe_listify_variables(variables)
-    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(
-        run,
-        sim_name=sim_name,
-        dt0_str=dt0_str,
-        dtN_str=dtN_str,
-        hemisphere=hemisphere,
-        project=project,
-        user=user,
-    )
+    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run,
+                                                                     sim_name   = sim_name,
+                                                                     dt0_str    = dt0_str,
+                                                                     dtN_str    = dtN_str,
+                                                                     hemisphere = hemisphere,
+                                                                     project    = project,
+                                                                     user       = user)
+    LOGGER.info("load_metrics resolved run context: sim=%s dt0=%s dtN=%s hemisphere=%s",run_eff.sim_name, dt0_eff, dtN_eff, hemisphere_eff)
     grid_type_eff = (grid_type_map or {}).get(run_eff.sim_name, grid_type)
-    classify_eff = _resolve_classify_context(
-        classify or (paths.classify if paths is not None else None),
-        classification=classification,
-        grid_type=grid_type_eff,
-        ice_type=ice_type,
-        ispd_thresh=ispd_thresh,
-        bin_window=bin_window,
-        bin_min_days=bin_min_days,
-        roll_window=roll_window,
-    )
-    paths_eff = _build_paths(
-        run=run_eff,
-        classify=classify_eff,
-        metrics=metrics,
-        plotting=plotting,
-        observations=observations,
-        paths=paths,
-        afim_output_root=afim_output_root,
-        classification_root=classification_root,
-    )
-    resolved = _resolve_class_store_path(
-        paths_eff,
-        classify_eff,
-        classification=classification,
-        grid_type=grid_type_eff,
-        store_name="mets.zarr",
-    )
-    LOGGER.info(
-            "Opening metrics store for %s [%s/%s]: %s",
-            run_eff.sim_name,
-            resolved["grid_type"],
-            resolved["classification"],
-            resolved["path"],
-    )
+    classify_eff  = _resolve_classify_context(classify or (paths.classify if paths is not None else None),
+                                              classification = classification,
+                                              grid_type      = grid_type_eff,
+                                              ice_type       = ice_type,
+                                              ispd_thresh    = ispd_thresh,
+                                              bin_window     = bin_window,
+                                              bin_min_days   = bin_min_days,
+                                              roll_window    = roll_window)
+
+    paths_eff     = _build_paths(run                 = run_eff,
+                                 classify            = classify_eff,
+                                 metrics             = metrics,
+                                 plotting            = plotting,
+                                 observations        = observations,
+                                 paths               = paths,
+                                 afim_output_root    = afim_output_root,
+                                 classification_root = classification_root)
+
+    resolved = _resolve_class_store_path(paths_eff, classify_eff,
+                                         classification = classification,
+                                         grid_type      = grid_type_eff,
+                                         store_name     = "mets.zarr")
+
+    LOGGER.info("Opening metrics store for %s [%s/%s]: %s", run_eff.sim_name, resolved["grid_type"], resolved["classification"], resolved["path"])
     ds = xr.open_zarr(resolved["path"], consolidated=False, chunks=chunks)
+    LOGGER.info("raw metrics ds: sizes=%s time=%s -> %s", dict(ds.sizes), ds.time.values[0] if ds.sizes.get("time", 0) else None, ds.time.values[-1] if ds.sizes.get("time", 0) else None)
     if variables_list is not None:
         keep = [v for v in variables_list if v in ds.data_vars or v in ds.coords]
+        LOGGER.info("keeping variables: %s", keep)
         ds = ds[keep]
+        LOGGER.info("after variable subset: sizes=%s", dict(ds.sizes))
     ds = _apply_hemisphere_mask(ds, hemisphere_eff)
-    ds = _slice_time(ds, dt0_eff, dtN_eff)
+    LOGGER.info("after hemisphere mask: sizes=%s", dict(ds.sizes))
+    ds = _slice_time_overlap(ds, dt0_eff, dtN_eff)
+    LOGGER.info("after time slice: sizes=%s time=%s -> %s", dict(ds.sizes), ds.time.values[0] if ds.sizes.get("time", 0) else None, ds.time.values[-1] if ds.sizes.get("time", 0) else None)
     if return_resolved:
         return ds, resolved
     return ds
 
+def open_cice_history(paths: ShugaPaths, *,
+                      variables   : list[str] | None = None,
+                      extend_days : int              = 0,
+                      chunks      : dict | None      = None) -> xr.Dataset:
+    """
+    Convenience wrapper around :func:`load_cice` using dates and configuration
+    from a ``ShugaPaths`` object.
 
-def open_cice_history(
-    paths: ShugaPaths,
-    *,
-    variables: list[str] | None = None,
-    extend_days: int = 0,
-    chunks: dict | None = None,
-) -> xr.Dataset:
+    The loader expands the run date range by ``extend_days`` on both ends,
+    then delegates to ``load_cice`` using the run, classification, metrics,
+    plotting, and observation specs stored on ``paths``.
+
+    Parameters
+    ----------
+    paths : ShugaPaths
+        Path/configuration bundle containing the run start/end dates and all
+        associated spec objects.
+    variables : list[str] | None, optional
+        Variables to load from the CICE history store. Passed directly to
+        ``load_cice``.
+    extend_days : int, optional
+        Number of days to extend the requested time range both before the run
+        start date and after the run end date. Defaults to ``0``.
+    chunks : dict | None, optional
+        Dask chunk mapping passed through to ``load_cice``.
+
+    Returns
+    -------
+    xr.Dataset
+        CICE history dataset loaded over the expanded date range.
+
+    Notes
+    -----
+    - ``dt0`` is computed as ``paths.run.start_date - extend_days``.
+    - ``dtN`` is computed as ``paths.run.end_date + extend_days``.
+    - The hemisphere is taken directly from ``paths.run.hemisphere``.
+    - This helper is useful when classification or diagnostic workflows need a
+      small temporal halo around the nominal analysis interval.
+    """
     dt0 = pd.to_datetime(paths.run.start_date) - pd.Timedelta(days=int(extend_days))
     dtN = pd.to_datetime(paths.run.end_date) + pd.Timedelta(days=int(extend_days))
-    return load_cice(
-        run=paths.run,
-        classify=paths.classify,
-        metrics=paths.metrics,
-        plotting=paths.plotting,
-        observations=paths.observations,
-        paths=paths,
-        dt0_str=dt0.strftime("%Y-%m-%d"),
-        dtN_str=dtN.strftime("%Y-%m-%d"),
-        variables=variables,
-        hemisphere=paths.run.hemisphere,
-        chunks=chunks,
-    )
+    return load_cice(run          = paths.run,
+                     classify     = paths.classify,
+                     metrics      = paths.metrics,
+                     plotting     = paths.plotting,
+                     observations = paths.observations,
+                     paths        = paths,
+                     dt0_str      = dt0.strftime("%Y-%m-%d"),
+                     dtN_str      = dtN.strftime("%Y-%m-%d"),
+                     variables    = variables,
+                     hemisphere   = paths.run.hemisphere,
+                     chunks       = chunks)
