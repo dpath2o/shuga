@@ -51,19 +51,19 @@ class MetricsSpec:
 
 @dataclass(slots=True)
 class PlottingSpec:
-    fig_size: float = 20.0
-    fip_fig_size: float = 20.0
-    split_fig_size: float = 14.0
-    region_fig_size: float = 20.0
-    shorelines: str = "0.25p,black"
-    land: str = "lightgray"
-    water: str = "white"
-    grid_style: str = "s0.1c"
-    nsidc_pen: str = "1p,green"
-    fip_cmap: str | Path | None = None
-    colorbar_position: str = "JMB+w8c/0.4c+v+o0.8c/0c"
-    colorbar_xlabel: str | None = None
-    colorbar_ylabel: str | None = None
+    fig_size          : float             = 20.0
+    fip_fig_size      : float             = 20.0
+    split_fig_size    : float             = 14.0
+    region_fig_size   : float             = 20.0
+    shorelines        : str               = "0.25p,black"
+    land              : str               = "lightgray"
+    water             : str               = "white"
+    grid_style        : str               = "s0.1c"
+    nsidc_pen         : str               = "1p,green"
+    fip_cmap          : str | Path | None = None
+    colorbar_position : str               = "JMB+w8c/0.4c+o0.8c/0c"
+    colorbar_xlabel   : str | None        = None
+    colorbar_ylabel   : str | None        = None
 
 @dataclass(slots=True)
 class ObservationSpec:

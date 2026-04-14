@@ -1,86 +1,76 @@
-from __future__ import annotations
-
-import json
-import re
-from calendar import monthrange
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
-from typing import Any
-
-import pandas as pd
-import xarray as xr
-
-from .naming import normalize_method
-from .paths import ShugaPaths
-from .store_selection import StoreSelection
-from .types import ClassificationSpec, RunSpec
+from __future__             import annotations
+import json, re
+import pandas               as pd
+import xarray               as xr
+from calendar               import monthrange
+from dataclasses            import asdict, dataclass, field
+from pathlib                import Path
+from typing                 import Any
+from .naming                import normalize_method
+from .paths                 import ShugaPaths
+from .store_selection       import StoreSelection
+from .types                 import ClassificationSpec, RunSpec
 from shuga.io.store_locator import CICEStoreLocator
 
-_MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
+_MONTH_RE  = re.compile(r"^(\d{4})-(\d{2})$")
 _THRESH_RE = re.compile(r"^ispd_thresh_(.+)$")
-_BIN_RE = re.compile(r"^bin-win-(\d+)_bin-min-(\d+)$")
-_ROLL_RE = re.compile(r"^roll-days-(\d+)$")
-
+_BIN_RE    = re.compile(r"^bin-win-(\d+)_bin-min-(\d+)$")
+_ROLL_RE   = re.compile(r"^roll-days-(\d+)$")
 
 @dataclass(slots=True)
 class StoreHealth:
-    status: str
-    reasons: list[str] = field(default_factory=list)
+    status           : str
+    reasons          : list[str] = field(default_factory=list)
     variables_present: list[str] = field(default_factory=list)
     variables_missing: list[str] = field(default_factory=list)
-
 
 @dataclass(slots=True)
 class TimeCoverage:
     start_date: str | None = None
-    end_date: str | None = None
-    n_time: int | None = None
-    n_groups: int | None = None
-
+    end_date  : str | None = None
+    n_time    : int | None = None
+    n_groups  : int | None = None
 
 @dataclass(slots=True)
 class CICEStoreStatus:
-    path: str
-    exists: bool
-    coverage: TimeCoverage | None = None
-    static_store: str | None = None
+    path         : str
+    exists       : bool
+    coverage     : TimeCoverage | None = None
+    static_store : str | None = None
     static_exists: bool | None = None
-
 
 @dataclass(slots=True)
 class ClassificationStatus:
-    method: str
-    grid_type: str
+    method             : str
+    grid_type          : str
     classification_path: str
-    metrics_path: str
-    ice_type: str | None = None
-    ispd_thresh: str | None = None
-    aice_thresh: float | str | None = None
-    bin_window: int | None = None
-    bin_min_days: int | None = None
-    roll_window: int | None = None
-    coverage: TimeCoverage | None = None
-    metrics_exists: bool = False
-    metrics_health: StoreHealth | None = None
-
+    metrics_path       : str
+    ice_type           : str | None = None
+    ispd_thresh        : str | None = None
+    aice_thresh        : float | str | None = None
+    bin_window         : int | None = None
+    bin_min_days       : int | None = None
+    roll_window        : int | None = None
+    coverage           : TimeCoverage | None = None
+    metrics_exists     : bool = False
+    metrics_health     : StoreHealth | None = None
 
 @dataclass(slots=True)
 class IceInStatus:
-    path: str | None = None
-    exists: bool = False
-    keys: list[str] = field(default_factory=list)
-    preview: dict[str, Any] = field(default_factory=dict)
-
+    path    : str | None = None
+    exists  : bool = False
+    keys    : list[str] = field(default_factory=list)
+    preview : dict[str, Any] = field(default_factory=dict)
 
 @dataclass(slots=True)
 class SimulationStatusReport:
-    sim_name: str
-    hemisphere: str
-    output_root: str
-    zarr_root: str
-    cice: CICEStoreStatus
+    sim_name       : str
+    hemisphere     : str
+    output_root    : str
+    zarr_root      : str
+    cice           : CICEStoreStatus
     classifications: list[ClassificationStatus] = field(default_factory=list)
-    ice_in_json: IceInStatus | None = None
+    ice_in_json    : IceInStatus | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -124,10 +114,8 @@ class SimulationStatusReport:
                     lines.append(f"     rolling-mean: window={cls.roll_window}")
                 lines.append(f"     class store: {cls.classification_path}")
                 if cls.coverage is not None:
-                    lines.append(
-                        f"     coverage: {cls.coverage.start_date} -> {cls.coverage.end_date}"
-                        f" (n_time={cls.coverage.n_time})"
-                    )
+                    lines.append(f"     coverage: {cls.coverage.start_date} -> {cls.coverage.end_date}"
+                                 f" (n_time={cls.coverage.n_time})")
                 lines.append(f"     metrics: {'yes' if cls.metrics_exists else 'no'}")
                 if cls.metrics_health is not None:
                     lines.append(f"     metrics health: {cls.metrics_health.status}")
@@ -138,7 +126,6 @@ class SimulationStatusReport:
             lines.append("Classifications")
             lines.append("  none discovered")
         lines.append("")
-
         if self.ice_in_json is not None:
             lines.append("ice_in JSON")
             lines.append(f"  exists: {self.ice_in_json.exists}")
@@ -154,7 +141,6 @@ class SimulationStatusReport:
 
     def __str__(self) -> str:
         return self.to_text()
-
 
 def _maybe_open_time_coverage(store: Path, *, group: str | None = None) -> TimeCoverage | None:
     try:
@@ -180,83 +166,56 @@ def _infer_grouped_store_coverage(zarr_root: Path) -> TimeCoverage | None:
     groups = sorted(p.name for p in zarr_root.iterdir() if p.is_dir() and _MONTH_RE.match(p.name))
     if not groups:
         return _maybe_open_time_coverage(zarr_root)
-
     first_group = groups[0]
-    last_group = groups[-1]
-    cov0 = _maybe_open_time_coverage(zarr_root, group=first_group)
-    covN = _maybe_open_time_coverage(zarr_root, group=last_group)
-
+    last_group  = groups[-1]
+    cov0        = _maybe_open_time_coverage(zarr_root, group=first_group)
+    covN        = _maybe_open_time_coverage(zarr_root, group=last_group)
     if cov0 is not None and covN is not None and cov0.start_date and covN.end_date:
         n_time = None
         if cov0.n_time is not None and covN.n_time is not None:
             # exact total time would require opening all groups; omit by default
             n_time = None
-        return TimeCoverage(
-            start_date=cov0.start_date,
-            end_date=covN.end_date,
-            n_time=n_time,
-            n_groups=len(groups),
-        )
-
+        return TimeCoverage(start_date = cov0.start_date,
+                            end_date   = covN.end_date,
+                            n_time     = n_time,
+                            n_groups   = len(groups))
     y0, m0 = map(int, first_group.split("-"))
     yN, mN = map(int, last_group.split("-"))
-    return TimeCoverage(
-        start_date=f"{y0:04d}-{m0:02d}-01",
-        end_date=f"{yN:04d}-{mN:02d}-{monthrange(yN, mN)[1]:02d}",
-        n_time=None,
-        n_groups=len(groups),
-    )
-
+    return TimeCoverage(start_date=f"{y0:04d}-{m0:02d}-01",
+                        end_date=f"{yN:04d}-{mN:02d}-{monthrange(yN, mN)[1]:02d}",
+                        n_time=None,
+                        n_groups=len(groups))
 
 def _discover_ice_in_json(paths: ShugaPaths, sim_name: str) -> IceInStatus:
-    filename = f"ice_in_AFIM_subset_{sim_name}.json"
-    candidates = [
-        paths.output_root / filename,
-        paths.output_root / "config" / filename,
-        paths.output_root / "configs" / filename,
-        paths.output_root.parent / filename,
-        Path.home() / "AFIM" / filename,
-    ]
-    found = next((p for p in candidates if p.exists()), None)
+    filename   = f"ice_in_AFIM_subset_{sim_name}.json"
+    candidates = [paths.output_root / filename,
+                  paths.output_root / "config" / filename,
+                  paths.output_root / "configs" / filename,
+                  paths.output_root.parent / filename,
+                  Path.home() / "AFIM" / filename]
+    found      = next((p for p in candidates if p.exists()), None)
     if found is None:
         return IceInStatus(path=str(candidates[0]), exists=False)
-
     try:
         payload = json.loads(found.read_text())
     except Exception:
         return IceInStatus(path=str(found), exists=True)
-
-    preview_keys = [
-        "dt0_str",
-        "dtN_str",
-        "grid_type",
-        "ice_type",
-        "ispd_thresh",
-        "aice_thresh",
-        "bin_window",
-        "bin_min_days",
-        "roll_window",
-    ]
+    preview_keys = ["dt0_str", "dtN_str", "grid_type", "ice_type", "ispd_thresh",
+                    "aice_thresh", "bin_window", "bin_min_days", "roll_window"]
     preview = {k: payload.get(k) for k in preview_keys if k in payload}
-    return IceInStatus(
-        path=str(found),
-        exists=True,
-        keys=sorted(payload.keys()),
-        preview=preview,
-    )
-
+    return IceInStatus(path    = str(found),
+                       exists  = True,
+                       keys    = sorted(payload.keys()),
+                       preview = preview)
 
 def _parse_store_metadata_from_path(path: Path, *, fallback_classify: ClassificationSpec | None = None) -> dict[str, Any]:
-    out: dict[str, Any] = {
-        "ice_type": None,
-        "grid_type": None,
-        "ispd_thresh": None,
-        "aice_thresh": getattr(fallback_classify, "aice_thresh", None),
-        "bin_window": None,
-        "bin_min_days": None,
-        "roll_window": None,
-    }
-
+    out: dict[str, Any] = {"ice_type": None,
+                           "grid_type": None,
+                           "ispd_thresh": None,
+                           "aice_thresh": getattr(fallback_classify, "aice_thresh", None),
+                           "bin_window": None,
+                           "bin_min_days": None,
+                           "roll_window": None}
     parts = path.parts
     for i, token in enumerate(parts):
         m = _THRESH_RE.match(token)
@@ -266,7 +225,6 @@ def _parse_store_metadata_from_path(path: Path, *, fallback_classify: Classifica
                 out["ice_type"] = parts[i + 1]
                 out["grid_type"] = parts[i + 2]
             break
-
     method_dir = path.parent.name
     if method_dir == "raw":
         return out
@@ -280,27 +238,22 @@ def _parse_store_metadata_from_path(path: Path, *, fallback_classify: Classifica
         out["roll_window"] = int(m_roll.group(1))
     return out
 
-
 def _metrics_health(metrics_store: Path) -> StoreHealth:
     expected = ["FIP", "FIPSI", "FIA", "FIT", "FIV"]
     try:
         ds = xr.open_zarr(metrics_store, consolidated=False)
     except Exception as e:
         return StoreHealth(status="broken", reasons=[f"open failed: {e}"])
-
     present = [v for v in expected if v in ds.data_vars or v in ds.coords]
     missing = [v for v in expected if v not in present]
     reasons: list[str] = []
     status = "healthy"
-
     if missing:
         status = "warning"
         reasons.append(f"missing expected variables: {', '.join(missing)}")
-
     if "time" in ds.coords and int(ds.sizes.get("time", 0)) == 0:
         status = "broken"
         reasons.append("time dimension exists but has length 0")
-
     for var in [v for v in ["FIP", "FIA", "FIT", "FIV"] if v in ds.data_vars]:
         try:
             all_nan = bool(ds[var].isnull().all().item())
@@ -309,23 +262,17 @@ def _metrics_health(metrics_store: Path) -> StoreHealth:
         if all_nan:
             status = "warning" if status != "broken" else status
             reasons.append(f"{var} is entirely NaN")
-
-    return StoreHealth(
-        status=status,
-        reasons=reasons,
-        variables_present=present,
-        variables_missing=missing,
-    )
-
+    return StoreHealth(status=status,
+                       reasons=reasons,
+                       variables_present=present,
+                       variables_missing=missing)
 
 def _discover_classifications(paths: ShugaPaths, classify: ClassificationSpec | None = None, logger=None) -> list[ClassificationStatus]:
     hemi_root = paths.zarr_root / paths.hemisphere
     if not hemi_root.exists():
         return []
-
     statuses: list[ClassificationStatus] = []
     seen: set[tuple[str, str, str]] = set()
-
     for thresh_dir in sorted(p for p in hemi_root.iterdir() if p.is_dir() and _THRESH_RE.match(p.name)):
         for ice_type_dir in sorted(p for p in thresh_dir.iterdir() if p.is_dir()):
             for grid_dir in sorted(p for p in ice_type_dir.iterdir() if p.is_dir()):
@@ -333,7 +280,6 @@ def _discover_classifications(paths: ShugaPaths, classify: ClassificationSpec | 
                     class_store = method_dir / "data.zarr"
                     if not class_store.exists():
                         continue
-
                     method_name: str | None = None
                     if method_dir.name == "raw":
                         method_name = "raw"
@@ -343,17 +289,14 @@ def _discover_classifications(paths: ShugaPaths, classify: ClassificationSpec | 
                         method_name = "rolling-mean"
                     if method_name is None:
                         continue
-
                     key = (grid_dir.name, method_dir.name, str(class_store))
                     if key in seen:
                         continue
                     seen.add(key)
-
                     meta = _parse_store_metadata_from_path(class_store, fallback_classify=classify)
                     coverage = _maybe_open_time_coverage(class_store)
                     metrics_store = method_dir / "mets.zarr"
                     health = _metrics_health(metrics_store) if metrics_store.exists() else None
-
                     statuses.append(
                         ClassificationStatus(
                             method=normalize_method(method_name),
@@ -371,7 +314,6 @@ def _discover_classifications(paths: ShugaPaths, classify: ClassificationSpec | 
                             metrics_health=health,
                         )
                     )
-
     statuses.sort(key=lambda x: (x.grid_type, x.method, x.ispd_thresh or ""))
     return statuses
 

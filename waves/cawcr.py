@@ -813,7 +813,7 @@ class CAWCRRegridder:
                             efreq_masked_chunk    : xr.DataArray,          # time, nj, ni, frequency
                             sic_hourly_chunk      : xr.DataArray,          # time, nj, ni
                             open_water_mask_chunk : xr.DataArray,          # time, nj, ni
-                            dwavefreq             : xr.DataArray) -> None  # nfreq
+                            dwavefreq             : xr.DataArray) -> None:  # nfreq
         nfreq_index        = np.arange(efreq_unmasked_chunk.sizes["frequency"], dtype=np.int32)
         efreq_unmasked_out = (efreq_unmasked_chunk
                               .transpose("time", "frequency", "nj", "ni")
@@ -1145,5 +1145,5 @@ class CAWCRRegridder:
                 nc.sync()
         self._log(f"Wrote {out}")
         return out
-    
+
 

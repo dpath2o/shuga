@@ -326,6 +326,7 @@ class CICEMetrics:
                                                            classification = norm,
                                                            dt0_str        = self.run.start_date,
                                                            dtN_str        = self.run.end_date,
+                                                           variables      = "FI_mask",
                                                            hemisphere     = self.run.hemisphere,
                                                            chunks         = self.chunks)
         return self._classified_cache[norm]

@@ -19,7 +19,9 @@ from .grid.lateral_drag    import FormFactors
 from .waves.cawcr          import CAWCRRegridConfig, CAWCRRegridder
 from .plotting             import CICEPlotter
 from .observations         import SeaIceObservations
-__all__     = ["RunSpec",
+from .core.reporting       import report_sim_status
+__all__     = [# configurations
+               "RunSpec",
                "ClassificationSpec",
                "MetricsSpec",
                "PlottingSpec",
@@ -28,11 +30,7 @@ __all__     = ["RunSpec",
                "WaveForcingSpec",
                "LateralDragSpec",
                "ShugaPaths",
-               "build_file_logger",
-               "load_cice",
-               "load_classified",
-               "load_metrics",
-               "open_cice_history",
+               # classes
                "CICEStoreLocator",
                "CICEClassifier",
                "CICEMetrics",
@@ -41,5 +39,12 @@ __all__     = ["RunSpec",
                "CAWCRRegridConfig",
                "CAWCRRegridder",
                "CICEPlotter",
-               "SeaIceObservations"]
+               "SeaIceObservations",
+               # methods / functions
+               "build_file_logger",
+               "load_cice",
+               "load_classified",
+               "load_metrics",
+               "open_cice_history",
+               "report_sim_status"]
 __version__ = "0.1.3"

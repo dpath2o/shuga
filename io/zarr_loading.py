@@ -462,6 +462,7 @@ def load_classified(run                 : RunSpec | None = None,
                     sim_name            : str | None = None,
                     dt0_str             : str | None = None,
                     dtN_str             : str | None = None,
+                    variables                        = None,
                     hemisphere          : str | None = None,
                     project             : str | None = None,
                     user                : str | None = None,
@@ -560,36 +561,40 @@ def load_classified(run                 : RunSpec | None = None,
                                                                      hemisphere = hemisphere,
                                                                      project    = project,
                                                                      user       = user)
-    grid_type_eff = (grid_type_map or {}).get(run_eff.sim_name, grid_type)
-    classify_eff  = _resolve_classify_context(classify or (paths.classify if paths is not None else None),
-                                             classification = classification,
-                                             grid_type      = grid_type_eff,
-                                             ice_type       = ice_type,
-                                             ispd_thresh    = ispd_thresh,
-                                             bin_window     = bin_window,
-                                             bin_min_days   = bin_min_days,
-                                             roll_window    = roll_window)
-    paths_eff     = _build_paths(run                 = run_eff,
-                                 classify            = classify_eff,
-                                 metrics             = metrics,
-                                 plotting            = plotting,
-                                 observations        = observations,
-                                 paths               = paths,
-                                 afim_output_root    = afim_output_root,
-                                 classification_root = classification_root)
-    resolved      = _resolve_class_store_path(paths_eff, classify_eff,
-                                              classification = classification,
-                                              grid_type      = grid_type_eff,
-                                              store_name     = "data.zarr")
+    variables_list = _maybe_listify_variables(variables)
+    grid_type_eff  = (grid_type_map or {}).get(run_eff.sim_name, grid_type)
+    classify_eff   = _resolve_classify_context(classify or (paths.classify if paths is not None else None),
+                                               classification = classification,
+                                               grid_type      = grid_type_eff,
+                                               ice_type       = ice_type,
+                                               ispd_thresh    = ispd_thresh,
+                                               bin_window     = bin_window,
+                                               bin_min_days   = bin_min_days,
+                                               roll_window    = roll_window)
+    paths_eff      = _build_paths(run                 = run_eff,
+                                  classify            = classify_eff,
+                                  metrics             = metrics,
+                                  plotting            = plotting,
+                                  observations        = observations,
+                                  paths               = paths,
+                                  afim_output_root    = afim_output_root,
+                                  classification_root = classification_root)
+    resolved       = _resolve_class_store_path(paths_eff, classify_eff,
+                                               classification = classification,
+                                               grid_type      = grid_type_eff,
+                                               store_name     = "data.zarr")
     LOGGER.info("Opening classified store for %s [%s/%s]: %s", run_eff.sim_name, resolved["grid_type"], resolved["classification"], resolved["path"])
     ds = xr.open_zarr(resolved["path"], consolidated=False, chunks=chunks)
-    if "FI_mask" in ds.data_vars:
-        ds = ds[["FI_mask"]]
-    elif len(ds.data_vars) == 1:
+    if "FI_mask" not in ds.data_vars and len(ds.data_vars) == 1:
         only = next(iter(ds.data_vars))
-        ds = ds[[only]].rename({only: "FI_mask"})
-    else:
+        ds = ds.rename({only: "FI_mask"})
+    if "FI_mask" not in ds.data_vars:
         raise KeyError(f"Could not find FI_mask in {resolved['path']}. Data variables: {list(ds.data_vars)}")
+    if variables_list is not None:
+        keep = [v for v in variables_list if v in ds.data_vars or v in ds.coords]
+        if not keep:
+            raise ValueError(f"None of the requested classified variables were found in {resolved['path']}: {variables_list}")
+        ds = ds[keep]
     ds = _apply_hemisphere_mask(ds, hemisphere_eff)
     ds = _slice_time(ds, dt0_eff, dtN_eff)
     if return_resolved:
