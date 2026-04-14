@@ -26,6 +26,7 @@ class ShugaPaths:
     # cice_store          : str | Path | None      = None
     # static_store        : str | Path | None      = None
     # classification_root : str | Path | None      = None
+    # archive_root        : str | Path | None      = None
     run: RunSpec
     classify: ClassificationSpec
     metrics: MetricsSpec | None = None
@@ -40,6 +41,7 @@ class ShugaPaths:
     cice_store: str | Path | None = None
     static_store: str | Path | None = None
     classification_root: str | Path | None = None
+    archive_root: str | Path | None = None
 
     @staticmethod
     def canonical_hemisphere(value: str) -> str:
@@ -71,6 +73,12 @@ class ShugaPaths:
         return self.output_root / "zarr"
 
     @property
+    def archive_root_path(self) -> Path:
+        if self.archive_root is not None:
+            return Path(self.archive_root).expanduser()
+        return Path.home() / "AFIM_archive" / self.run.sim_name
+
+    @property
     def classification_root_path(self) -> Path:
         if self.classification_root is not None:
             return Path(self.classification_root).expanduser()
@@ -99,14 +107,37 @@ class ShugaPaths:
             return Path(obs.seaice_root).expanduser()
         return Path(f"/g/data/{self.run.project}/{self.run.user}/SeaIce")
 
-    def resolve_cice_store(self) -> Path:
-        if self.cice_store is not None:
-            path = Path(self.cice_store).expanduser()
+    def resolve_daily_iceh_root(self, daily_root: str | Path | None = None) -> Path:
+        if daily_root is not None:
+            path = Path(daily_root).expanduser()
             if not path.exists():
-                raise FileNotFoundError(f"Explicit CICE store does not exist: {path}")
+                raise FileNotFoundError(f"Explicit daily CICE NetCDF root does not exist: {path}")
             return path
-        candidates = [self.zarr_root / "iceh_daily.zarr",
-                      self.zarr_root / "history" / "iceh_daily.zarr"]
+        candidates = [self.archive_root_path / "history" / "daily",
+                      self.output_root / "history" / "daily"]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        raise FileNotFoundError("Could not infer daily CICE NetCDF root from the default AFIM layout. "
+                                f"Tried: {', '.join(str(c) for c in candidates)}")
+
+    def resolve_cice_store_target(self) -> Path:
+        if self.cice_store is not None:
+            return Path(self.cice_store).expanduser()
+        return self.zarr_root / "iceh_daily.zarr"
+
+    def resolve_static_store_target(self) -> Path:
+        if self.static_store is not None:
+            return Path(self.static_store).expanduser()
+        return self.zarr_root / "iceh_static.zarr"
+
+    def resolve_cice_store(self) -> Path:
+        candidates = []
+        if self.cice_store is not None:
+            candidates.append(Path(self.cice_store).expanduser())
+        else:
+            candidates.extend([self.zarr_root / "iceh_daily.zarr",
+                               self.zarr_root / "history" / "iceh_daily.zarr"])
         for candidate in candidates:
             if candidate.exists():
                 return candidate
@@ -114,13 +145,12 @@ class ShugaPaths:
                                 f"Tried: {', '.join(str(c) for c in candidates)}")
 
     def resolve_static_store(self) -> Path | None:
+        candidates = []
         if self.static_store is not None:
-            path = Path(self.static_store).expanduser()
-            if not path.exists():
-                raise FileNotFoundError(f"Explicit static store does not exist: {path}")
-            return path
-        candidates = [self.zarr_root / "iceh_static.zarr",
-                      self.zarr_root / "static" / "iceh_static.zarr"]
+            candidates.append(Path(self.static_store).expanduser())
+        else:
+            candidates.extend([self.zarr_root / "iceh_static.zarr",
+                               self.zarr_root / "static" / "iceh_static.zarr"])
         for candidate in candidates:
             if candidate.exists():
                 return candidate

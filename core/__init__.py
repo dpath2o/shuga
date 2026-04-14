@@ -4,6 +4,7 @@ from .regions import ANTARCTIC_8_REGIONS
 from .naming import normalize_method, threshold_tag_dir, threshold_tag_compact, method_dirname
 from .logging import build_file_logger
 from .reporting import report_sim_status, SimulationStatusReport
+from .data_conversion import NC2Zarr
 
 __all__ = ["RunSpec",
            "ClassificationSpec",
@@ -21,4 +22,5 @@ __all__ = ["RunSpec",
            "method_dirname",
            "build_file_logger",
            "report_sim_status",
-           "SimulationStatusReport"]
+           "SimulationStatusReport",
+           "NC2Zarr"]

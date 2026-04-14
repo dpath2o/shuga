@@ -12,6 +12,7 @@ from shuga              import (ClassificationSpec,
                                 CICEClassifier,
                                 RunSpec,
                                 ShugaPaths)
+from shuga.core.data_conversion import NC2Zarr
 from shuga.core.logging import build_file_logger
 from shuga.core.naming  import normalize_method
 
@@ -41,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--classification-root", default=None)
     p.add_argument("--afim-output-root", default=None)
     p.add_argument("--logs-root", default=None)
+    p.add_argument("--archive-root", default=None)
+    p.add_argument("--daily-root", default=None)
+    p.add_argument("--netcdf-engine", default="scipy")
+    p.add_argument("--overwrite-history", action="store_true")
+    p.add_argument("--overwrite-static", action="store_true")
+    p.add_argument("--delete-original", action="store_true")
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
@@ -68,15 +75,24 @@ def main() -> None:
                               cice_store          = args.cice_store,
                               static_store        = args.static_store,
                               classification_root = args.classification_root,
-                              logs_root           = args.logs_root)
+                              logs_root           = args.logs_root,
+                              archive_root        = args.archive_root)
     logger = build_file_logger("shuga.classify", paths.classification_log_path(), level=args.log_level)
     logger.info("Logging to: %s", paths.classification_log_path())
-    logger.info("Resolved CICE store: %s", paths.resolve_cice_store())
-    static_store = paths.resolve_static_store()
-    if static_store is not None:
-        logger.info("Resolved static store: %s", static_store)
+    converter = NC2Zarr(paths=paths, logger=logger, netcdf_engine=args.netcdf_engine)
+    conv      = converter.ensure_iceh_stores(dt0_str          = args.start_date,
+                                             dtN_str          = args.end_date,
+                                             daily_root       = args.daily_root,
+                                             overwrite        = args.overwrite_history,
+                                             overwrite_static = args.overwrite_static,
+                                             delete_original  = args.delete_original )
+    logger.info("Resolved/updated CICE store: %s", conv.cice_store)
+    if conv.static_store is not None:
+        logger.info("Resolved/updated static store: %s", conv.static_store)
+    logger.info("nc2zarr summary: months_scanned=%d months_written=%d months_rewritten=%d months_skipped=%d daily_files_seen=%d daily_files_used=%d",
+                conv.months_scanned, conv.months_written, conv.months_rewritten, conv.months_skipped, conv.daily_files_seen, conv.daily_files_used)
     logger.info("Resolved classification root: %s", paths.classification_root_path)
-    runner = CICEClassifier(run=run, classify=classify, paths=paths, logger=logger)
+    runner  = CICEClassifier(run=run, classify=classify, paths=paths, logger=logger)
     outputs = runner.run_methods(methods=methods, overwrite=args.overwrite)
     for method, path in outputs.items():
         logger.info("Wrote %s classification: %s", method, path)
