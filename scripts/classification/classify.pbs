@@ -25,6 +25,13 @@ BIN_WINDOW="${BIN_WINDOW:-11}"
 BIN_MIN_DAYS="${BIN_MIN_DAYS:-9}"
 ROLL_WINDOW="${ROLL_WINDOW:-15}"
 OVERWRITE="${OVERWRITE:-false}"
+GRID_FILE="${GRID_FILE:-}"
+KMT_FILE="${KMT_FILE:-}"
+BATHYMETRY_FILE="${BATHYMETRY_FILE:-}"
+F2_FILE="${F2_FILE:-}"
+GRIDCPL_FILE="${GRIDCPL_FILE:-}"
+ICE_IN_FILE="${ICE_IN_FILE:-}"
+PERSIST_GRID_ASSETS="${PERSIST_GRID_ASSETS:-false}"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 METHODS="${METHODS//|/,}"
 REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest/shuga}"
@@ -52,6 +59,13 @@ CMD=(python "$PY_SCRIPT"
 [[ -n "${STATIC_STORE:-}" ]] && CMD+=(--static-store "$STATIC_STORE")
 [[ -n "${CLASSIFICATION_ROOT:-}" ]] && CMD+=(--classification-root "$CLASSIFICATION_ROOT")
 [[ -n "${AFIM_OUTPUT_ROOT:-}" ]] && CMD+=(--afim-output-root "$AFIM_OUTPUT_ROOT")
+[[ -n "${GRID_FILE:-}" ]] && CMD+=(--grid-file "$GRID_FILE")
+[[ -n "${KMT_FILE:-}" ]] && CMD+=(--kmt-file "$KMT_FILE")
+[[ -n "${BATHYMETRY_FILE:-}" ]] && CMD+=(--bathymetry-file "$BATHYMETRY_FILE")
+[[ -n "${F2_FILE:-}" ]] && CMD+=(--f2-file "$F2_FILE")
+[[ -n "${GRIDCPL_FILE:-}" ]] && CMD+=(--gridcpl-file "$GRIDCPL_FILE")
+[[ -n "${ICE_IN_FILE:-}" ]] && CMD+=(--ice-in-file "$ICE_IN_FILE")
+[[ "${PERSIST_GRID_ASSETS:-false}" == "true" ]] && CMD+=(--persist-grid-assets)
 [[ -n "${LOGS_ROOT:-}" ]] && CMD+=(--logs-root "$LOGS_ROOT")
 [[ "${OVERWRITE:-false}" == "true" ]] && CMD+=(--overwrite)
 echo "Running: ${CMD[*]}"

@@ -11,6 +11,7 @@ if str(repo_root) not in sys.path:
 from shuga              import (ClassificationSpec,
                                 CICEClassifier,
                                 RunSpec,
+                                CICEGridSpec,
                                 ShugaPaths)
 from shuga.core.data_conversion import NC2Zarr
 from shuga.core.logging import build_file_logger
@@ -37,6 +38,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bin-min-days", type=int, default=9)
     p.add_argument("--roll-window", type=int, default=15)
     p.add_argument("--aice-thresh", type=float, default=0.15)
+    p.add_argument("--grid-file", default=None)
+    p.add_argument("--kmt-file", default=None)
+    p.add_argument("--bathymetry-file", default=None)
+    p.add_argument("--f2-file", default=None)
+    p.add_argument("--gridcpl-file", default=None)
+    p.add_argument("--ice-in-file", default=None)
+    p.add_argument("--persist-grid-assets", action="store_true")
     p.add_argument("--cice-store", default=None)
     p.add_argument("--static-store", default=None)
     p.add_argument("--classification-root", default=None)
@@ -69,16 +77,40 @@ def main() -> None:
                                       bin_window   = args.bin_window,
                                       bin_min_days = args.bin_min_days,
                                       roll_window  = args.roll_window)
+    cice_grid    = CICEGridSpec(grid_file       = args.grid_file,
+                                kmt_file        = args.kmt_file,
+                                bathymetry_file = args.bathymetry_file,
+                                f2_file         = args.f2_file,
+                                gridcpl_file    = args.gridcpl_file,
+                                ice_in_file     = args.ice_in_file)
     paths        = ShugaPaths(run                 = run,
                               classify            = classify,
                               afim_output_root    = args.afim_output_root,
                               cice_store          = args.cice_store,
                               static_store        = args.static_store,
+                              cice_grid           = cice_grid,
                               classification_root = args.classification_root,
                               logs_root           = args.logs_root,
                               archive_root        = args.archive_root)
     logger = build_file_logger("shuga.classify", paths.classification_log_path(), level=args.log_level)
     logger.info("Logging to: %s", paths.classification_log_path())
+    has_explicit_grid_assets = any(v is not None for v in (args.grid_file,
+                                                           args.kmt_file,
+                                                           args.bathymetry_file,
+                                                           args.f2_file,
+                                                           args.gridcpl_file,
+                                                           args.ice_in_file))
+    if args.persist_grid_assets and has_explicit_grid_assets:
+        cfg = paths.persist_cice_grid_assets(grid_spec=cice_grid, overwrite=True)
+        logger.info("Persisted CICE grid assets: %s", cfg)
+    elif args.persist_grid_assets:
+        logger.warning("--persist-grid-assets requested but no explicit grid assets were provided; "
+                       "leaving any existing config unchanged.")
+    grid_assets = paths.resolve_cice_grid_assets()
+    if grid_assets is None:
+        raise RuntimeError("resolve_cice_grid_assets() returned None")
+    logger.info("Resolved CICE grid file: %s", grid_assets["grid_file"])
+    logger.info("Resolved CICE KMT file : %s", grid_assets["kmt_file"])
     converter = NC2Zarr(paths=paths, logger=logger, netcdf_engine=args.netcdf_engine)
     conv      = converter.ensure_iceh_stores(dt0_str          = args.start_date,
                                              dtN_str          = args.end_date,

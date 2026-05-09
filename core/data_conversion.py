@@ -17,9 +17,10 @@ from .paths import ShugaPaths
 
 __all__ = ["NC2Zarr", "NC2ZarrResult"]
 
-_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.nc$")
-
+_MONTH_RE       = re.compile(r"^\d{4}-\d{2}$")
+_DATE_RE        = re.compile(r"(\d{4}-\d{2}-\d{2})\.nc$")
+_HOURLY_FILE_RE = re.compile(r"^iceh(?:_inst)?\.(\d{4}-\d{2}-\d{2})-(\d{5})\.nc$")
+_DAY_GROUP_RE   = re.compile(r"^\d{4}_\d{2}_\d{2}$")
 
 @dataclass(slots=True)
 class NC2ZarrResult:
@@ -43,15 +44,11 @@ class NC2Zarr:
     intended to be merged back in at read time by ``shuga.io.zarr_loading``.
     """
 
-    def __init__(
-        self,
-        paths: ShugaPaths,
-        *,
-        logger: logging.Logger | None = None,
-        chunks: dict | None = None,
-        netcdf_engine: str = "scipy",
-    ) -> None:
-        self.paths = paths
+    def __init__(self, paths: ShugaPaths, *,
+                 logger       : logging.Logger | None = None,
+                 chunks       : dict           | None = None,
+                 netcdf_engine:                   str = "scipy") -> None:
+        self.paths  = paths
         self.logger = logger or logging.getLogger(__name__)
         self.chunks = chunks
         self.netcdf_engine = netcdf_engine
@@ -59,51 +56,167 @@ class NC2Zarr:
     # ------------------------------------------------------------------
     # public API
     # ------------------------------------------------------------------
-    def ensure_iceh_stores(
-        self,
-        *,
-        dt0_str: str | None = None,
-        dtN_str: str | None = None,
-        daily_root: str | Path | None = None,
-        overwrite: bool = False,
-        overwrite_static: bool = False,
-        delete_original: bool = False,
-        netcdf_engine: str | None = None,
-    ) -> NC2ZarrResult:
-        """
-        Ensure both ``iceh_daily.zarr`` and ``iceh_static.zarr`` exist and are
-        updated from the available daily NetCDF files.
-        """
-        result = self.daily_iceh_to_monthly_zarr(
-            dt0_str=dt0_str,
-            dtN_str=dtN_str,
-            daily_root=daily_root,
-            overwrite=overwrite,
-            delete_original=delete_original,
-            netcdf_engine=netcdf_engine,
-            overwrite_static=overwrite_static,
-        )
+    def ensure_iceh_stores(self, *,
+                           dt0_str         : str | None = None,
+                           dtN_str         : str | None = None,
+                           daily_root      : str | Path | None = None,
+                           hourly_root     : str | Path | None = None,
+                           overwrite       : bool = False,
+                           overwrite_static: bool = False,
+                           delete_original : bool = False,
+                           netcdf_engine   : str | None = None) -> NC2ZarrResult:
+        freq = str(getattr(self.paths.run, "iceh_frequency", "daily")).lower()
+        if freq == "hourly":
+            result = self.hourly_iceh_to_daily_zarr(dt0_str          = dt0_str,
+                                                    dtN_str          = dtN_str,
+                                                    hourly_root      = hourly_root,
+                                                    overwrite        = overwrite,
+                                                    delete_original  = delete_original,
+                                                    netcdf_engine    = netcdf_engine,
+                                                    overwrite_static = overwrite_static)
+        else:
+            result = self.daily_iceh_to_monthly_zarr(dt0_str          = dt0_str,
+                                                     dtN_str          = dtN_str,
+                                                     hourly_root      = hourly_root,
+                                                     overwrite        = overwrite,
+                                                     delete_original  = delete_original,
+                                                     netcdf_engine    = netcdf_engine,
+                                                     overwrite_static = overwrite_static)
         if result.static_store is None or not result.static_store.exists():
-            static_store = self.ensure_iceh_static_store(
-                dt0_str=dt0_str,
-                dtN_str=dtN_str,
-                daily_root=daily_root,
-                overwrite=overwrite_static,
-            )
+            static_store = self.ensure_iceh_static_store(dt0_str    = dt0_str,
+                                                         dtN_str    = dtN_str,
+                                                         daily_root = daily_root,
+                                                         overwrite  = overwrite_static)
             result.static_store = static_store
         return result
 
-    def daily_iceh_to_monthly_zarr(
-        self,
-        *,
-        dt0_str: str | None = None,
-        dtN_str: str | None = None,
-        daily_root: str | Path | None = None,
-        overwrite: bool = False,
-        delete_original: bool = False,
-        netcdf_engine: str | None = None,
-        overwrite_static: bool = False,
-    ) -> NC2ZarrResult:
+    def hourly_iceh_to_daily_zarr(self, *,
+                                  dt0_str          : str | None = None,
+                                  dtN_str          : str | None = None,
+                                  hourly_root      : str | Path | None = None,
+                                  overwrite        : bool = False,
+                                  delete_original  : bool = False,
+                                  netcdf_engine    : str | None = None,
+                                  overwrite_static : bool = False) -> NC2ZarrResult:
+        """
+        Convert instantaneous hourly CICE files like
+
+            iceh_inst.YYYY-MM-DD-SSSSS.nc
+
+        into grouped daily Zarr:
+
+            iceh_hourly.zarr/YYYY_MM_DD
+
+        Unlike daily averaged CICE output, instantaneous hourly output is not
+        shifted back by one day.
+        """
+        engine       = netcdf_engine or self.netcdf_engine
+        hourly_dir   = self.paths.resolve_hourly_iceh_root(hourly_root)
+        cice_store   = self.paths.resolve_cice_store_target()
+        static_store = self.paths.resolve_static_store_target()
+        result       = NC2ZarrResult(cice_store=cice_store, static_store=static_store)
+        cice_store.mkdir(parents=True, exist_ok=True)
+        source_files = self._select_hourly_files_between_dates(hourly_dir, dt0_str, dtN_str)
+        result.daily_files_seen = len(source_files)
+        if not source_files:
+            self.logger.info("No CICE hourly NetCDF files found in %s for [%s, %s]", hourly_dir, dt0_str, dtN_str)
+            return result
+        day_groups = self._group_hourly_files_by_day(source_files)
+        result.months_scanned = len(day_groups)
+        result.daily_files_used = sum(len(v) for v in day_groups.values())
+        for day, files in sorted(day_groups.items()):
+            needs_rewrite, reason = self._month_needs_rewrite(cice_store   = cice_store,
+                                                              month        = day,
+                                                              source_files = files,
+                                                              overwrite    = overwrite)
+            if not needs_rewrite:
+                result.months_skipped += 1
+                self.logger.info("[%s] skipping grouped hourly day (%s)", day, reason)
+                if delete_original:
+                    self._delete_source_files(files)
+                continue
+            if reason == "overwrite requested" or (cice_store / day).exists():
+                result.months_rewritten += int((cice_store / day).exists())
+            else:
+                result.months_written += 1
+            self.logger.info("[%s] opening %d hourly NetCDF files with engine=%s", day, len(files), engine)
+            ds_all = xr.open_mfdataset(files,
+                                       engine     = engine,
+                                       parallel   = True,
+                                       combine    = "nested",
+                                       concat_dim ="time",
+                                       coords     = "minimal",
+                                       data_vars  = "minimal",
+                                       compat     = "override",
+                                       join       = "override",
+                                       cache      = False,
+                                       chunks     = self.chunks)
+            if self.chunks:
+                ds_all = ds_all.chunk(self.chunks)
+            if "time" not in ds_all.coords:
+                raise KeyError(f"[{day}] opened hourly dataset does not contain a time coordinate")
+            # Important: hourly files are instantaneous, so no daily-output
+            # timestamp correction is applied here.
+            ds_static_new = self._build_iceh_static_dataset(ds_all, log_missing=True)
+            self._maybe_update_static_store(ds_static_new,
+                                            static_store = static_store,
+                                            overwrite    = overwrite_static,
+                                            context      = f"hourly day {day}")
+            ds_dynamic = self._drop_iceh_static_from_monthly(ds_all)
+            ds_dynamic = self._attach_source_metadata(ds_dynamic, files)
+            self._write_grouped_month(cice_store, day, ds_dynamic)
+            self.logger.info("[%s] wrote grouped hourly Zarr to %s", day, cice_store / day)
+            ds_all.close()
+            if delete_original:
+                self._delete_source_files(files)
+        return result
+
+    def _select_hourly_files_between_dates(self, hourly_dir: Path,
+                                           dt0_str: str | None,
+                                           dtN_str: str | None) -> list[Path]:
+        if not hourly_dir.exists():
+            raise FileNotFoundError(f"Hourly CICE NetCDF directory not found: {hourly_dir}")
+        dt0 = pd.to_datetime(dt0_str) if dt0_str is not None else None
+        dtN = pd.to_datetime(dtN_str) if dtN_str is not None else None
+        files: list[tuple[pd.Timestamp, Path]] = []
+        for path in sorted(hourly_dir.glob("iceh*.nc")):
+            match = _HOURLY_FILE_RE.match(path.name)
+            if not match:
+                continue
+            date_part = match.group(1)
+            sec_part  = int(match.group(2))
+            ts = pd.to_datetime(date_part) + pd.to_timedelta(sec_part, unit="s")
+            if dt0 is not None and ts < dt0:
+                continue
+            # Date-only dtN means keep the whole day.
+            if dtN is not None:
+                dtN_eff = dtN
+                if str(dtN_str).strip() == dtN.strftime("%Y-%m-%d"):
+                    dtN_eff = dtN + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+                if ts > dtN_eff:
+                    continue
+            files.append((ts, path))
+        return [p for _, p in files]
+
+    def _group_hourly_files_by_day(self, files: Iterable[Path]) -> dict[str, list[Path]]:
+        grouped: dict[str, list[Path]] = {}
+        for path in files:
+            match = _HOURLY_FILE_RE.match(path.name)
+            if not match:
+                self.logger.warning("Skipping unrecognised hourly filename: %s", path.name)
+                continue
+            day = pd.to_datetime(match.group(1)).strftime("%Y_%m_%d")
+            grouped.setdefault(day, []).append(path)
+        return grouped
+
+    def daily_iceh_to_monthly_zarr(self, *,
+                                   dt0_str          : str | None = None,
+                                   dtN_str          : str | None = None,
+                                   daily_root       : str | Path | None = None,
+                                   overwrite        : bool = False,
+                                   delete_original  : bool = False,
+                                   netcdf_engine    : str | None = None,
+                                   overwrite_static : bool = False) -> NC2ZarrResult:
         """
         Convert daily CICE ``iceh.YYYY-MM-DD.nc`` files into the grouped monthly
         ``iceh_daily.zarr`` store.
@@ -115,94 +228,73 @@ class NC2Zarr:
         - Existing monthly groups are skipped unless a rewrite is required or
           ``overwrite=True``.
         """
-        engine = netcdf_engine or self.netcdf_engine
-        daily_dir = self.paths.resolve_daily_iceh_root(daily_root)
-        cice_store = self.paths.resolve_cice_store_target()
+        engine       = netcdf_engine or self.netcdf_engine
+        daily_dir    = self.paths.resolve_daily_iceh_root(daily_root)
+        cice_store   = self.paths.resolve_cice_store_target()
         static_store = self.paths.resolve_static_store_target()
-
-        result = NC2ZarrResult(cice_store=cice_store, static_store=static_store)
+        result       = NC2ZarrResult(cice_store=cice_store, static_store=static_store)
         cice_store.mkdir(parents=True, exist_ok=True)
-
         source_files = self._select_daily_files_between_dates(daily_dir, dt0_str, dtN_str)
         result.daily_files_seen = len(source_files)
         if not source_files:
             self.logger.info("No CICE daily NetCDF files found in %s for [%s, %s]", daily_dir, dt0_str, dtN_str)
             return result
-
         month_groups = self._group_files_by_month(source_files)
         result.months_scanned = len(month_groups)
         result.daily_files_used = sum(len(v) for v in month_groups.values())
-
         for month, files in sorted(month_groups.items()):
-            needs_rewrite, reason = self._month_needs_rewrite(
-                cice_store=cice_store,
-                month=month,
-                source_files=files,
-                overwrite=overwrite,
-            )
+            needs_rewrite, reason = self._month_needs_rewrite(cice_store   = cice_store,
+                                                              month        = month,
+                                                              source_files = files,
+                                                              overwrite    = overwrite)
             if not needs_rewrite:
                 result.months_skipped += 1
                 self.logger.info("[%s] skipping grouped month (%s)", month, reason)
                 if delete_original:
                     self._delete_source_files(files)
                 continue
-
             if reason == "overwrite requested" or (cice_store / month).exists():
                 result.months_rewritten += int((cice_store / month).exists())
             else:
                 result.months_written += 1
-
             self.logger.info("[%s] opening %d NetCDF files with engine=%s", month, len(files), engine)
-            ds_all = xr.open_mfdataset(
-                files,
-                engine=engine,
-                parallel=True,
-                combine="nested",
-                concat_dim="time",
-                coords="minimal",
-                data_vars="minimal",
-                compat="override",
-                join="override",
-                cache=False,
-                chunks=self.chunks,
-            )
+            ds_all = xr.open_mfdataset(files,
+                                       engine     = engine,
+                                       parallel   = True,
+                                       combine    = "nested",
+                                       concat_dim = "time",
+                                       coords     = "minimal",
+                                       data_vars  = "minimal",
+                                       compat     = "override",
+                                       join       = "override",
+                                       cache      = False,
+                                       chunks     = self.chunks)
             if self.chunks:
                 ds_all = ds_all.chunk(self.chunks)
-
             if "time" not in ds_all.coords:
                 raise KeyError(f"[{month}] opened dataset does not contain a time coordinate")
-
             self.logger.info("[%s] shifting time coordinate back by one day", month)
             ds_all = ds_all.assign_coords(time=ds_all["time"] - np.timedelta64(1, "D"))
-
             ds_static_new = self._build_iceh_static_dataset(ds_all, log_missing=True)
-            self._maybe_update_static_store(
-                ds_static_new,
-                static_store=static_store,
-                overwrite=overwrite_static,
-                context=f"month {month}",
-            )
-
+            self._maybe_update_static_store(ds_static_new,
+                                            static_store = static_store,
+                                            overwrite    = overwrite_static,
+                                            context      = f"month {month}")
             ds_dynamic = self._drop_iceh_static_from_monthly(ds_all)
             ds_dynamic = self._attach_source_metadata(ds_dynamic, files)
             self._write_grouped_month(cice_store, month, ds_dynamic)
             self.logger.info("[%s] wrote grouped dynamic Zarr to %s", month, cice_store / month)
-
             ds_all.close()
             if delete_original:
                 self._delete_source_files(files)
-
         return result
 
-    def ensure_iceh_static_store(
-        self,
-        *,
-        dt0_str: str | None = None,
-        dtN_str: str | None = None,
-        daily_root: str | Path | None = None,
-        overwrite: bool = False,
-        verify_all_groups: bool = True,
-    ) -> Path | None:
+    def ensure_iceh_static_store(self, *,
+                                 dt0_str          : str | None = None,
+                                 dtN_str          : str | None = None,
+                                 daily_root       : str | Path | None = None,
+                                 overwrite        : bool = False,
+                                 verify_all_groups: bool = True) -> Path | None:
         """
         Ensure ``iceh_static.zarr`` exists.
 
@@ -218,25 +310,20 @@ class NC2Zarr:
         if static_store.exists() and overwrite:
             self.logger.info("Overwriting static store: %s", static_store)
             shutil.rmtree(static_store)
-
         cice_store = self.paths.resolve_cice_store_target()
         if cice_store.exists():
-            built = self.build_iceh_static_zarr_from_grouped_daily(
-                cice_store=cice_store,
-                static_store=static_store,
-                overwrite=False,
-                verify_all_groups=verify_all_groups,
-                allow_empty_fallback=True,
-            )
+            built = self.build_iceh_static_zarr_from_grouped_daily(cice_store           = cice_store,
+                                                                   static_store         = static_store,
+                                                                   overwrite            = False,
+                                                                   verify_all_groups    = verify_all_groups,
+                                                                   allow_empty_fallback = True)
             if built is not None and built.exists():
                 return built
-
         daily_dir = self.paths.resolve_daily_iceh_root(daily_root)
         source_files = self._select_daily_files_between_dates(daily_dir, dt0_str, dtN_str)
         if not source_files:
             self.logger.warning("No daily NetCDF files available to build %s", static_store)
             return None
-
         self.logger.info("Building %s from first available daily file %s", static_store, source_files[0])
         ds = xr.open_dataset(source_files[0], engine=self.netcdf_engine)
         try:
@@ -250,36 +337,29 @@ class NC2Zarr:
         finally:
             ds.close()
 
-    def build_iceh_static_zarr_from_grouped_daily(
-        self,
-        *,
-        cice_store: str | Path | None = None,
-        static_store: str | Path | None = None,
-        overwrite: bool = False,
-        verify_all_groups: bool = True,
-        allow_empty_fallback: bool = False,
-    ) -> Path | None:
+    def build_iceh_static_zarr_from_grouped_daily(self, *,
+                                                  cice_store: str | Path | None = None,
+                                                  static_store: str | Path | None = None,
+                                                  overwrite: bool = False,
+                                                  verify_all_groups: bool = True,
+                                                  allow_empty_fallback: bool = False) -> Path | None:
         """
         Build ``iceh_static.zarr`` from an existing grouped ``iceh_daily.zarr``
         root if those monthly groups still contain static fields.
         """
         cice_store = Path(cice_store).expanduser() if cice_store is not None else self.paths.resolve_cice_store_target()
         static_store = Path(static_store).expanduser() if static_store is not None else self.paths.resolve_static_store_target()
-
         if not cice_store.exists():
             raise FileNotFoundError(f"Grouped CICE store not found: {cice_store}")
-
         groups = sorted(p.name for p in cice_store.iterdir() if p.is_dir() and _MONTH_RE.fullmatch(p.name))
         if not groups:
             raise FileNotFoundError(f"No YYYY-MM groups found under {cice_store}")
-
         if static_store.exists() and not overwrite:
             self.logger.info("Static store already exists, skipping: %s", static_store)
             return static_store
         if static_store.exists() and overwrite:
             self.logger.info("Overwriting existing static store: %s", static_store)
             shutil.rmtree(static_store)
-
         ref_group = groups[0]
         self.logger.info("Building static store from grouped month %s", ref_group)
         ds_ref = xr.open_zarr(cice_store, group=ref_group, consolidated=False)
@@ -290,7 +370,6 @@ class NC2Zarr:
                     self.logger.info("Grouped month %s contains no static content; falling back to daily NetCDF source", ref_group)
                     return None
                 raise ValueError(f"No static content found in grouped month {ref_group}")
-
             if verify_all_groups and len(groups) > 1:
                 self.logger.info("Checking static consistency across %d grouped months", len(groups))
                 for g in groups[1:]:
@@ -301,7 +380,6 @@ class NC2Zarr:
                             self._warn_if_iceh_static_differs(ds_g_static, ds_static, context=f"group {g} vs {ref_group}")
                     finally:
                         ds_g.close()
-
             ds_static = self._prepare_iceh_static_for_write(ds_static)
             static_store.parent.mkdir(parents=True, exist_ok=True)
             ds_static.to_zarr(static_store, mode="w", consolidated=False)
@@ -313,15 +391,11 @@ class NC2Zarr:
     # ------------------------------------------------------------------
     # helpers: discovery / update checks
     # ------------------------------------------------------------------
-    def _select_daily_files_between_dates(
-        self,
-        daily_dir: Path,
-        dt0_str: str | None,
-        dtN_str: str | None,
-    ) -> list[Path]:
+    def _select_daily_files_between_dates(self, daily_dir: Path,
+                                          dt0_str: str | None,
+                                          dtN_str: str | None) -> list[Path]:
         if not daily_dir.exists():
             raise FileNotFoundError(f"Daily CICE NetCDF directory not found: {daily_dir}")
-
         dt0 = pd.to_datetime(dt0_str) if dt0_str is not None else None
         dtN = pd.to_datetime(dtN_str) if dtN_str is not None else None
         files: list[tuple[pd.Timestamp, Path]] = []
@@ -348,34 +422,25 @@ class NC2Zarr:
             grouped.setdefault(month, []).append(path)
         return grouped
 
-    def _month_needs_rewrite(
-        self,
-        *,
-        cice_store: Path,
-        month: str,
-        source_files: list[Path],
-        overwrite: bool,
-    ) -> tuple[bool, str]:
+    def _month_needs_rewrite(self, *, cice_store: Path, month: str,
+                             source_files: list[Path],
+                             overwrite: bool) -> tuple[bool, str]:
         if overwrite:
             return True, "overwrite requested"
-
         group_path = cice_store / month
         if not group_path.exists():
             return True, "group missing"
-
         try:
             ds = xr.open_zarr(cice_store, group=month, consolidated=False)
         except Exception as exc:
             self.logger.warning("[%s] reopening existing group failed; will rewrite (%s)", month, exc)
             return True, f"failed to reopen existing group: {exc}"
-
         try:
             attrs = ds.attrs or {}
             old_sig = attrs.get("_nc2zarr_source_signature")
             new_sig = self._source_signature(source_files)
             if old_sig is not None:
                 return (old_sig != new_sig), ("signature changed" if old_sig != new_sig else "signature match")
-
             expected_count = len(source_files)
             actual_count = int(ds.sizes.get("time", 0))
             if expected_count != actual_count:
@@ -389,13 +454,11 @@ class NC2Zarr:
         return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()
 
     def _attach_source_metadata(self, ds: xr.Dataset, files: list[Path]) -> xr.Dataset:
-        meta = {
-            "_nc2zarr_source_signature": self._source_signature(files),
-            "_nc2zarr_file_count": len(files),
-            "_nc2zarr_first_file": files[0].name,
-            "_nc2zarr_last_file": files[-1].name,
-            "_nc2zarr_source_filenames": json.dumps([p.name for p in files]),
-        }
+        meta = {"_nc2zarr_source_signature": self._source_signature(files),
+                "_nc2zarr_file_count": len(files),
+                "_nc2zarr_first_file": files[0].name,
+                "_nc2zarr_last_file": files[-1].name,
+                "_nc2zarr_source_filenames": json.dumps([p.name for p in files])}
         ds = ds.copy()
         ds.attrs = dict(ds.attrs)
         ds.attrs.update(meta)
@@ -418,23 +481,19 @@ class NC2Zarr:
     # helpers: static extraction / comparison
     # ------------------------------------------------------------------
     def _get_iceh_static_field_names(self, extra_coords=None, extra_vars=None) -> dict[str, list[str]]:
-        default_coords = [
-            "ELAT", "ELON",
-            "NLAT", "NLON",
-            "TLAT", "TLON",
-            "ULAT", "ULON",
-        ]
-        default_vars = [
-            "ANGLE", "ANGLET", "HTE", "HTN", "NCAT",
-            "VGRDa", "VGRDb", "VGRDi", "VGRDs",
-            "blkmask",
-            "dxe", "dxn", "dxt", "dxu",
-            "dye", "dyn", "dyt", "dyu",
-            "earea", "emask",
-            "narea", "nmask",
-            "tarea", "tmask",
-            "uarea", "umask",
-        ]
+        default_coords = ["ELAT", "ELON",
+                          "NLAT", "NLON",
+                          "TLAT", "TLON",
+                          "ULAT", "ULON"]
+        default_vars = ["ANGLE", "ANGLET", "HTE", "HTN", "NCAT",
+                        "VGRDa", "VGRDb", "VGRDi", "VGRDs",
+                        "blkmask",
+                        "dxe", "dxn", "dxt", "dxu",
+                        "dye", "dyn", "dyt", "dyu",
+                        "earea", "emask",
+                        "narea", "nmask",
+                        "tarea", "tmask",
+                        "uarea", "umask"]
         coords = list(dict.fromkeys(default_coords + list(extra_coords or [])))
         vars_ = list(dict.fromkeys(default_vars + list(extra_vars or [])))
         return {"coords": coords, "vars": vars_, "all": coords + vars_}
@@ -442,30 +501,21 @@ class NC2Zarr:
     def _prepare_iceh_static_da(self, da: xr.DataArray, *, name: str | None = None, context: str = "static") -> xr.DataArray:
         da = da.copy()
         if "time" in da.dims:
-            self.logger.warning(
-                "%s: %r unexpectedly has a time dimension; using the first time slice for static handling.",
-                context,
-                name or da.name,
-            )
+            self.logger.warning("%s: %r unexpectedly has a time dimension; using the first time slice for static handling.", context, name or da.name)
             da = da.isel(time=0, drop=True)
         drop_now = [c for c in da.coords if (c == "time" or c == "time_bounds" or c not in da.dims)]
         if drop_now:
             da = da.drop_vars(drop_now, errors="ignore")
         return da
 
-    def _build_iceh_static_dataset(
-        self,
-        ds: xr.Dataset,
-        *,
-        static_coords=None,
-        static_vars=None,
-        log_missing: bool = True,
-    ) -> xr.Dataset:
+    def _build_iceh_static_dataset(self, ds: xr.Dataset, *,
+                                   static_coords=None,
+                                   static_vars=None,
+                                   log_missing: bool = True) -> xr.Dataset:
         names = self._get_iceh_static_field_names(extra_coords=static_coords, extra_vars=static_vars)
         ds_out = xr.Dataset()
         missing_coords: list[str] = []
         missing_vars: list[str] = []
-
         for name in names["coords"]:
             if name in ds.coords:
                 da = ds.coords[name]
@@ -475,7 +525,6 @@ class NC2Zarr:
                 missing_coords.append(name)
                 continue
             ds_out = ds_out.assign_coords({name: self._prepare_iceh_static_da(da, name=name, context="extract-coord")})
-
         for name in names["vars"]:
             if name in ds.variables or name in ds.coords:
                 da = ds[name]
@@ -483,7 +532,6 @@ class NC2Zarr:
                 missing_vars.append(name)
                 continue
             ds_out[name] = self._prepare_iceh_static_da(da, name=name, context="extract-var")
-
         ds_out = ds_out.drop_vars(["time", "time_bounds"], errors="ignore")
         if log_missing:
             if missing_coords:
@@ -517,12 +565,10 @@ class NC2Zarr:
                 continue
             if not in_new and not in_ref:
                 continue
-
             where_new = "coord" if name in ds_new.coords else "data_var"
             where_ref = "coord" if name in ds_ref.coords else "data_var"
             if where_new != where_ref:
                 self.logger.warning("%sstatic name %r changed role: new=%s, on_disk=%s", prefix, name, where_new, where_ref)
-
             da_new = self._prepare_iceh_static_da(ds_new[name], name=name, context="compare-new")
             da_ref = self._prepare_iceh_static_da(ds_ref[name], name=name, context="compare-ref")
             if da_new.dims != da_ref.dims:
@@ -533,7 +579,6 @@ class NC2Zarr:
                 continue
             if da_new.dtype != da_ref.dtype:
                 self.logger.warning("%sstatic name %r dtype differs: new=%s, on_disk=%s", prefix, name, da_new.dtype, da_ref.dtype)
-
             a = np.asarray(da_new.values)
             b = np.asarray(da_ref.values)
             try:
@@ -552,14 +597,7 @@ class NC2Zarr:
             ds_out["time"].attrs.pop("bounds", None)
         return self._strip_unsafe_zarr_encoding(ds_out)
 
-    def _maybe_update_static_store(
-        self,
-        ds_static_new: xr.Dataset,
-        *,
-        static_store: Path,
-        overwrite: bool,
-        context: str,
-    ) -> None:
+    def _maybe_update_static_store(self, ds_static_new: xr.Dataset, *, static_store: Path, overwrite: bool, context: str) -> None:
         if not ds_static_new.data_vars and not ds_static_new.coords:
             self.logger.warning("[%s] extracted empty static dataset; skipping static-store update", context)
             return

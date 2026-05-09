@@ -10,7 +10,6 @@ from .core.types           import (RunSpec,
                                    LateralDragSpec)
 from .core.paths           import ShugaPaths
 from .core.logging         import build_file_logger
-from .io                   import load_cice, load_classified, load_metrics, open_cice_history
 from .io.store_locator     import CICEStoreLocator
 from .classify.cice        import CICEClassifier
 from .metrics.cice         import CICEMetrics
@@ -20,6 +19,7 @@ from .waves.cawcr          import CAWCRRegridConfig, CAWCRRegridder
 from .plotting             import CICEPlotter
 from .observations         import SeaIceObservations
 from .core.reporting       import report_sim_status
+from .io                   import IceHistoryLoader, load_ice_history, load_cice, load_classified, load_metrics, open_cice_history
 __all__     = [# configurations
                "RunSpec",
                "ClassificationSpec",
@@ -32,6 +32,7 @@ __all__     = [# configurations
                "ShugaPaths",
                # classes
                "CICEStoreLocator",
+               "IceHistoryLoader",
                "CICEClassifier",
                "CICEMetrics",
                "CICEGridwork",
@@ -42,6 +43,7 @@ __all__     = [# configurations
                "SeaIceObservations",
                # methods / functions
                "build_file_logger",
+               "load_ice_history",
                "load_cice",
                "load_classified",
                "load_metrics",

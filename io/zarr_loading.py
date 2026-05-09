@@ -10,6 +10,7 @@ from shuga.core.logging import resolve_logger
 from shuga.core.naming  import method_dirname, normalize_method
 from shuga.core.paths   import ShugaPaths
 from shuga.core.types   import ClassificationSpec, MetricsSpec, ObservationSpec, PlottingSpec, RunSpec
+from shuga.io.iceh_loading import IceHistoryLoader
 
 """
 Zarr loading utilities for CICE history, classified fast-ice masks, and
@@ -128,6 +129,7 @@ def _resolve_run_context(run        : RunSpec | None = None, *,
                          dt0_str    : str | None = None,
                          dtN_str    : str | None = None,
                          hemisphere : str | None = None,
+                         iceh_frequency : str | None = None, 
                          project    : str | None = None,
                          user       : str | None = None) -> tuple[RunSpec, str | None, str | None, str | None]:
     LOGGER.info("resolving run context: sim_name, date start/stop, hemisphere, etc.")
@@ -138,6 +140,7 @@ def _resolve_run_context(run        : RunSpec | None = None, *,
         hemisphere_eff = hemisphere or run.hemisphere
         project_eff    = project    or run.project
         user_eff       = user       or run.user
+        iceh_frequency_eff = iceh_frequency or getattr(run, "iceh_frequency", "daily")
     else:
         sim_name_eff   = sim_name
         if sim_name_eff is None:
@@ -147,6 +150,7 @@ def _resolve_run_context(run        : RunSpec | None = None, *,
         hemisphere_eff = hemisphere or _default_value(RunSpec, "hemisphere")
         project_eff    = project    or _default_value(RunSpec, "project")
         user_eff       = user       or _default_value(RunSpec, "user")
+        iceh_frequency_eff = iceh_frequency or _default_value(RunSpec, "iceh_frequency")
     if dt0_eff is not None and dtN_eff is not None and pd.to_datetime(dtN_eff) < pd.to_datetime(dt0_eff):
         raise ValueError(f"dtN_str ({dtN_eff}) must be on or after dt0_str ({dt0_eff}).")
     run_eff = RunSpec(sim_name   = sim_name_eff,
@@ -154,7 +158,8 @@ def _resolve_run_context(run        : RunSpec | None = None, *,
                       end_date   = dtN_eff or "2100-12-31",
                       hemisphere = hemisphere_eff or _default_value(RunSpec, "hemisphere"),
                       project    = project_eff,
-                      user       = user_eff)
+                      user       = user_eff,
+                      iceh_frequency = iceh_frequency_eff)
     return run_eff, dt0_eff, dtN_eff, hemisphere_eff
 
 def _resolve_classify_context(classify       : ClassificationSpec | None = None, *,
@@ -337,6 +342,7 @@ def load_cice(run              : RunSpec | None = None,
               hemisphere       : str | None = None,
               project          : str | None = None,
               user             : str | None = None,
+              iceh_frequency   : str | None = None,
               afim_output_root : str | Path | None = None,
               cice_store       : str | Path | None = None,
               static_store     : str | Path | None = None,
@@ -431,26 +437,36 @@ def load_cice(run              : RunSpec | None = None,
                                 afim_output_root = afim_output_root,
                                 cice_store       = cice_store,
                                 static_store     = static_store)
-    zarr_root    = paths_eff.resolve_cice_store()
-    static_eff   = Path(static_store).expanduser() if static_store is not None else paths_eff.resolve_static_store()
-    dynamic_requested, static_requested = _split_requested_variables(variables_list, static_eff)
-    # If user requested only static variables, allow grouped monthly open to return empty
-    allow_empty_dynamic = variables_list is not None and dynamic_requested is None
-    ds_all = _open_grouped_cice_store(zarr_root,
-                                      dt0_str     = dt0_eff,
-                                      dtN_str     = dtN_eff,
-                                      variables   = dynamic_requested,
-                                      chunks      = chunks,
-                                      allow_empty = allow_empty_dynamic)
-    ds_all = _merge_static(ds_all, static_eff, variables_list)
-    ds_all = _apply_hemisphere_mask(ds_all, hemisphere_eff)
-    # Final subset on merged dataset
-    if variables_list is not None:
-        present = [v for v in variables_list if v in ds_all.data_vars or v in ds_all.coords]
-        if not present:
-            raise ValueError(f"None of the requested variables were found after merging static/dynamic stores: {variables_list}")
-        ds_all = ds_all[present]
-    return ds_all
+    loader = IceHistoryLoader(paths_eff, logger=LOGGER)
+    return loader.load(
+        dt0_str      = dt0_eff,
+        dtN_str      = dtN_eff,
+        variables    = variables,
+        hemisphere   = hemisphere_eff,
+        cice_store   = cice_store,
+        static_store = static_store,
+        chunks       = chunks,
+    )
+    # zarr_root    = paths_eff.resolve_cice_store()
+    # static_eff   = Path(static_store).expanduser() if static_store is not None else paths_eff.resolve_static_store()
+    # dynamic_requested, static_requested = _split_requested_variables(variables_list, static_eff)
+    # # If user requested only static variables, allow grouped monthly open to return empty
+    # allow_empty_dynamic = variables_list is not None and dynamic_requested is None
+    # ds_all = _open_grouped_cice_store(zarr_root,
+    #                                   dt0_str     = dt0_eff,
+    #                                   dtN_str     = dtN_eff,
+    #                                   variables   = dynamic_requested,
+    #                                   chunks      = chunks,
+    #                                   allow_empty = allow_empty_dynamic)
+    # ds_all = _merge_static(ds_all, static_eff, variables_list)
+    # ds_all = _apply_hemisphere_mask(ds_all, hemisphere_eff)
+    # # Final subset on merged dataset
+    # if variables_list is not None:
+    #     present = [v for v in variables_list if v in ds_all.data_vars or v in ds_all.coords]
+    #     if not present:
+    #         raise ValueError(f"None of the requested variables were found after merging static/dynamic stores: {variables_list}")
+    #     ds_all = ds_all[present]
+    # return ds_all
 
 def load_classified(run                 : RunSpec | None = None,
                     classify            : ClassificationSpec | None = None,

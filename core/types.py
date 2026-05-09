@@ -1,8 +1,9 @@
-# shuga/core/types.py
 from __future__  import annotations
 from dataclasses import dataclass
 from pathlib     import Path
-from typing      import Iterable, Sequence
+from typing      import Iterable, Sequence, Literal
+
+IcehFrequency = Literal["daily", "hourly"]
 
 @dataclass(slots=True)
 class RunSpec:
@@ -12,6 +13,22 @@ class RunSpec:
     hemisphere: str = "SH"
     project: str = "gv90"
     user: str = "da1339"
+    iceh_frequency: IcehFrequency | str = "daily"
+    def __post_init__(self) -> None:
+        token = str(self.iceh_frequency).strip().lower().replace("_", "-")
+        aliases = {"d": "daily",
+                   "day": "daily",
+                   "daily": "daily",
+                   "h": "hourly",
+                   "hour": "hourly",
+                   "hours": "hourly",
+                   "hourly": "hourly",
+                   "inst": "hourly",
+                   "instantaneous": "hourly"}
+        if token not in aliases:
+            raise ValueError(f"Unsupported iceh_frequency={self.iceh_frequency!r}. "
+                             "Use 'daily' or 'hourly'.")
+        self.iceh_frequency = aliases[token]
 
 @dataclass(slots=True)
 class ClassificationSpec:

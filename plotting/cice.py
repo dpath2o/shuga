@@ -20,6 +20,76 @@ from shuga.plotting.cawcr import plot_regridded_hs_sic_panel
 def _any_not_none(*vals) -> bool:
     return any(v is not None for v in vals)
 
+def compute_fip(fi_mask: xr.DataArray, *,
+                time_dim   : str  = "time",
+                name       : str  = "FIP",
+                long_name  : str  = "Fast Ice Persistence",
+                as_percent : bool = False) -> xr.DataArray:
+    """
+    Compute fast-ice persistence (FIP) from a time-varying fast-ice mask.
+
+    Parameters
+    ----------
+    fi_mask : xr.DataArray
+        Fast-ice mask with a time dimension. Expected to be boolean or
+        binary-like (0/1). NaNs are treated as missing and excluded from
+        the denominator.
+    time_dim : str, default "time"
+        Name of the time dimension.
+    name : str, default "FIP"
+        Output variable name.
+    long_name : str, default "Fast Ice Persistence"
+        Output long_name attribute.
+    as_percent : bool, default False
+        If True, return persistence in percent [0, 100]. Otherwise return
+        fractional persistence [0, 1].
+
+    Returns
+    -------
+    xr.DataArray
+        Spatial field of persistence over the supplied time window.
+
+    Notes
+    -----
+    Persistence is defined here as:
+
+        FIP = (# valid timesteps with fast ice) / (# valid timesteps)
+
+    so a cell that is fast ice for all valid timesteps has FIP = 1.
+    """
+    if not isinstance(fi_mask, xr.DataArray):
+        raise TypeError("fi_mask must be an xarray.DataArray.")
+    if time_dim not in fi_mask.dims:
+        raise ValueError(f"fi_mask must have a '{time_dim}' dimension.")
+    if fi_mask.sizes.get(time_dim, 0) == 0:
+        raise ValueError("fi_mask has zero length along the time dimension.")
+    # Convert to numeric while preserving NaNs.
+    if np.issubdtype(fi_mask.dtype, np.bool_):
+        mask_num = fi_mask.astype("float32")
+    else:
+        # Treat positive values as fast ice, zeros as no fast ice, NaNs as missing.
+        mask_num = xr.where(fi_mask.notnull(), fi_mask > 0, np.nan).astype("float32")
+    fip = mask_num.mean(dim=time_dim, skipna=True)
+    if as_percent:
+        fip = 100.0 * fip
+        units = "%"
+    else:
+        units = "1"
+    fip.name = name
+    fip.attrs.update({"long_name"  : long_name,
+                      "units"      : units,
+                      "description": "Fraction of valid timesteps classified as fast ice"})
+    # Helpful metadata if time coordinate exists
+    if time_dim in fi_mask.coords and fi_mask.sizes.get(time_dim, 0) > 0:
+        try:
+            t0 = pd.to_datetime(fi_mask[time_dim].values[0])
+            tN = pd.to_datetime(fi_mask[time_dim].values[-1])
+            fip.attrs["time_start"] = str(t0.date())
+            fip.attrs["time_end"] = str(tN.date())
+        except Exception:
+            pass
+    return fip
+
 class CICEPlotter:
     """PyGMT plotting helpers for shuga classification, metrics, and observations."""
 
@@ -321,9 +391,6 @@ class CICEPlotter:
             ds = load_metrics(run            = self.run,
                               classify       = self.classify,
                               metrics        = self.metrics,
-                              plotting       = self.plotting,
-                              observations   = self.observations,
-                              paths          = self.paths,
                               classification = norm,
                               hemisphere     = self.run.hemisphere,
                               chunks         = self.chunks)
@@ -339,15 +406,11 @@ class CICEPlotter:
                              f"{target_sim} ({target_dt0} to {target_dtN}, {norm}, grid={target_grid})")
             run      = replace(self.run, sim_name=target_sim)
             classify = replace(self.classify, grid_type=target_grid)
-            cls      = load_classification(run            = run,
-                                           classify       = classify,
-                                           metrics        = self.metrics,
-                                           plotting       = self.plotting,
-                                           observations   = self.observations,
-                                           paths          = self.paths,
-                                           classification = norm,
-                                           hemisphere     = run.hemisphere,
-                                           chunks         = self.chunks)
+            cls      = load_classified(run            = run,
+                                       classify       = classify,
+                                       classification = norm,
+                                       hemisphere     = run.hemisphere,
+                                       chunks         = self.chunks)
             if "FI_mask" not in cls:
                 raise KeyError(f"classification store does not contain 'FI_mask' for "
                                f"{target_sim} / {norm} / {target_grid}")
