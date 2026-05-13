@@ -1,13 +1,10 @@
 from __future__ import annotations
-
 from dataclasses import replace
 from pathlib import Path
 import xarray as xr
-
 from shuga.core.paths import ShugaPaths
 from shuga.core.naming import method_dirname, normalize_method
 from shuga.core.store_selection import ResolvedStore, StoreSelection
-
 
 class CICEStoreLocator:
     """
@@ -52,24 +49,60 @@ class CICEStoreLocator:
       filesystem locations unless higher-level code opens the returned path.
     """
 
-    def __init__(self, run, classify, metrics=None, plotting=None, observations=None, logger=None):
-        self.run = run
-        self.classify = classify
-        self.metrics = metrics
-        self.plotting = plotting
+    # def __init__(self, run, classify, metrics=None, plotting=None, observations=None, logger=None):
+    #     self.run = run
+    #     self.classify = classify
+    #     self.metrics = metrics
+    #     self.plotting = plotting
+    #     self.observations = observations
+    #     self.logger = logger
+    def __init__(self, run, classify, metrics=None, plotting=None, observations=None,
+                 paths: ShugaPaths | None = None, logger=None):
+        self.run          = run
+        self.classify     = classify
+        self.metrics      = metrics
+        self.plotting     = plotting
         self.observations = observations
-        self.logger = logger
+        self.paths        = paths
+        self.logger       = logger
 
     def _paths_for_sim(self, sim_name: str, project: str | None = None, user: str | None = None) -> ShugaPaths:
-        run_other = replace(self.run,
-                            sim_name = sim_name,
-                            project  = project or self.run.project,
-                            user     = user or self.run.user)
-        return ShugaPaths(run          = run_other,
-                          classify     = self.classify,
-                          metrics      = self.metrics,
-                          plotting     = self.plotting,
-                          observations = self.observations)
+        # run_other = replace(self.run,
+        #                     sim_name = sim_name,
+        #                     project  = project or self.run.project,
+        #                     user     = user or self.run.user)
+        # return ShugaPaths(run          = run_other,
+        #                   classify     = self.classify,
+        #                   metrics      = self.metrics,
+        #                   plotting     = self.plotting,
+        #                   observations = self.observations)
+        base_paths = self.paths
+        base_run   = base_paths.run if base_paths is not None else self.run
+        run_other  = replace(base_run,
+                             sim_name = sim_name,
+                             project  = project or base_run.project,
+                             user     = user or base_run.user)
+        if base_paths is None:
+            return ShugaPaths(run          = run_other,
+                              classify     = self.classify,
+                              metrics      = self.metrics,
+                              plotting     = self.plotting,
+                              observations = self.observations)
+        return ShugaPaths(run                 = run_other,
+                          classify            = self.classify,
+                          metrics             = self.metrics or base_paths.metrics,
+                          plotting            = self.plotting or base_paths.plotting,
+                          observations        = self.observations or base_paths.observations,
+                          wave_forcing        = base_paths.wave_forcing,
+                          cice_grid           = base_paths.cice_grid,
+                          lateral_drag        = base_paths.lateral_drag,
+                          afim_output_root    = base_paths.afim_output_root,
+                          graphics_root       = base_paths.graphics_root,
+                          logs_root           = base_paths.logs_root,
+                          cice_store          = base_paths.cice_store,
+                          static_store        = base_paths.static_store,
+                          classification_root = base_paths.classification_root,
+                          archive_root        = base_paths.archive_root)
 
     def _method_dir(self, method: str) -> str:
         norm = normalize_method(method)
@@ -207,7 +240,7 @@ class CICEStoreLocator:
             resolved             = ResolvedStore(sim_name   = sim_name,
                                                  method     = norm,
                                                  grid_type  = grid_type,
-                                                 store_kind = pstore_kind,
+                                                 store_kind = store_kind,
                                                  path       = candidate)
             if self.logger is not None:
                 self.logger.info("Resolved %s store for %s [%s/%s]: %s", store_kind, sim_name, grid_type, norm, candidate)
