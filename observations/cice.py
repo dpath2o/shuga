@@ -1,12 +1,9 @@
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Iterable
-
 import numpy as np
 import pandas as pd
 import xarray as xr
-
 from shuga.core.logging import build_file_logger
 from shuga.core.paths import ShugaPaths
 from shuga.core.types import ObservationSpec, RunSpec

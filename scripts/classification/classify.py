@@ -13,9 +13,9 @@ from shuga              import (ClassificationSpec,
                                 RunSpec,
                                 CICEGridSpec,
                                 ShugaPaths)
-from shuga.core.data_conversion import NC2Zarr
 from shuga.core.logging import build_file_logger
 from shuga.core.naming  import normalize_method
+from shuga.core.data_conversion import NC2Zarr
 
 def _comma_split(value: str | None) -> list[str]:
     if value is None:
@@ -38,6 +38,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bin-min-days", type=int, default=9)
     p.add_argument("--roll-window", type=int, default=15)
     p.add_argument("--aice-thresh", type=float, default=0.15)
+    p.add_argument("--iceh-frequency",
+                   choices=["daily", "hourly"],
+                   default="daily",
+                   help="CICE history frequency. daily -> iceh_daily.zarr/YYYY-MM; hourly -> iceh_hourly.zarr/YYYY_MM_DD.")
+    p.add_argument("--hourly-root",
+                   default=None,
+                   help="Optional root containing hourly CICE NetCDF files, e.g. ~/AFIM_archive/SIM/history/hourly.")
+    p.add_argument("--chunks-time",
+                   type=int,
+                   default=None,
+                   help="Time chunk size for conversion/loading. Defaults to 31 for daily and 24 for hourly.")
+    p.add_argument("--skip-history-conversion",
+                   action="store_true",
+                   help="Skip NetCDF-to-Zarr conversion and classify from existing iceh_daily/hourly.zarr stores.")
     p.add_argument("--grid-file", default=None)
     p.add_argument("--kmt-file", default=None)
     p.add_argument("--bathymetry-file", default=None)
@@ -63,12 +77,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args         = build_parser().parse_args()
     methods      = [normalize_method(m) for m in _comma_split(args.methods)]
-    run          = RunSpec(sim_name   = args.sim_name,
-                           start_date = args.start_date,
-                           end_date   = args.end_date,
-                           hemisphere = args.hemisphere,
-                           project    = args.project,
-                           user       = args.user)
+    run          = RunSpec(sim_name       = args.sim_name,
+                           start_date     = args.start_date,
+                           end_date       = args.end_date,
+                           hemisphere     = args.hemisphere,
+                           project        = args.project,
+                           user           = args.user,
+                           iceh_frequency = args.iceh_frequency)
     classify     = ClassificationSpec(ice_type     = args.ice_type,
                                       grid_type    = args.grid_type,
                                       ispd_thresh  = args.ispd_thresh,
@@ -111,20 +126,44 @@ def main() -> None:
         raise RuntimeError("resolve_cice_grid_assets() returned None")
     logger.info("Resolved CICE grid file: %s", grid_assets["grid_file"])
     logger.info("Resolved CICE KMT file : %s", grid_assets["kmt_file"])
-    converter = NC2Zarr(paths=paths, logger=logger, netcdf_engine=args.netcdf_engine)
-    conv      = converter.ensure_iceh_stores(dt0_str          = args.start_date,
-                                             dtN_str          = args.end_date,
-                                             daily_root       = args.daily_root,
-                                             overwrite        = args.overwrite_history,
-                                             overwrite_static = args.overwrite_static,
-                                             delete_original  = args.delete_original )
-    logger.info("Resolved/updated CICE store: %s", conv.cice_store)
-    if conv.static_store is not None:
-        logger.info("Resolved/updated static store: %s", conv.static_store)
-    logger.info("nc2zarr summary: months_scanned=%d months_written=%d months_rewritten=%d months_skipped=%d daily_files_seen=%d daily_files_used=%d",
-                conv.months_scanned, conv.months_written, conv.months_rewritten, conv.months_skipped, conv.daily_files_seen, conv.daily_files_used)
+    chunks_time = args.chunks_time
+    if chunks_time is None:
+        chunks_time = 24 if args.iceh_frequency == "hourly" else 31
+    chunks = {"time": chunks_time}
+    if args.skip_history_conversion:
+        logger.info("--skip-history-conversion requested; using existing CICE Zarr/static stores.")
+        logger.info("Resolved CICE store target: %s", paths.resolve_cice_store())
+        logger.info("Resolved static store    : %s", paths.resolve_static_store())
+    else:
+        converter = NC2Zarr(paths         = paths,
+                            logger        = logger,
+                            chunks        = chunks,
+                            netcdf_engine = args.netcdf_engine)
+        conv = converter.ensure_iceh_stores(dt0_str          = args.start_date,
+                                            dtN_str          = args.end_date,
+                                            daily_root       = args.daily_root,
+                                            #hourly_root      = args.hourly_root,
+                                            overwrite        = args.overwrite_history,
+                                            overwrite_static = args.overwrite_static,
+                                            delete_original  = args.delete_original)
+        logger.info("Resolved/updated CICE store: %s", conv.cice_store)
+        if conv.static_store is not None:
+            logger.info("Resolved/updated static store: %s", conv.static_store)
+        logger.info("nc2zarr summary: groups_scanned=%d groups_written=%d groups_rewritten=%d "
+                    "groups_skipped=%d source_files_seen=%d source_files_used=%d",
+                    conv.months_scanned,
+                    conv.months_written,
+                    conv.months_rewritten,
+                    conv.months_skipped,
+                    conv.daily_files_seen,
+                    conv.daily_files_used)
     logger.info("Resolved classification root: %s", paths.classification_root_path)
-    runner  = CICEClassifier(run=run, classify=classify, paths=paths, logger=logger)
+    runner = CICEClassifier(run      = run,
+                            classify = classify,
+                            paths    = paths,
+                            chunks   = chunks,
+                            logger   = logger)
+    # runner  = CICEClassifier(run=run, classify=classify, paths=paths, logger=logger)
     outputs = runner.run_methods(methods=methods, overwrite=args.overwrite)
     for method, path in outputs.items():
         logger.info("Wrote %s classification: %s", method, path)

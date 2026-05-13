@@ -438,35 +438,13 @@ def load_cice(run              : RunSpec | None = None,
                                 cice_store       = cice_store,
                                 static_store     = static_store)
     loader = IceHistoryLoader(paths_eff, logger=LOGGER)
-    return loader.load(
-        dt0_str      = dt0_eff,
-        dtN_str      = dtN_eff,
-        variables    = variables,
-        hemisphere   = hemisphere_eff,
-        cice_store   = cice_store,
-        static_store = static_store,
-        chunks       = chunks,
-    )
-    # zarr_root    = paths_eff.resolve_cice_store()
-    # static_eff   = Path(static_store).expanduser() if static_store is not None else paths_eff.resolve_static_store()
-    # dynamic_requested, static_requested = _split_requested_variables(variables_list, static_eff)
-    # # If user requested only static variables, allow grouped monthly open to return empty
-    # allow_empty_dynamic = variables_list is not None and dynamic_requested is None
-    # ds_all = _open_grouped_cice_store(zarr_root,
-    #                                   dt0_str     = dt0_eff,
-    #                                   dtN_str     = dtN_eff,
-    #                                   variables   = dynamic_requested,
-    #                                   chunks      = chunks,
-    #                                   allow_empty = allow_empty_dynamic)
-    # ds_all = _merge_static(ds_all, static_eff, variables_list)
-    # ds_all = _apply_hemisphere_mask(ds_all, hemisphere_eff)
-    # # Final subset on merged dataset
-    # if variables_list is not None:
-    #     present = [v for v in variables_list if v in ds_all.data_vars or v in ds_all.coords]
-    #     if not present:
-    #         raise ValueError(f"None of the requested variables were found after merging static/dynamic stores: {variables_list}")
-    #     ds_all = ds_all[present]
-    # return ds_all
+    return loader.load(dt0_str      = dt0_eff,
+                       dtN_str      = dtN_eff,
+                       variables    = variables,
+                       hemisphere   = hemisphere_eff,
+                       cice_store   = cice_store,
+                       static_store = static_store,
+                       chunks       = chunks)
 
 def load_classified(run                 : RunSpec | None = None,
                     classify            : ClassificationSpec | None = None,

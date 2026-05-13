@@ -89,15 +89,12 @@ class SimulationStatusReport:
         lines.append(f"  path: {self.cice.path}")
         lines.append(f"  exists: {self.cice.exists}")
         if self.cice.coverage is not None:
-            lines.append(
-                f"  coverage: {self.cice.coverage.start_date} -> {self.cice.coverage.end_date}"
-                f" ({self.cice.coverage.n_groups} monthly groups, n_time={self.cice.coverage.n_time})"
-            )
+            lines.append(f"  coverage: {self.cice.coverage.start_date} -> {self.cice.coverage.end_date}"
+                         f" ({self.cice.coverage.n_groups} monthly groups, n_time={self.cice.coverage.n_time})")
         if self.cice.static_store is not None:
             lines.append(f"  static store: {self.cice.static_store}")
             lines.append(f"  static exists: {self.cice.static_exists}")
         lines.append("")
-
         if self.classifications:
             lines.append("Classifications")
             for i, cls in enumerate(self.classifications, start=1):
@@ -142,6 +139,82 @@ class SimulationStatusReport:
     def __str__(self) -> str:
         return self.to_text()
 
+#-----------------------------------------------------------------------------------
+# primary function/API of this module:
+#-----------------------------------------------------------------------------------
+def report_sim_status(sim_name        : str | None = None, *,
+                      run             : RunSpec | None = None,
+                      classify        : ClassificationSpec | None = None,
+                      hemisphere      : str | None = None,
+                      project         : str | None = None,
+                      user            : str | None = None,
+                      afim_output_root: str | Path | None = None,
+                      echo            : bool = True,
+                      logger                 = None) -> SimulationStatusReport:
+    """
+    Inspect the AFIM/Shuga on-disk layout for one simulation and report:
+      - iceh_daily.zarr coverage
+      - discovered classification products and settings
+      - metrics presence and a simple health check
+      - ice_in_AFIM_subset_[SIM_NAME].json if present
+
+    This is intended as a lightweight Jupyter-friendly diagnostic entry point.
+    """
+    if run is None and not sim_name:
+        raise ValueError("report_sim_status() requires sim_name=... or run=RunSpec(...).")
+    if run is None:
+        run = RunSpec(sim_name   = str(sim_name),
+                      start_date = "1900-01-01",
+                      end_date   = "1900-01-01",
+                      hemisphere = hemisphere or "SH",
+                      project    = project or RunSpec.__dataclass_fields__["project"].default,
+                      user       = user or RunSpec.__dataclass_fields__["user"].default)
+    else:
+        if sim_name is not None and sim_name != run.sim_name:
+            run = RunSpec(sim_name   = sim_name,
+                          start_date = run.start_date,
+                          end_date   = run.end_date,
+                          hemisphere = hemisphere or run.hemisphere,
+                          project    = project or run.project,
+                          user       = user or run.user)
+        elif hemisphere is not None or project is not None or user is not None:
+            run = RunSpec(sim_name   = run.sim_name,
+                          start_date = run.start_date,
+                          end_date   = run.end_date,
+                          hemisphere = hemisphere or run.hemisphere,
+                          project    = project or run.project,
+                          user       = user or run.user)
+    classify_eff = classify or ClassificationSpec()
+    paths        = ShugaPaths(run=run, classify=classify_eff, afim_output_root=afim_output_root)
+    try:
+        cice_store = paths.resolve_cice_store()
+        cice_exists = cice_store.exists()
+    except FileNotFoundError:
+        cice_store = paths.zarr_root / "iceh_daily.zarr"
+        cice_exists = False
+    static_store    = paths.resolve_static_store()
+    cice_status     = CICEStoreStatus(path          = str(cice_store),
+                                      exists        = cice_exists,
+                                      coverage      = _infer_grouped_store_coverage(cice_store) if cice_exists else None,
+                                      static_store  = str(static_store) if static_store is not None else None,
+                                      static_exists = static_store.exists() if static_store is not None else None)
+    classifications = _discover_classifications(paths, classify=classify_eff, logger=logger)
+    ice_in          = _discover_ice_in_json(paths, run.sim_name)
+    report          = SimulationStatusReport(sim_name        = run.sim_name,
+                                             hemisphere      = paths.hemisphere,
+                                             output_root     = str(paths.output_root),
+                                             zarr_root       = str(paths.zarr_root),
+                                             cice            = cice_status,
+                                             classifications = classifications,
+                                             ice_in_json     = ice_in)
+    if echo:
+        print(report.to_text())
+    return report
+
+
+#-----------------------------------------------------------------------------------
+# helper functions outside any class/module
+#-----------------------------------------------------------------------------------
 def _maybe_open_time_coverage(store: Path, *, group: str | None = None) -> TimeCoverage | None:
     try:
         ds = xr.open_zarr(store, group=group, consolidated=False)
@@ -158,7 +231,6 @@ def _maybe_open_time_coverage(store: Path, *, group: str | None = None) -> TimeC
     except Exception:
         t0 = tN = None
     return TimeCoverage(start_date=t0, end_date=tN, n_time=n_time, n_groups=1 if group else None)
-
 
 def _infer_grouped_store_coverage(zarr_root: Path) -> TimeCoverage | None:
     if not zarr_root.exists():
@@ -316,93 +388,3 @@ def _discover_classifications(paths: ShugaPaths, classify: ClassificationSpec | 
                     )
     statuses.sort(key=lambda x: (x.grid_type, x.method, x.ispd_thresh or ""))
     return statuses
-
-
-def report_sim_status(
-    sim_name: str | None = None,
-    *,
-    run: RunSpec | None = None,
-    classify: ClassificationSpec | None = None,
-    hemisphere: str | None = None,
-    project: str | None = None,
-    user: str | None = None,
-    afim_output_root: str | Path | None = None,
-    echo: bool = True,
-    logger=None,
-) -> SimulationStatusReport:
-    """
-    Inspect the AFIM/Shuga on-disk layout for one simulation and report:
-      - iceh_daily.zarr coverage
-      - discovered classification products and settings
-      - metrics presence and a simple health check
-      - ice_in_AFIM_subset_[SIM_NAME].json if present
-
-    This is intended as a lightweight Jupyter-friendly diagnostic entry point.
-    """
-    if run is None and not sim_name:
-        raise ValueError("report_sim_status() requires sim_name=... or run=RunSpec(...).")
-
-    if run is None:
-        run = RunSpec(
-            sim_name=str(sim_name),
-            start_date="1900-01-01",
-            end_date="1900-01-01",
-            hemisphere=hemisphere or "SH",
-            project=project or RunSpec.__dataclass_fields__["project"].default,
-            user=user or RunSpec.__dataclass_fields__["user"].default,
-        )
-    else:
-        if sim_name is not None and sim_name != run.sim_name:
-            run = RunSpec(
-                sim_name=sim_name,
-                start_date=run.start_date,
-                end_date=run.end_date,
-                hemisphere=hemisphere or run.hemisphere,
-                project=project or run.project,
-                user=user or run.user,
-            )
-        elif hemisphere is not None or project is not None or user is not None:
-            run = RunSpec(
-                sim_name=run.sim_name,
-                start_date=run.start_date,
-                end_date=run.end_date,
-                hemisphere=hemisphere or run.hemisphere,
-                project=project or run.project,
-                user=user or run.user,
-            )
-
-    classify_eff = classify or ClassificationSpec()
-    paths = ShugaPaths(run=run, classify=classify_eff, afim_output_root=afim_output_root)
-
-    try:
-        cice_store = paths.resolve_cice_store()
-        cice_exists = cice_store.exists()
-    except FileNotFoundError:
-        cice_store = paths.zarr_root / "iceh_daily.zarr"
-        cice_exists = False
-
-    static_store = paths.resolve_static_store()
-    cice_status = CICEStoreStatus(
-        path=str(cice_store),
-        exists=cice_exists,
-        coverage=_infer_grouped_store_coverage(cice_store) if cice_exists else None,
-        static_store=str(static_store) if static_store is not None else None,
-        static_exists=static_store.exists() if static_store is not None else None,
-    )
-
-    classifications = _discover_classifications(paths, classify=classify_eff, logger=logger)
-    ice_in = _discover_ice_in_json(paths, run.sim_name)
-
-    report = SimulationStatusReport(
-        sim_name=run.sim_name,
-        hemisphere=paths.hemisphere,
-        output_root=str(paths.output_root),
-        zarr_root=str(paths.zarr_root),
-        cice=cice_status,
-        classifications=classifications,
-        ice_in_json=ice_in,
-    )
-
-    if echo:
-        print(report.to_text())
-    return report

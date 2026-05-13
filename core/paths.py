@@ -45,15 +45,11 @@ class ShugaPaths:
             raise ValueError(f"Unsupported hemisphere={value!r}. Use SH/NH or south/north.")
         return mapping[token]
 
-    def fip_plot_path(
-        self,
-        classification: str,
-        *,
-        region: str = "total",
-        sim_name: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-    ) -> Path:
+    def fip_plot_path(self, classification: str, *,
+                      region    : str = "total",
+                      sim_name  : str | None = None,
+                      start_date: str | None = None,
+                      end_date  : str | None = None) -> Path:
         """
         Return output path for a fast-ice persistence (FIP) plot.
 
@@ -74,11 +70,7 @@ class ShugaPaths:
         sim    = sim_name or self.run.sim_name
         dt0    = start_date or self.run.start_date
         dtN    = end_date or self.run.end_date
-
-        return (
-            Path(self.graphical_root) / sim / region / "FIP"
-            / f"{dt0}_{dtN}_{sim}_FIP_{norm.replace('-', '_')}.png"
-        )
+        return (Path(self.graphical_root) / sim / region / "FIP" / f"{dt0}_{dtN}_{sim}_FIP_{norm.replace('-', '_')}.png")
 
     @property
     def hemisphere(self) -> str:
@@ -164,33 +156,20 @@ class ShugaPaths:
             return "iceh_hourly.zarr"
         return "iceh_daily.zarr"
 
-    def resolve_iceh_history_root(
-        self,
-        history_root: str | Path | None = None,
-        *,
-        frequency: str | None = None,
-    ) -> Path:
+    def resolve_iceh_history_root(self, history_root: str | Path | None = None, *, frequency: str | None = None) -> Path:
         freq = frequency or self.iceh_frequency
-
         if history_root is not None:
             path = Path(history_root).expanduser()
             if not path.exists():
                 raise FileNotFoundError(f"Explicit CICE NetCDF root does not exist: {path}")
             return path
-
-        candidates = [
-            self.archive_root_path / "history" / freq,
-            self.output_root / "history" / freq,
-        ]
-
+        candidates = [self.archive_root_path / "history" / freq,
+                      self.output_root / "history" / freq]
         for candidate in candidates:
             if candidate.exists():
                 return candidate
-
-        raise FileNotFoundError(
-            f"Could not infer {freq} CICE NetCDF root from the default AFIM layout. "
-            f"Tried: {', '.join(str(c) for c in candidates)}"
-        )
+        raise FileNotFoundError(f"Could not infer {freq} CICE NetCDF root from the default AFIM layout. "
+                                f"Tried: {', '.join(str(c) for c in candidates)}")
 
     def resolve_daily_iceh_root(self, daily_root: str | Path | None = None) -> Path:
         return self.resolve_iceh_history_root(daily_root, frequency="daily")
@@ -201,48 +180,35 @@ class ShugaPaths:
     def resolve_cice_store_target(self) -> Path:
         if self.cice_store is not None:
             return Path(self.cice_store).expanduser()
-
         store_name = self.iceh_store_name
-
         archive_target = self.archive_zarr_root_path / store_name
         output_target  = self.zarr_root / store_name
-
         # For archive-driven workflows, write beside ~/AFIM_archive/SIM_NAME/history/*
         # when that source tree exists. Otherwise preserve the /g/data output default.
         archive_history = self.archive_root_path / "history" / self.iceh_frequency
         if archive_history.exists() or archive_target.exists():
             return archive_target
-
         return output_target
 
     def resolve_cice_store(self) -> Path:
         store_name = self.iceh_store_name
-
         if self.cice_store is not None:
             candidates = [Path(self.cice_store).expanduser()]
         elif self.iceh_frequency == "hourly":
-            candidates = [
-                self.archive_zarr_root_path / store_name,
-                self.zarr_root / store_name,
-                self.archive_zarr_root_path / "history" / store_name,
-                self.zarr_root / "history" / store_name,
-            ]
+            candidates = [self.archive_zarr_root_path / store_name,
+                          self.zarr_root / store_name,
+                          self.archive_zarr_root_path / "history" / store_name,
+                          self.zarr_root / "history" / store_name]
         else:
-            candidates = [
-                self.zarr_root / store_name,
-                self.archive_zarr_root_path / store_name,
-                self.zarr_root / "history" / store_name,
-                self.archive_zarr_root_path / "history" / store_name,
-            ]
-
+            candidates = [self.zarr_root / store_name,
+                          self.archive_zarr_root_path / store_name,
+                          self.zarr_root / "history" / store_name,
+                          self.archive_zarr_root_path / "history" / store_name]
         for candidate in candidates:
             if candidate.exists():
                 return candidate
-
-        raise FileNotFoundError(
-            f"Could not infer {store_name} from the default AFIM layout. "
-            f"Tried: {', '.join(str(c) for c in candidates)}"
-        )
+        raise FileNotFoundError(f"Could not infer {store_name} from the default AFIM layout. "
+                                f"Tried: {', '.join(str(c) for c in candidates)}")
 
     def resolve_static_store_target(self) -> Path:
         if self.static_store is not None:
@@ -406,40 +372,6 @@ class ShugaPaths:
         wf = self.wave_forcing or WaveForcingSpec()
         return self.graphics_root_path / wf.figure_subdir / f"{year:04d}{month:02d}"
 
-    # @property
-    # def cawcr_root_path(self) -> Path:
-    #     obs = self.observations or ObservationSpec()
-    #     if obs.cawcr_root is not None:
-    #         return Path(obs.cawcr_root).expanduser()
-    #     return Path(f"/g/data/{self.run.project}/{self.run.user}/afim_input/CAWCR")
-
-    # def cawcr_file(self, year: int, month: int) -> Path:
-    #     obs = self.observations or ObservationSpec()
-    #     name = obs.cawcr_filename_template.format(year=year, month=month)
-    #     return self.cawcr_org_root_path / name
-
-    # @property
-    # def wave_weights_root_path(self) -> Path:
-    #     wf = self.wave_forcing or WaveForcingSpec()
-    #     if wf.weights_root is not None:
-    #         return Path(wf.weights_root).expanduser()
-    #     return Path(f"/g/data/{self.run.project}/{self.run.user}/grids/weights")
-
-    # def cawcr_regridded_file(self, year: int, month: int) -> Path:
-    #     wf = self.wave_forcing or WaveForcingSpec()
-    #     name = wf.regridded_wave_filename_template.format(year=year, month=month)
-    #     return self.regridded_wave_root_path / name
-
-    # def cawcr2cice_weight_file(self, year: int, month: int) -> Path:
-    #     wf = self.wave_forcing or WaveForcingSpec()
-    #     name = wf.cawcr2cice_weight_template.format(year=year, month=month)
-    #     return self.wave_weights_root_path / name
-
-    # @property
-    # def nsidc2cice_weight_file(self) -> Path:
-    #     wf = self.wave_forcing or WaveForcingSpec()
-    #     return self.wave_weights_root_path / wf.nsidc2cice_weight_name
-
     # ------------------------------
     # CICE grid / ice_in resolution
     # ------------------------------
@@ -450,42 +382,64 @@ class ShugaPaths:
     @property
     def cice_defaults(self) -> dict[str, Path]:
         spec = self.cice_grid or CICEGridSpec()
-        return {
-            "grid_file": Path(spec.default_grid_file).expanduser() if spec.default_grid_file is not None else self.grids_root_path / "ACCESS-OM3-025_Cgrid.nc",
-            "kmt_file": Path(spec.default_kmt_file).expanduser() if spec.default_kmt_file is not None else self.grids_root_path / "ACCESS-OM3-025_kmt.nc",
-            "bathymetry_file": Path(spec.default_bathymetry_file).expanduser() if spec.default_bathymetry_file is not None else self.grids_root_path / "unknown_bathymetry_file",
-            "f2_file": Path(spec.default_f2_file).expanduser() if spec.default_f2_file is not None else self.form_factors_root_path / "combined.nc",
-        }
+        return {"grid_file"      : Path(spec.default_grid_file).expanduser() if spec.default_grid_file is not None else self.grids_root_path / "ACCESS-OM3-025_Cgrid.nc",
+                "kmt_file"       : Path(spec.default_kmt_file).expanduser() if spec.default_kmt_file is not None else self.grids_root_path / "ACCESS-OM3-025_kmt.nc",
+                "bathymetry_file": Path(spec.default_bathymetry_file).expanduser() if spec.default_bathymetry_file is not None else self.grids_root_path / "unknown_bathymetry_file",
+                "f2_file"        : Path(spec.default_f2_file).expanduser() if spec.default_f2_file is not None else self.form_factors_root_path / "combined.nc"}
 
     def resolve_ice_in_file(self) -> Path | None:
         spec = self.cice_grid or CICEGridSpec()
         if spec.ice_in_file is not None:
             path = Path(spec.ice_in_file).expanduser()
             return path if path.exists() else None
-
         roots = []
         if spec.experiment_root is not None:
             roots.append(Path(spec.experiment_root).expanduser())
-        roots.extend(
-            [
-                self.output_root,
-                Path(f"/g/data/{self.run.project}/{self.run.user}/simulations/{self.run.sim_name}"),
-                Path(f"/g/data/{self.run.project}/{self.run.user}/experiments/{self.run.sim_name}"),
-                Path.home() / self.run.sim_name,
-            ]
-        )
-
+        roots.extend([self.output_root,
+                      Path(f"/g/data/{self.run.project}/{self.run.user}/simulations/{self.run.sim_name}"),
+                      Path(f"/g/data/{self.run.project}/{self.run.user}/experiments/{self.run.sim_name}"),
+                      Path.home() / self.run.sim_name])
         candidates = []
         for root in roots:
-            candidates.extend(
-                [
-                    root / "ice_in",
-                    root / "run" / "ice_in",
-                    root / "config" / "ice_in",
-                    root / "work" / "ice_in",
-                    root / "history" / "ice_in",
-                ]
-            )
+            candidates.extend([root / "ice_in",
+                               root / "run" / "ice_in",
+                               root / "config" / "ice_in",
+                               root / "work" / "ice_in",
+                               root / "history" / "ice_in"])
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def resolve_ice_diag_file(self) -> Path | None:
+        """
+        Return the first available CICE diagnostic file for this simulation.
+
+        This is intentionally searched under the simulation output root first,
+        because AFIM commonly preserves ice_diag.d beside the simulation archive:
+
+            /g/data/<project>/<user>/afim_output/<sim_name>/ice_diag.d
+        """
+        spec = self.cice_grid or CICEGridSpec()
+        explicit = getattr(spec, "ice_diag_file", None)
+        if explicit is not None:
+            path = Path(explicit).expanduser()
+            return path if path.exists() else None
+        roots = []
+        if spec.experiment_root is not None:
+            roots.append(Path(spec.experiment_root).expanduser())
+        roots.extend([self.output_root,
+                      self.archive_root_path,
+                      Path(f"/g/data/{self.run.project}/{self.run.user}/simulations/{self.run.sim_name}"),
+                      Path(f"/g/data/{self.run.project}/{self.run.user}/experiments/{self.run.sim_name}"),
+                      Path.home() / self.run.sim_name])
+        candidates: list[Path] = []
+        for root in roots:
+            candidates.extend([root / "ice_diag.d",
+                               root / "run" / "ice_diag.d",
+                               root / "config" / "ice_diag.d",
+                               root / "work" / "ice_diag.d",
+                               root / "history" / "ice_diag.d"])
         for candidate in candidates:
             if candidate.exists():
                 return candidate
@@ -498,11 +452,15 @@ class ShugaPaths:
             s = line.strip()
             if not s or s.startswith("!"):
                 continue
+            # Strip simple inline comments.
+            for marker in ("!", "#"):
+                if marker in s:
+                    s = s.split(marker, 1)[0].strip()
             if "=" not in s:
                 continue
             key, value = s.split("=", 1)
-            key = key.strip()
-            value = value.strip().rstrip(",")
+            key        = key.strip().lower()
+            value      = value.strip().rstrip(",").strip()
             if not key:
                 continue
             if value.startswith(("'", '"')) and value.endswith(("'", '"')):
@@ -512,14 +470,7 @@ class ShugaPaths:
 
     @staticmethod
     def _grid_asset_keys() -> tuple[str, ...]:
-        return (
-            "grid_file",
-            "kmt_file",
-            "bathymetry_file",
-            "f2_file",
-            "gridcpl_file",
-            "ice_in_file",
-        )
+        return("grid_file", "kmt_file", "bathymetry_file", "f2_file", "gridcpl_file", "ice_in_file", "ice_diag_file")
 
     def load_persisted_cice_grid_assets(self) -> dict[str, Path | None]:
         cfg = self.cice_grid_assets_config_path
@@ -549,48 +500,55 @@ class ShugaPaths:
         return target
 
     def resolve_cice_grid_assets(self) -> dict[str, Path | None]:
-        spec = self.cice_grid or CICEGridSpec()
-        defaults = self.cice_defaults
+        spec      = self.cice_grid or CICEGridSpec()
+        defaults  = self.cice_defaults
         persisted = self.load_persisted_cice_grid_assets()
-        resolved: dict[str, Path | None] = {
-            "grid_file": Path(spec.grid_file).expanduser() if spec.grid_file is not None else None,
-            "kmt_file": Path(spec.kmt_file).expanduser() if spec.kmt_file is not None else None,
-            "bathymetry_file": Path(spec.bathymetry_file).expanduser() if spec.bathymetry_file is not None else None,
-            "f2_file": Path(spec.f2_file).expanduser() if spec.f2_file is not None else None,
-            "gridcpl_file": Path(spec.gridcpl_file).expanduser() if spec.gridcpl_file is not None else None,
-            "ice_in_file": Path(spec.ice_in_file).expanduser() if spec.ice_in_file is not None else None,
-        }
+        resolved: dict[str, Path | None] = {"grid_file"      : Path(spec.grid_file).expanduser() if spec.grid_file is not None else None,
+                                            "kmt_file"       : Path(spec.kmt_file).expanduser() if spec.kmt_file is not None else None,
+                                            "bathymetry_file": Path(spec.bathymetry_file).expanduser() if spec.bathymetry_file is not None else None,
+                                            "f2_file"        : Path(spec.f2_file).expanduser() if spec.f2_file is not None else None,
+                                            "gridcpl_file"   : Path(spec.gridcpl_file).expanduser() if spec.gridcpl_file is not None else None,
+                                            "ice_in_file"    : Path(spec.ice_in_file).expanduser() if spec.ice_in_file is not None else None,
+                                            "ice_diag_file"  : Path(getattr(spec, "ice_diag_file", "")).expanduser() if getattr(spec, "ice_diag_file", None) is not None else None}
+        # Persisted config fills only missing explicit values.
         for key, value in persisted.items():
-            if resolved[key] is None and value is not None:
+            if key in resolved and resolved[key] is None and value is not None:
                 resolved[key] = value
         if resolved["ice_in_file"] is None:
             resolved["ice_in_file"] = self.resolve_ice_in_file()
-        ice_in = resolved["ice_in_file"]
-        if ice_in is not None and ice_in.exists():
-            parsed = self._parse_ice_in_scalar_lines(ice_in.read_text())
-            def _from_icein(key: str) -> Path | None:
-                raw = parsed.get(key)
-                return Path(raw).expanduser() if raw else None
-            if resolved["grid_file"] is None:
-                resolved["grid_file"] = _from_icein("grid_file")
-            if resolved["kmt_file"] is None:
-                resolved["kmt_file"] = _from_icein("kmt_file")
-            if resolved["bathymetry_file"] is None:
-                resolved["bathymetry_file"] = _from_icein("bathymetry_file")
-            if resolved["f2_file"] is None:
-                resolved["f2_file"] = _from_icein("f2_file")
-            if resolved["gridcpl_file"] is None:
-                resolved["gridcpl_file"] = _from_icein("gridcpl_file")
-        if resolved["grid_file"] is None and getattr(defaults, "grid_file", None):
-            resolved["grid_file"] = Path(defaults.grid_file).expanduser()
-        if resolved["kmt_file"] is None and getattr(defaults, "kmt_file", None):
-            resolved["kmt_file"] = Path(defaults.kmt_file).expanduser()
-        if resolved["bathymetry_file"] is None and getattr(defaults, "bathymetry_file", None):
-            resolved["bathymetry_file"] = Path(defaults.bathymetry_file).expanduser()
-        if resolved["f2_file"] is None and getattr(defaults, "f2_file", None):
-            resolved["f2_file"] = Path(defaults.f2_file).expanduser()
-        if resolved["gridcpl_file"] is None and getattr(defaults, "gridcpl_file", None):
-            resolved["gridcpl_file"] = Path(defaults.gridcpl_file).expanduser()
+        if resolved["ice_diag_file"] is None:
+            resolved["ice_diag_file"] = self.resolve_ice_diag_file()
+        def _path_from_metadata(parsed: dict[str, str], key: str) -> Path | None:
+            raw = parsed.get(key.lower())
+            if raw in (None, "", "none", "None", "unknown", "unknown_file"):
+                return None
+            return Path(raw).expanduser()
+        # Prefer ice_in; use ice_diag.d only to fill gaps.
+        for meta_key in ("ice_in_file", "ice_diag_file"):
+            meta_file = resolved.get(meta_key)
+            if meta_file is None or not meta_file.exists():
+                continue
+            parsed  = self._parse_ice_in_scalar_lines(meta_file.read_text(errors="ignore"))
+            aliases = {"grid_file"      : ("grid_file",),
+                       "kmt_file"       : ("kmt_file", "mask_file"),
+                       "bathymetry_file": ("bathymetry_file", "bathy_file", "topography_file", "topog_file"),
+                       "f2_file"        : ("f2_file", "F2_file".lower()),
+                       "gridcpl_file"   : ("gridcpl_file",)}
+            for out_key, candidate_keys in aliases.items():
+                if resolved[out_key] is not None:
+                    continue
+                for candidate_key in candidate_keys:
+                    value = _path_from_metadata(parsed, candidate_key)
+                    if value is not None:
+                        resolved[out_key] = value
+                        break
+        # Defaults are allowed only after explicit/persisted/metadata resolution.
+        # This fixes the current dict/getattr mismatch in this method.
+        for key in ("grid_file", "kmt_file", "bathymetry_file", "f2_file", "gridcpl_file"):
+            if resolved.get(key) is None:
+                value = defaults.get(key)
+                if value is not None:
+                    resolved[key] = Path(value).expanduser()
         return resolved
 
     @property
@@ -633,20 +591,14 @@ class ShugaPaths:
         ld = self.lateral_drag or LateralDragSpec()
         if ld.grounded_iceberg_file is not None:
             return Path(ld.grounded_iceberg_file).expanduser()
-        return Path(
-            f"/g/data/{self.run.project}/{self.run.user}/grounded_icebergs/"
-            "Kaihong_Jiao/Grounded_Icebergs_Full_Merged.gpkg"
-        )
+        return Path(f"/g/data/{self.run.project}/{self.run.user}/grounded_icebergs/Kaihong_Jiao/Grounded_Icebergs_Full_Merged.gpkg")
 
     @property
     def high_res_coast_file_path(self) -> Path:
         ld = self.lateral_drag or LateralDragSpec()
         if ld.high_res_coast_file is not None:
             return Path(ld.high_res_coast_file).expanduser()
-        return Path(
-            f"/g/data/{self.run.project}/{self.run.user}/coastlines/high_res_coast/"
-            "add_coastline_high_res_polygon_v7_9.shp"
-        )
+        return Path(f"/g/data/{self.run.project}/{self.run.user}/coastlines/high_res_coast/add_coastline_high_res_polygon_v7_9.shp")
 
     @property
     def coast_form_factors_path(self) -> Path:

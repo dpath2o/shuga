@@ -119,6 +119,9 @@ class CICEPlotter:
             raise ImportError("PyGMT is required for plotting methods.") from exc
         return pygmt
 
+    # ------------------------------------------------------------
+    # static functions
+    # ------------------------------------------------------------
     @staticmethod
     def _detect_lonlat(ds: xr.Dataset) -> tuple[xr.DataArray, xr.DataArray]:
         lon_name = next((n for n in ("TLON", "ULON", "lon", "longitude", "ELON", "NLON") if n in ds.variables or n in ds.coords), None)
@@ -164,63 +167,32 @@ class CICEPlotter:
         lat_mask = (lat >= lat_min) & (lat <= lat_max)
         return lon_mask & lat_mask
 
-    def _load_static_lonlat(self, sim_name: str | None = None) -> xr.Dataset:
-        """
-        Load only the static grid dataset needed for lon/lat detection.
-        This avoids calling load_cice() just to get TLON/TLAT.
-        """
-        target_sim = sim_name or self.run.sim_name
-        # Prefer a dedicated paths helper if you already have one.
-        if hasattr(self.paths, "iceh_static_path"):
-            static_path = Path(self.paths.iceh_static_path(sim_name=target_sim)).expanduser()
-        else:
-            # Fallback path pattern; adjust if your ShugaPaths API differs.
-            static_path = Path(self.paths.output_root).expanduser() / "zarr" / "iceh_static.zarr"
-        if not static_path.exists():
-            raise FileNotFoundError(f"Could not find static grid store: {static_path}")
-        ds = xr.open_zarr(static_path, chunks=self.chunks, consolidated=False)
-        wanted = [v for v in ("TLON", "TLAT", "ULON", "ULAT") if v in ds.variables]
-        if not wanted:
-            raise KeyError(f"No recognised lon/lat variables found in {static_path}. "
-                           "Expected one or more of TLON, TLAT, ULON, ULAT.")
-        return ds[wanted]
+    @staticmethod
+    def _resolve_plot_window(dt0_str: str | None = None, dtN_str: str | None = None) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+        dt0 = pd.Timestamp(dt0_str) if dt0_str is not None else None
+        dtN = pd.Timestamp(dtN_str) if dtN_str is not None else None
+        if dt0 is not None and dtN is not None and dtN < dt0:
+            raise ValueError(f"dtN_str ({dtN.date()}) must be on or after dt0_str ({dt0.date()}).")
+        return dt0, dtN
 
-    def pygmt_da_prep(self, da: xr.DataArray,
-                      lon       : xr.DataArray | None    = None,
-                      lat       : xr.DataArray | None    = None, *,
-                      mask_zero : bool                   = False,
-                      region    : Sequence[float] | None = None) -> pd.DataFrame:
-        if lon is None or lat is None:
-            if "lon" in da.coords and "lat" in da.coords:
-                lon, lat = da["lon"], da["lat"]
-            else:
-                raise ValueError("lon/lat must be supplied when not present on the DataArray.")
-        lon_da = self._lon_to_180(lon)
-        work   = da
-        if region is not None:
-            mask = self._region_mask(lon_da, lat, region)
-            work = work.where(mask)
-        if mask_zero:
-            work = work.where(np.abs(work) > 0)
-        lon_flat = lon_da.values.ravel()
-        lat_flat = lat.values.ravel()
-        z_flat   = work.values.ravel()
-        good     = np.isfinite(lon_flat) & np.isfinite(lat_flat) & np.isfinite(z_flat)
-        return pd.DataFrame({"lon": lon_flat[good], "lat": lat_flat[good], "z": z_flat[good]})
+    @staticmethod
+    def _validate_f2020_window(dt0: pd.Timestamp | None, dtN : pd.Timestamp | None, *,
+                               add_f2020  : bool,
+                               f2020_mode : str) -> None:
+        if not add_f2020:
+            return
+        if str(f2020_mode).strip().lower() != "climatology":
+            return
+        if dt0 is None or dtN is None:
+            return
+        ndays = (dtN - dt0).days + 1
+        if ndays < 15:
+            raise ValueError(f"When add_f2020=True and f2020_mode='climatology', the requested window must be at least 15 days. "
+                             f"Got {ndays} days ({dt0.strftime('%Y-%m-%d')} to {dtN.strftime('%Y-%m-%d')}).")
 
-    def pygmt_base_layer(self, fig, region: Sequence[float], projection: str, *,
-                         title      : str | None = None,
-                         shorelines : str | None = None,
-                         land       : str | None = None,
-                         water      : str | None = None):
-        frame = ["af"]
-        if title:
-            frame.append(f'+t{title}')
-        fig.basemap(region=list(region), projection=projection, frame=frame)
-        fig.coast(shorelines = shorelines or self.plotting.shorelines,
-                  land       = land       or self.plotting.land,
-                  water      = water      or self.plotting.water)
-
+    # ------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------
     def _default_fip_cmap(self) -> str:
         if self.plotting.fip_cmap is not None:
             return str(Path(self.plotting.fip_cmap).expanduser())
@@ -266,29 +238,6 @@ class CICEPlotter:
                 line  = np.column_stack([(((lon[iy, ix] + 180.0) % 360.0) - 180.0), lat[iy, ix]])
                 lines.append(line)
         return lines
-
-    @staticmethod
-    def _resolve_plot_window(dt0_str: str | None = None, dtN_str: str | None = None) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
-        dt0 = pd.Timestamp(dt0_str) if dt0_str is not None else None
-        dtN = pd.Timestamp(dtN_str) if dtN_str is not None else None
-        if dt0 is not None and dtN is not None and dtN < dt0:
-            raise ValueError(f"dtN_str ({dtN.date()}) must be on or after dt0_str ({dt0.date()}).")
-        return dt0, dtN
-
-    @staticmethod
-    def _validate_f2020_window(dt0: pd.Timestamp | None, dtN : pd.Timestamp | None, *,
-                               add_f2020  : bool,
-                               f2020_mode : str) -> None:
-        if not add_f2020:
-            return
-        if str(f2020_mode).strip().lower() != "climatology":
-            return
-        if dt0 is None or dtN is None:
-            return
-        ndays = (dtN - dt0).days + 1
-        if ndays < 15:
-            raise ValueError(f"When add_f2020=True and f2020_mode='climatology', the requested window must be at least 15 days. "
-                             f"Got {ndays} days ({dt0.strftime('%Y-%m-%d')} to {dtN.strftime('%Y-%m-%d')}).")
 
     def _load_field(self, variable: str, date_str: str | None = None, method: str | None = None) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
         var = variable
@@ -339,6 +288,117 @@ class CICEPlotter:
         if date_str is not None and "time" in da.dims:
             da = da.sel(time=date_str)
         return da, lon, lat
+
+    def _build_obs_timeseries(self, variable: str, *,
+                              plot_dt0: pd.Timestamp,
+                              plot_dtN: pd.Timestamp,
+                              hemisphere: str,
+                              add_obs: bool,
+                              f2020_mode: str = "climatology") -> pd.DataFrame | None:
+        """
+        Return an observational time series DataFrame with columns ['time', 'value'],
+        or None if no observation overlay is available/applicable.
+        """
+        if not add_obs:
+            return None
+        var  = str(variable).upper()
+        hemi = str(hemisphere).strip().upper()
+        # ------------------------------------------------------------
+        # FIA -> AF2020 (south only)
+        # ------------------------------------------------------------
+        if var == "FIA":
+            if hemi != "SH":
+                self.logger.info("No AF2020 FIA observational overlay available for hemisphere=%s; plotting model only.", hemi)
+                return None
+            self._validate_f2020_window(plot_dt0, plot_dtN, add_f2020=True, f2020_mode=f2020_mode)
+            mode = str(f2020_mode).strip().lower()
+            if mode not in {"climatology", "overlap"}:
+                raise ValueError(f"f2020_mode must be 'climatology' or 'overlap', got {f2020_mode!r}")
+            if mode == "climatology":
+                obs_da = self.obs.repeat_af2020_fia_daily_climatology(plot_dt0.strftime("%Y-%m-%d"), plot_dtN.strftime("%Y-%m-%d"))
+            else:
+                obs_da = self.obs.subset_af2020_fia_daily(plot_dt0.strftime("%Y-%m-%d"), plot_dtN.strftime("%Y-%m-%d"))
+            obs_df = pd.DataFrame({"time"  : pd.to_datetime(obs_da["time"].values),
+                                   "value" : np.asarray(obs_da.values, dtype=float)}).dropna()
+            return None if obs_df.empty else obs_df
+        # ------------------------------------------------------------
+        # SIA -> NSIDC (north or south)
+        # ------------------------------------------------------------
+        if var == "SIA":
+            nsidc = self.obs.compute_nsidc_sia_sie(start_date = plot_dt0.strftime("%Y-%m-%d"),
+                                                   end_date   = plot_dtN.strftime("%Y-%m-%d"),
+                                                   hemisphere = hemi)
+            if "SIA" not in nsidc:
+                raise KeyError("NSIDC observational dataset did not return 'SIA'.")
+            obs_da = nsidc["SIA"]
+            obs_df = pd.DataFrame({"time" : pd.to_datetime(obs_da["time"].values),
+                                   "value": np.asarray(obs_da.values, dtype=float)}).dropna()
+            return None if obs_df.empty else obs_df
+        # ------------------------------------------------------------
+        # Other variables -> no observational overlay implemented
+        # ------------------------------------------------------------
+        self.logger.info("No observational overlay implemented for variable=%s; plotting model only.", var)
+        return None
+
+    def _load_static_lonlat(self, sim_name: str | None = None) -> xr.Dataset:
+        """
+        Load only the static grid dataset needed for lon/lat detection.
+        This avoids calling load_cice() just to get TLON/TLAT.
+        """
+        target_sim = sim_name or self.run.sim_name
+        # Prefer a dedicated paths helper if you already have one.
+        if hasattr(self.paths, "iceh_static_path"):
+            static_path = Path(self.paths.iceh_static_path(sim_name=target_sim)).expanduser()
+        else:
+            # Fallback path pattern; adjust if your ShugaPaths API differs.
+            static_path = Path(self.paths.output_root).expanduser() / "zarr" / "iceh_static.zarr"
+        if not static_path.exists():
+            raise FileNotFoundError(f"Could not find static grid store: {static_path}")
+        ds = xr.open_zarr(static_path, chunks=self.chunks, consolidated=False)
+        wanted = [v for v in ("TLON", "TLAT", "ULON", "ULAT") if v in ds.variables]
+        if not wanted:
+            raise KeyError(f"No recognised lon/lat variables found in {static_path}. "
+                           "Expected one or more of TLON, TLAT, ULON, ULAT.")
+        return ds[wanted]
+
+    # ------------------------------------------------------------
+    # primary APIs
+    # ------------------------------------------------------------
+    def pygmt_da_prep(self, da: xr.DataArray,
+                      lon       : xr.DataArray | None    = None,
+                      lat       : xr.DataArray | None    = None, *,
+                      mask_zero : bool                   = False,
+                      region    : Sequence[float] | None = None) -> pd.DataFrame:
+        if lon is None or lat is None:
+            if "lon" in da.coords and "lat" in da.coords:
+                lon, lat = da["lon"], da["lat"]
+            else:
+                raise ValueError("lon/lat must be supplied when not present on the DataArray.")
+        lon_da = self._lon_to_180(lon)
+        work   = da
+        if region is not None:
+            mask = self._region_mask(lon_da, lat, region)
+            work = work.where(mask)
+        if mask_zero:
+            work = work.where(np.abs(work) > 0)
+        lon_flat = lon_da.values.ravel()
+        lat_flat = lat.values.ravel()
+        z_flat   = work.values.ravel()
+        good     = np.isfinite(lon_flat) & np.isfinite(lat_flat) & np.isfinite(z_flat)
+        return pd.DataFrame({"lon": lon_flat[good], "lat": lat_flat[good], "z": z_flat[good]})
+
+    def pygmt_base_layer(self, fig, region: Sequence[float], projection: str, *,
+                         title      : str | None = None,
+                         shorelines : str | None = None,
+                         land       : str | None = None,
+                         water      : str | None = None):
+        frame = ["af"]
+        if title:
+            frame.append(f'+t{title}')
+        fig.basemap(region=list(region), projection=projection, frame=frame)
+        fig.coast(shorelines = shorelines or self.plotting.shorelines,
+                  land       = land       or self.plotting.land,
+                  water      = water      or self.plotting.water)
 
     def plot_fip(self, method: str,
                  sim_name          : str | None                           = None,
@@ -470,57 +530,6 @@ class CICEPlotter:
                 fig.show()
             saved[name] = str(path)
         return next(iter(saved.values())) if len(saved) == 1 else saved
-
-    def _build_obs_timeseries(self, variable: str, *,
-                              plot_dt0: pd.Timestamp,
-                              plot_dtN: pd.Timestamp,
-                              hemisphere: str,
-                              add_obs: bool,
-                              f2020_mode: str = "climatology") -> pd.DataFrame | None:
-        """
-        Return an observational time series DataFrame with columns ['time', 'value'],
-        or None if no observation overlay is available/applicable.
-        """
-        if not add_obs:
-            return None
-        var  = str(variable).upper()
-        hemi = str(hemisphere).strip().upper()
-        # ------------------------------------------------------------
-        # FIA -> AF2020 (south only)
-        # ------------------------------------------------------------
-        if var == "FIA":
-            if hemi != "SH":
-                self.logger.info("No AF2020 FIA observational overlay available for hemisphere=%s; plotting model only.", hemi)
-                return None
-            self._validate_f2020_window(plot_dt0, plot_dtN, add_f2020=True, f2020_mode=f2020_mode)
-            mode = str(f2020_mode).strip().lower()
-            if mode not in {"climatology", "overlap"}:
-                raise ValueError(f"f2020_mode must be 'climatology' or 'overlap', got {f2020_mode!r}")
-            if mode == "climatology":
-                obs_da = self.obs.repeat_af2020_fia_daily_climatology(plot_dt0.strftime("%Y-%m-%d"), plot_dtN.strftime("%Y-%m-%d"))
-            else:
-                obs_da = self.obs.subset_af2020_fia_daily(plot_dt0.strftime("%Y-%m-%d"), plot_dtN.strftime("%Y-%m-%d"))
-            obs_df = pd.DataFrame({"time"  : pd.to_datetime(obs_da["time"].values),
-                                   "value" : np.asarray(obs_da.values, dtype=float)}).dropna()
-            return None if obs_df.empty else obs_df
-        # ------------------------------------------------------------
-        # SIA -> NSIDC (north or south)
-        # ------------------------------------------------------------
-        if var == "SIA":
-            nsidc = self.obs.compute_nsidc_sia_sie(start_date = plot_dt0.strftime("%Y-%m-%d"),
-                                                   end_date   = plot_dtN.strftime("%Y-%m-%d"),
-                                                   hemisphere = hemi)
-            if "SIA" not in nsidc:
-                raise KeyError("NSIDC observational dataset did not return 'SIA'.")
-            obs_da = nsidc["SIA"]
-            obs_df = pd.DataFrame({"time" : pd.to_datetime(obs_da["time"].values),
-                                   "value": np.asarray(obs_da.values, dtype=float)}).dropna()
-            return None if obs_df.empty else obs_df
-        # ------------------------------------------------------------
-        # Other variables -> no observational overlay implemented
-        # ------------------------------------------------------------
-        self.logger.info("No observational overlay implemented for variable=%s; plotting model only.", var)
-        return None
 
     def plot_timeseries(self, variable: str, method: str,
                         region      : str        = "total",
@@ -779,21 +788,16 @@ class CICEPlotter:
             fig.show()
         return str(path)
 
-    def plot_var_split_hemisphere(
-        self,
-        date_str: str,
-        variable: str,
-        *,
-        method: str | None = None,
-        add_nsidc_south: bool = True,
-        add_nsidc_north: bool = False,
-        output_path: str | None = None,
-        fig_size: float | None = None,
-        cmap: str = "viridis",
-        series: Sequence[float] | None = None,
-        title: str | None = None,
-        grid_style: str | None = None,
-    ) -> str:
+    def plot_var_split_hemisphere(self, date_str: str, variable: str, *,
+                                  method         : str | None = None,
+                                  add_nsidc_south: bool = True,
+                                  add_nsidc_north: bool = False,
+                                  output_path    : str | None = None,
+                                  fig_size       : float | None = None,
+                                  cmap           : str = "viridis",
+                                  series         : Sequence[float] | None = None,
+                                  title          : str | None = None,
+                                  grid_style     : str | None = None) -> str:
         pygmt = self._require_pygmt()
         da, lon, lat = self._load_field(variable, date_str=date_str, method=method)
         path = Path(output_path).expanduser() if output_path else self.paths.split_hemisphere_plot_path(variable, date_str)
@@ -824,36 +828,29 @@ class CICEPlotter:
         fig.savefig(path)
         return str(path)
 
-    def plot_var_by_region(
-        self,
-        date_str: str,
-        variable: str,
-        *,
-        method: str | None = None,
-        region_name: str | None = None,
-        region: Sequence[float] | None = None,
-        regions: Mapping[str, Sequence[float]] | None = None,
-        output_path: str | None = None,
-        output_root: str | Path | None = None,
-        fig_size: float | None = None,
-        cmap: str = "viridis",
-        series: Sequence[float] | None = None,
-        title: str | None = None,
-        grid_style: str | None = None,
-        add_nsidc: bool | None = None,
-    ) -> str | dict[str, str]:
+    def plot_var_by_region(self, date_str: str, variable: str, *,
+                           method     : str | None = None,
+                           region_name: str | None = None,
+                           region     : Sequence[float] | None = None,
+                           regions    : Mapping[str, Sequence[float]] | None = None,
+                           output_path: str | None = None,
+                           output_root: str | Path | None = None,
+                           fig_size   : float | None = None,
+                           cmap       : str = "viridis",
+                           series     : Sequence[float] | None = None,
+                           title      : str | None = None,
+                           grid_style : str | None = None,
+                           add_nsidc  : bool | None = None) -> str | dict[str, str]:
         pygmt = self._require_pygmt()
         da, lon, lat = self._load_field(variable, date_str=date_str, method=method)
         region_map = self._resolve_regions(region_name=region_name, region=region, regions=regions)
         out: dict[str, str] = {}
         for name, reg in region_map.items():
             data = self.pygmt_da_prep(da, lon=lon, lat=lat, region=reg)
-            path = Path(output_path).expanduser() if output_path and len(region_map) == 1 else (
-                Path(output_root).expanduser() / self.run.sim_name / name / variable / f"{date_str}.png"
-                if output_root is not None else self.paths.regional_var_plot_path(variable, date_str, name)
-            )
+            path = Path(output_path).expanduser() if output_path and len(region_map) == 1 else (Path(output_root).expanduser() / self.run.sim_name / name / variable / f"{date_str}.png"
+                                                                                                if output_root is not None else self.paths.regional_var_plot_path(variable, date_str, name))
             path.parent.mkdir(parents=True, exist_ok=True)
-            fig = pygmt.Figure()
+            fig  = pygmt.Figure()
             proj = self.projection_from_region(reg, fig_size=fig_size or self.plotting.region_fig_size)
             pygmt.makecpt(cmap=cmap, series=series, continuous=True)
             self.pygmt_base_layer(fig, reg, proj, title=title or f"{self.run.sim_name} {name} {variable} {date_str}")
@@ -870,15 +867,10 @@ class CICEPlotter:
             out[name] = str(path)
         return next(iter(out.values())) if len(out) == 1 else out
 
-    def plot_triptych(
-        self,
-        region: Sequence[float],
-        panels: Sequence[Mapping],
-        *,
-        fig_size: float = 20.0,
-        output_path: str | Path | None = None,
-        panel_gap: str = "1.5c",
-    ) -> str:
+    def plot_triptych(self, region: Sequence[float], panels: Sequence[Mapping], *,
+                      fig_size   : float = 20.0,
+                      output_path: str | Path | None = None,
+                      panel_gap  : str = "1.5c") -> str:
         """Generic 3-panel regional plotter with per-panel layer stacks.
 
         Each panel dict may contain:

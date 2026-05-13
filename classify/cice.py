@@ -12,6 +12,8 @@ from shuga.core.types      import ClassificationSpec, RunSpec
 from shuga.io.zarr_loading import load_cice
 from shuga.regridding.cice import compute_tgrid_speed, parse_grid_selection
 
+
+# POSSIBLE MOVE THIS TO shuga/IO/zarr_writing.py **NEW FILE**
 def _sanitize_for_zarr_write(ds: xr.Dataset) -> xr.Dataset:
     ds = ds.copy()
     # Drop inherited backend encoding that can poison writes.
@@ -21,6 +23,7 @@ def _sanitize_for_zarr_write(ds: xr.Dataset) -> xr.Dataset:
     ds.encoding = {}
     return ds
 
+# POSSIBLE MOVE THIS TO shuga/core/netcdf_helper.py **NEW FILE**
 def _strip_to_classification_coords(da: xr.DataArray) -> xr.DataArray:
     """
     Keep only the minimal coordinates needed for classification output.
@@ -159,6 +162,9 @@ class CICEClassifier:
     def grid_selection(self) -> tuple[str, ...]:
         return parse_grid_selection(self.classify.grid_type)
 
+    #----------------------------------------------------------------------------
+    # helpers
+    #---------------------------------------------------------------------------
     def _required_padding_days(self, methods: list[str] | tuple[str, ...]) -> int:
         pads = [0]
         methods = [normalize_method(m) for m in methods]
@@ -184,6 +190,9 @@ class CICEClassifier:
         vars_keep = [self.classify.speed_var_u, self.classify.speed_var_v]
         return vars_keep
 
+    def _crop_requested_window(self, da: xr.DataArray) -> xr.DataArray:
+        return da.sel(time=slice(self.run.start_date, self.run.end_date))
+
     def load_cice(self, methods: list[str] | tuple[str, ...] | None = None) -> xr.Dataset:
         methods     = list(methods or self.classify.methods)
         extend_days = self._required_padding_days(methods)
@@ -205,6 +214,18 @@ class CICEClassifier:
                                        chunks     = self.chunks)
         return self._ds_cache
 
+    def _output_chunk_map(self, ds_out: xr.Dataset) -> dict[str, int]:
+        chunk_map: dict[str, int] = {}
+        if "time" in ds_out.dims:
+            chunk_map["time"] = int(self.chunks.get("time", 31))
+        for dim in ds_out.dims:
+            if dim != "time":
+                chunk_map[dim] = -1
+        return chunk_map
+
+    #----------------------------------------------------------------------------
+    # APIs
+    #---------------------------------------------------------------------------
     def compute_speed(self, ds: xr.Dataset) -> xr.DataArray:
         """
         Reconstruct sea-ice speed magnitude on the target T grid.
@@ -295,9 +316,6 @@ class CICEClassifier:
                            "classification_method": "raw",
                            "grid_type"            : " ".join(self.grid_selection)})
         return mask.astype("bool")
-
-    def _crop_requested_window(self, da: xr.DataArray) -> xr.DataArray:
-        return da.sel(time=slice(self.run.start_date, self.run.end_date))
 
     def classify_raw(self, ds: xr.Dataset | None = None) -> xr.DataArray:
         """
@@ -442,16 +460,8 @@ class CICEClassifier:
             return self.classify_binary_days(ds)
         return self.classify_rolling_mean(ds)
 
-    def _output_chunk_map(self, ds_out: xr.Dataset) -> dict[str, int]:
-        chunk_map: dict[str, int] = {}
-        if "time" in ds_out.dims:
-            chunk_map["time"] = int(self.chunks.get("time", 31))
-        for dim in ds_out.dims:
-            if dim != "time":
-                chunk_map[dim] = -1
-        return chunk_map
-
-    def write_classification(self, method: str, data: xr.Dataset | xr.DataArray, *, overwrite: bool = False) -> str:
+    def write_classification(self, method: str, data: xr.Dataset | xr.DataArray, *,
+                             overwrite: bool = False) -> str:
         """
         Write classified output to its method-specific Zarr store.
 
@@ -467,15 +477,13 @@ class CICEClassifier:
                 return str(store)
             shutil.rmtree(store)
         if isinstance(data, xr.DataArray):
-            mask = _strip_to_classification_coords(data)
+            mask  = _strip_to_classification_coords(data)
             t_org = mask["time"] if "time" in mask.coords else None
-            mask = xr.DataArray(
-                mask.data,
-                dims=mask.dims,
-                coords={"time": t_org} if t_org is not None else None,
-                name="FI_mask",
-                attrs=mask.attrs,
-            )
+            mask  = xr.DataArray(mask.data,
+                                 dims   = mask.dims,
+                                 coords = {"time": t_org} if t_org is not None else None,
+                                 name   = "FI_mask",
+                                 attrs  = mask.attrs)
             ds_out = xr.Dataset({"FI_mask": mask})
         else:
             if "FI_mask" not in data.data_vars:
@@ -487,25 +495,21 @@ class CICEClassifier:
             cleaned = {}
             for name in ("FI_mask", "FI_ispd", "FI_aice"):
                 if name in data.data_vars:
-                    da = _strip_to_classification_coords(data[name])
+                    da    = _strip_to_classification_coords(data[name])
                     t_org = da["time"] if "time" in da.coords else None
-                    cleaned[name] = xr.DataArray(
-                        da.data,
-                        dims=da.dims,
-                        coords={"time": t_org} if t_org is not None else None,
-                        name=name,
-                        attrs=da.attrs,
-                    )
+                    cleaned[name] = xr.DataArray(da.data,
+                                                 dims   = da.dims,
+                                                 coords = {"time": t_org} if t_org is not None else None,
+                                                 name   = name,
+                                                 attrs  = da.attrs)
             ds_out = xr.Dataset(cleaned)
-        ds_out.attrs.update({
-            "sim_name": self.run.sim_name,
-            "start_date": self.run.start_date,
-            "end_date": self.run.end_date,
-            "hemisphere": self.run.hemisphere,
-            "ice_type": self.classify.ice_type,
-            "grid_type": self.classify.grid_type,
-            "method": normalize_method(method),
-        })
+        ds_out.attrs.update({"sim_name"  : self.run.sim_name,
+                             "start_date": self.run.start_date,
+                             "end_date"  : self.run.end_date,
+                             "hemisphere": self.run.hemisphere,
+                             "ice_type"  : self.classify.ice_type,
+                             "grid_type" : self.classify.grid_type,
+                             "method"    : normalize_method(method)})
         chunk_map = self._output_chunk_map(ds_out)
         if chunk_map:
             self.logger.info("Rechunking classification output with chunks: %s", chunk_map)

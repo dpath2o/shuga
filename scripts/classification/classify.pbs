@@ -13,6 +13,11 @@ module use /g/data/xp65/public/modules
 module load conda/analysis3-25.12
 PROJECT="${PROJECT:-gv90}"
 RUN_USER="${RUN_USER:-da1339}"
+ICEH_FREQUENCY="${ICEH_FREQUENCY:-daily}"
+DAILY_ROOT="${DAILY_ROOT:-}"
+HOURLY_ROOT="${HOURLY_ROOT:-}"
+CHUNKS_TIME="${CHUNKS_TIME:-}"
+SKIP_HISTORY_CONVERSION="${SKIP_HISTORY_CONVERSION:-false}"
 SIM_NAME="${SIM_NAME:?SIM_NAME not set}"
 START_DATE="${START_DATE:?START_DATE not set}"
 END_DATE="${END_DATE:?END_DATE not set}"
@@ -25,6 +30,10 @@ BIN_WINDOW="${BIN_WINDOW:-11}"
 BIN_MIN_DAYS="${BIN_MIN_DAYS:-9}"
 ROLL_WINDOW="${ROLL_WINDOW:-15}"
 OVERWRITE="${OVERWRITE:-false}"
+OVERWRITE_HISTORY="${OVERWRITE_HISTORY:-false}"
+OVERWRITE_STATIC="${OVERWRITE_STATIC:-false}"
+DELETE_ORIGINAL="${DELETE_ORIGINAL:-false}"
+NETCDF_ENGINE="${NETCDF_ENGINE:-scipy}"
 GRID_FILE="${GRID_FILE:-}"
 KMT_FILE="${KMT_FILE:-}"
 BATHYMETRY_FILE="${BATHYMETRY_FILE:-}"
@@ -34,8 +43,8 @@ ICE_IN_FILE="${ICE_IN_FILE:-}"
 PERSIST_GRID_ASSETS="${PERSIST_GRID_ASSETS:-false}"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 METHODS="${METHODS//|/,}"
-REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest/shuga}"
-PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/scripts/classification/classify.py}"
+REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest}"
+PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/shuga/scripts/classification/classify.py}"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 export DASK_TEMPORARY_DIRECTORY="/scratch/${PROJECT}/${RUN_USER}/dask_tmp/${PBS_JOBID}"
 export TMPDIR="/scratch/${PROJECT}/${RUN_USER}/tmp/${PBS_JOBID}"
@@ -54,6 +63,8 @@ CMD=(python "$PY_SCRIPT"
      --bin-window "$BIN_WINDOW"
      --bin-min-days "$BIN_MIN_DAYS"
      --roll-window "$ROLL_WINDOW"
+     --iceh-frequency "$ICEH_FREQUENCY"
+     --netcdf-engine "$NETCDF_ENGINE"
      --log-level "$LOG_LEVEL")
 [[ -n "${CICE_STORE:-}" ]] && CMD+=(--cice-store "$CICE_STORE")
 [[ -n "${STATIC_STORE:-}" ]] && CMD+=(--static-store "$STATIC_STORE")
@@ -65,6 +76,13 @@ CMD=(python "$PY_SCRIPT"
 [[ -n "${F2_FILE:-}" ]] && CMD+=(--f2-file "$F2_FILE")
 [[ -n "${GRIDCPL_FILE:-}" ]] && CMD+=(--gridcpl-file "$GRIDCPL_FILE")
 [[ -n "${ICE_IN_FILE:-}" ]] && CMD+=(--ice-in-file "$ICE_IN_FILE")
+[[ -n "${DAILY_ROOT:-}" ]] && CMD+=(--daily-root "$DAILY_ROOT")
+[[ -n "${HOURLY_ROOT:-}" ]] && CMD+=(--hourly-root "$HOURLY_ROOT")
+[[ -n "${CHUNKS_TIME:-}" ]] && CMD+=(--chunks-time "$CHUNKS_TIME")
+[[ "${SKIP_HISTORY_CONVERSION:-false}" == "true" ]] && CMD+=(--skip-history-conversion)
+[[ "${OVERWRITE_HISTORY:-false}" == "true" ]] && CMD+=(--overwrite-history)
+[[ "${OVERWRITE_STATIC:-false}" == "true" ]] && CMD+=(--overwrite-static)
+[[ "${DELETE_ORIGINAL:-false}" == "true" ]] && CMD+=(--delete-original)
 [[ "${PERSIST_GRID_ASSETS:-false}" == "true" ]] && CMD+=(--persist-grid-assets)
 [[ -n "${LOGS_ROOT:-}" ]] && CMD+=(--logs-root "$LOGS_ROOT")
 [[ "${OVERWRITE:-false}" == "true" ]] && CMD+=(--overwrite)
