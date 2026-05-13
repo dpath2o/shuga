@@ -1,4 +1,3 @@
-
 from __future__            import annotations
 import shutil
 from collections.abc       import Callable
@@ -11,31 +10,31 @@ from shuga.core.paths      import ShugaPaths
 from shuga.core.types      import ClassificationSpec, RunSpec
 from shuga.io.zarr_loading import load_cice
 from shuga.regridding.cice import compute_tgrid_speed, parse_grid_selection
-
+from shuga.io.zarr_writing import sanitise_for_zarr_write, strip_to_time_coord
 
 # POSSIBLE MOVE THIS TO shuga/IO/zarr_writing.py **NEW FILE**
-def _sanitize_for_zarr_write(ds: xr.Dataset) -> xr.Dataset:
-    ds = ds.copy()
-    # Drop inherited backend encoding that can poison writes.
-    for name in ds.variables:
-        ds[name].encoding = {}
-    # Dataset-level encoding can also carry backend state.
-    ds.encoding = {}
-    return ds
+# def _sanitize_for_zarr_write(ds: xr.Dataset) -> xr.Dataset:
+#     ds = ds.copy()
+#     # Drop inherited backend encoding that can poison writes.
+#     for name in ds.variables:
+#         ds[name].encoding = {}
+#     # Dataset-level encoding can also carry backend state.
+#     ds.encoding = {}
+#     return ds
 
-# POSSIBLE MOVE THIS TO shuga/core/netcdf_helper.py **NEW FILE**
-def _strip_to_classification_coords(da: xr.DataArray) -> xr.DataArray:
-    """
-    Keep only the minimal coordinates needed for classification output.
-    Retain time coordinate if present; drop all spatial/static coords.
-    """
-    time_coord = da["time"] if "time" in da.coords else None
-    clean      = xr.DataArray(da.data,
-                              dims   = da.dims,
-                              coords = {"time": time_coord} if time_coord is not None else None,
-                              name   = da.name,
-                              attrs  = da.attrs)
-    return clean
+# # POSSIBLE MOVE THIS TO shuga/core/netcdf_helper.py **NEW FILE**
+# def _strip_to_classification_coords(da: xr.DataArray) -> xr.DataArray:
+#     """
+#     Keep only the minimal coordinates needed for classification output.
+#     Retain time coordinate if present; drop all spatial/static coords.
+#     """
+#     time_coord = da["time"] if "time" in da.coords else None
+#     clean      = xr.DataArray(da.data,
+#                               dims   = da.dims,
+#                               coords = {"time": time_coord} if time_coord is not None else None,
+#                               name   = da.name,
+#                               attrs  = da.attrs)
+#     return clean
 
 class CICEClassifier:
     """
@@ -477,7 +476,8 @@ class CICEClassifier:
                 return str(store)
             shutil.rmtree(store)
         if isinstance(data, xr.DataArray):
-            mask  = _strip_to_classification_coords(data)
+            mask  = strip_to_time_coord(data)
+            #mask  = _strip_to_classification_coords(data)
             t_org = mask["time"] if "time" in mask.coords else None
             mask  = xr.DataArray(mask.data,
                                  dims   = mask.dims,
@@ -495,7 +495,8 @@ class CICEClassifier:
             cleaned = {}
             for name in ("FI_mask", "FI_ispd", "FI_aice"):
                 if name in data.data_vars:
-                    da    = _strip_to_classification_coords(data[name])
+                    da    = strip_to_time_coord(data[name])
+                    #da    = _strip_to_classification_coords(data[name])
                     t_org = da["time"] if "time" in da.coords else None
                     cleaned[name] = xr.DataArray(da.data,
                                                  dims   = da.dims,
@@ -514,7 +515,7 @@ class CICEClassifier:
         if chunk_map:
             self.logger.info("Rechunking classification output with chunks: %s", chunk_map)
             ds_out = ds_out.chunk(chunk_map)
-        ds_out = _sanitize_for_zarr_write(ds_out)
+        ds_out = sanitise_for_zarr_write(ds_out)
         encoding = {}
         for name, var in ds_out.data_vars.items():
             if getattr(var.data, "chunks", None) is not None:

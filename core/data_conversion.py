@@ -371,48 +371,6 @@ class NC2Zarr:
             result.static_store = static_store
         return result
 
-    # def ensure_iceh_stores(self, *,
-    #                        dt0_str         : str | None = None,
-    #                        dtN_str         : str | None = None,
-    #                        daily_root      : str | Path | None = None,
-    #                        hourly_root     : str | Path | None = None,
-    #                        overwrite       : bool = False,
-    #                        overwrite_static: bool = False,
-    #                        delete_original : bool = False,
-    #                        netcdf_engine   : str | None = None) -> NC2ZarrResult:
-    #     """
-    #     Ensure the dynamic ice-history Zarr store and companion iceh_static.zarr
-    #     exist for either daily or hourly CICE history output.
-    #     """
-    #     freq = str(getattr(self.paths.run, "iceh_frequency", "daily")).strip().lower()
-    #     if freq == "hourly":
-    #         result = self.hourly_iceh_to_daily_zarr(dt0_str          = dt0_str,
-    #                                                 dtN_str          = dtN_str,
-    #                                                 hourly_root      = hourly_root,
-    #                                                 overwrite        = overwrite,
-    #                                                 delete_original  = delete_original,
-    #                                                 netcdf_engine    = netcdf_engine,
-    #                                                 overwrite_static = overwrite_static)
-    #     elif freq == "daily":
-    #         result = self.daily_iceh_to_monthly_zarr(dt0_str          = dt0_str,
-    #                                                  dtN_str          = dtN_str,
-    #                                                  daily_root       = daily_root,
-    #                                                  overwrite        = overwrite,
-    #                                                  delete_original  = delete_original,
-    #                                                  netcdf_engine    = netcdf_engine,
-    #                                                  overwrite_static = overwrite_static)
-    #     else:
-    #         raise ValueError(f"Unsupported iceh_frequency={freq!r}. Use 'daily' or 'hourly'.")
-    #     if result.static_store is None or not result.static_store.exists():
-    #         static_store = self.ensure_iceh_static_store(dt0_str                 = dt0_str,
-    #                                                      dtN_str                 = dtN_str,
-    #                                                      daily_root              = daily_root,
-    #                                                      hourly_root             = hourly_root,
-    #                                                      overwrite               = overwrite_static,
-    #                                                      allow_gridwork_fallback = True)
-    #         result.static_store = static_store
-    #     return result
-
     def hourly_iceh_to_daily_zarr(self, *,
                                   dt0_str          : str | None = None,
                                   dtN_str          : str | None = None,
@@ -643,65 +601,6 @@ class NC2Zarr:
                                 freq, static_store)
         return self._build_iceh_static_zarr_from_grid_assets(static_store=static_store)
 
-    # def ensure_iceh_static_store(self, *,
-    #                              dt0_str          : str | None = None,
-    #                              dtN_str          : str | None = None,
-    #                              daily_root       : str | Path | None = None,
-    #                              overwrite        : bool = False,
-    #                              verify_all_groups: bool = True) -> Path | None:
-    #     """
-    #     Ensure ``iceh_static.zarr`` exists.
-
-    #     Preference order:
-    #     1. build from grouped ``iceh_daily.zarr`` if those groups still contain
-    #        static content;
-    #     2. build from the first available daily NetCDF file if it still contains
-    #        static content;
-    #     3. build from grid assets resolved from ``ice_in`` or ``ice_diag.d``.
-
-    #     If neither ``ice_in`` nor ``ice_diag.d`` can be found, fallback (3) is
-    #     deliberately disabled because the grid/mask provenance is then ambiguous.
-    #     """
-    #     static_store = self.paths.resolve_static_store_target()
-    #     if static_store.exists() and not overwrite:
-    #         self.logger.info("Static store already exists, skipping: %s", static_store)
-    #         return static_store
-    #     if static_store.exists() and overwrite:
-    #         self.logger.info("Overwriting static store: %s", static_store)
-    #         shutil.rmtree(static_store)
-    #     cice_store = self.paths.resolve_cice_store_target()
-    #     if cice_store.exists():
-    #         built = self.build_iceh_static_zarr_from_grouped_daily(cice_store           = cice_store,
-    #                                                                static_store         = static_store,
-    #                                                                overwrite            = False,
-    #                                                                verify_all_groups    = verify_all_groups,
-    #                                                                allow_empty_fallback = True)
-    #         if built is not None and built.exists():
-    #             return built
-    #     source_files: list[Path] = []
-    #     try:
-    #         daily_dir = self.paths.resolve_daily_iceh_root(daily_root)
-    #         source_files = self._select_daily_files_between_dates(daily_dir, dt0_str, dtN_str)
-    #     except FileNotFoundError as exc:
-    #         self.logger.info("No daily NetCDF root available for static extraction (%s); trying grid-asset fallback.", exc)
-    #     if source_files:
-    #         self.logger.info("Building %s from first available daily file %s", static_store, source_files[0])
-    #         ds = xr.open_dataset(source_files[0], engine=self.netcdf_engine)
-    #         try:
-    #             ds_static = self._build_iceh_static_dataset(ds, log_missing=True)
-    #             if ds_static.data_vars or ds_static.coords:
-    #                 ds_static = self._prepare_iceh_static_for_write(ds_static)
-    #                 static_store.parent.mkdir(parents=True, exist_ok=True)
-    #                 ds_static.to_zarr(static_store, mode="w", consolidated=False)
-    #                 self.logger.info("Wrote static store from daily NetCDF: %s", static_store)
-    #                 return static_store
-    #             self.logger.warning("Daily file %s contains no usable static fields; trying grid-asset fallback.", source_files[0])
-    #         finally:
-    #             ds.close()
-    #     else:
-    #         self.logger.info("No daily NetCDF files available to build %s; trying grid-asset fallback.", static_store)
-    #     return self.build_iceh_static_zarr_from_grid_assets(static_store = static_store, overwrite = False)
-
     def build_iceh_static_zarr_from_grouped_iceh(self, *,
                                                  cice_store: str | Path | None = None,
                                                  static_store: str | Path | None = None,
@@ -796,54 +695,4 @@ class NC2Zarr:
             allow_empty_fallback = allow_empty_fallback,
         )
 
-    # def build_iceh_static_zarr_from_grouped_daily(self, *,
-    #                                               cice_store: str | Path | None = None,
-    #                                               static_store: str | Path | None = None,
-    #                                               overwrite: bool = False,
-    #                                               verify_all_groups: bool = True,
-    #                                               allow_empty_fallback: bool = False) -> Path | None:
-    #     """
-    #     Build ``iceh_static.zarr`` from an existing grouped ``iceh_daily.zarr``
-    #     root if those monthly groups still contain static fields.
-    #     """
-    #     cice_store = Path(cice_store).expanduser() if cice_store is not None else self.paths.resolve_cice_store_target()
-    #     static_store = Path(static_store).expanduser() if static_store is not None else self.paths.resolve_static_store_target()
-    #     if not cice_store.exists():
-    #         raise FileNotFoundError(f"Grouped CICE store not found: {cice_store}")
-    #     groups = sorted(p.name for p in cice_store.iterdir() if p.is_dir() and _MONTH_RE.fullmatch(p.name))
-    #     if not groups:
-    #         raise FileNotFoundError(f"No YYYY-MM groups found under {cice_store}")
-    #     if static_store.exists() and not overwrite:
-    #         self.logger.info("Static store already exists, skipping: %s", static_store)
-    #         return static_store
-    #     if static_store.exists() and overwrite:
-    #         self.logger.info("Overwriting existing static store: %s", static_store)
-    #         shutil.rmtree(static_store)
-    #     ref_group = groups[0]
-    #     self.logger.info("Building static store from grouped month %s", ref_group)
-    #     ds_ref = xr.open_zarr(cice_store, group=ref_group, consolidated=False)
-    #     try:
-    #         ds_static = self._build_iceh_static_dataset(ds_ref, log_missing=True)
-    #         if not ds_static.data_vars and not ds_static.coords:
-    #             if allow_empty_fallback:
-    #                 self.logger.info("Grouped month %s contains no static content; falling back to daily NetCDF source", ref_group)
-    #                 return None
-    #             raise ValueError(f"No static content found in grouped month {ref_group}")
-    #         if verify_all_groups and len(groups) > 1:
-    #             self.logger.info("Checking static consistency across %d grouped months", len(groups))
-    #             for g in groups[1:]:
-    #                 ds_g = xr.open_zarr(cice_store, group=g, consolidated=False)
-    #                 try:
-    #                     ds_g_static = self._build_iceh_static_dataset(ds_g, log_missing=False)
-    #                     if ds_g_static.data_vars or ds_g_static.coords:
-    #                         self._warn_if_iceh_static_differs(ds_g_static, ds_static, context=f"group {g} vs {ref_group}")
-    #                 finally:
-    #                     ds_g.close()
-    #         ds_static = self._prepare_iceh_static_for_write(ds_static)
-    #         static_store.parent.mkdir(parents=True, exist_ok=True)
-    #         ds_static.to_zarr(static_store, mode="w", consolidated=False)
-    #         self.logger.info("Wrote static store: %s", static_store)
-    #         return static_store
-    #     finally:
-    #         ds_ref.close()
 

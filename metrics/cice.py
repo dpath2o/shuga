@@ -12,6 +12,7 @@ from shuga.core.paths      import ShugaPaths
 from shuga.core.regions    import ANTARCTIC_8_REGIONS
 from shuga.core.types      import ClassificationSpec, MetricsSpec, RunSpec
 from shuga.io.zarr_loading import load_cice, load_classified
+from shuga.io.zarr_writing import sanitise_for_zarr_write
 
 """
 Incremental CICE metrics builder for fast-ice and sea-ice diagnostics.
@@ -20,13 +21,6 @@ The class computes time-series, spatial, regional, seasonal-summary,
 persistence, skill, and stress metrics from classified masks and CICE history
 fields, and writes them to method-specific metrics Zarr stores.
 """
-
-def _sanitize_for_zarr_write(ds: xr.Dataset) -> xr.Dataset:
-    ds = ds.copy()
-    for name in ds.variables:
-        ds[name].encoding = {}
-    ds.encoding = {}
-    return ds
 
 def _as_list(value: str | Iterable[str] | None) -> list[str]:
     if value is None:
@@ -816,7 +810,7 @@ class CICEMetrics:
             elif name == "SIS" and "strength" in ds:
                 return remember(name, self.compute_strength_series(aice, hi, ds["strength"], area, si_mask,
                                                                    name      = "SIS",
-                                                                   long_name = "Sea Ice Strength")
+                                                                   long_name = "Sea Ice Strength"),
                                 publish=publish)
             elif name == "SITVR" and "dvidtt" in ds:
                 return remember(name, self.compute_volume_rate(ds["dvidtt"], aice, area, si_mask,
@@ -1014,7 +1008,8 @@ class CICEMetrics:
         if chunk_map:
             self.logger.info("Rechunking metrics output with chunks: %s", chunk_map)
             ds_out = ds_out.chunk(chunk_map)
-        ds_out = _sanitize_for_zarr_write(ds_out)
+        ds_out = sanitise_for_zarr_write(ds_out)
+        #ds_out = _sanitize_for_zarr_write(ds_out)
         return ds_out
 
     #----------------------------------------------------------------------------------

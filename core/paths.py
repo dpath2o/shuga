@@ -171,9 +171,6 @@ class ShugaPaths:
         raise FileNotFoundError(f"Could not infer {freq} CICE NetCDF root from the default AFIM layout. "
                                 f"Tried: {', '.join(str(c) for c in candidates)}")
 
-    def resolve_daily_iceh_root(self, daily_root: str | Path | None = None) -> Path:
-        return self.resolve_iceh_history_root(daily_root, frequency="daily")
-
     def resolve_hourly_iceh_root(self, hourly_root: str | Path | None = None) -> Path:
         return self.resolve_iceh_history_root(hourly_root, frequency="hourly")
 
@@ -267,10 +264,10 @@ class ShugaPaths:
             path = path / part
         return path
 
-    def fip_plot_path(self, method: str, region: str = "TOTAL") -> Path:
-        method_part = method_slug(method)
-        name = f"{self.run.start_date}_{self.run.end_date}_{self.run.sim_name}_FIP_{method_part}.png"
-        return self.figure_root(region=region) / "FIP" / name
+    # def fip_plot_path(self, method: str, region: str = "TOTAL") -> Path:
+    #     method_part = method_slug(method)
+    #     name = f"{self.run.start_date}_{self.run.end_date}_{self.run.sim_name}_FIP_{method_part}.png"
+    #     return self.figure_root(region=region) / "FIP" / name
 
     def timeseries_plot_path(self, variable: str, method: str, region: str = "total") -> Path:
         method_part = method_slug(method)
