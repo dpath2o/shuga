@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from .paths import ShugaPaths
+from shuga.grid.static import CICEStaticBuilder
 
 __all__         = ["NC2Zarr", "NC2ZarrResult"]
 _MONTH_RE       = re.compile(r"^\d{4}-\d{2}$")
@@ -49,65 +50,13 @@ class NC2Zarr:
         self.netcdf_engine = netcdf_engine
 
     # ------------------------------------------------------------------
-    # helpers: TO MOVE TO shuga/grid/math.py **NEW FILE/MODULE**
+    # helpers:
     # ------------------------------------------------------------------
-    def _latlon_to_degrees(self, da: xr.DataArray, target: str) -> xr.DataArray:
-        values = np.asarray(da.values, dtype="float64")
-        units = str(da.attrs.get("units", "")).strip().lower()
-        finite = np.isfinite(values)
-        if "radian" in units or (finite.any() and np.nanmax(np.abs(values[finite])) <= 2.0 * np.pi + 1e-6):
-            values = np.rad2deg(values)
-        if target.endswith("LON"):
-            values = self._normalise_lon_values(values)
-        attrs = dict(da.attrs)
-        attrs["units"] = "degrees"
-        attrs.setdefault("standard_name", "longitude" if target.endswith("LON") else "latitude")
-        return xr.DataArray(values, dims=da.dims, coords=self._dim_coords(da), attrs=attrs, name=target)
-
-    def _normalise_lon_values(self, lon: np.ndarray) -> np.ndarray:
-        lon_wrapped = ((lon % 360.0) + 360.0) % 360.0
-        spec = self.paths.cice_grid
-        lon_type = getattr(spec, "lon_type", "-180-180") if spec is not None else "-180-180"
-
-        if lon_type == "-180-180":
-            out = ((lon_wrapped + 180.0) % 360.0) - 180.0
-            return np.where(np.isclose(out, 180.0), -180.0, out)
-        return np.where(np.isclose(lon_wrapped, 360.0), 0.0, lon_wrapped)
-
-    def _angle_to_radians(self, da: xr.DataArray, target: str) -> xr.DataArray:
-        values = np.asarray(da.values, dtype="float64")
-        units = str(da.attrs.get("units", "")).strip().lower()
-        finite = np.isfinite(values)
-        if "degree" in units or (finite.any() and np.nanmax(np.abs(values[finite])) > 2.0 * np.pi + 1e-6):
-            values = np.deg2rad(values)
-        attrs = dict(da.attrs)
-        attrs["units"] = "radians"
-        return xr.DataArray(values, dims=da.dims, coords=self._dim_coords(da), attrs=attrs, name=target)
-
-    def _metric_to_meters(self, da: xr.DataArray, target: str) -> xr.DataArray:
-        values = np.asarray(da.values, dtype="float64")
-        units = str(da.attrs.get("units", "")).strip().lower()
-        if unit_is_cm := units in {"cm", "centimeter", "centimeters", "centimetre", "centimetres"}:
-            values = values / 100.0
-        elif units in {"km", "kilometer", "kilometers", "kilometre", "kilometres"}:
-            values = values * 1000.0
-        attrs = dict(da.attrs)
-        attrs["units"] = "m"
-        return xr.DataArray(values, dims=da.dims, coords=self._dim_coords(da), attrs=attrs, name=target)
-
-    def _area_to_m2(self, da: xr.DataArray, target: str) -> xr.DataArray:
-        values = np.asarray(da.values, dtype="float64")
-        units = str(da.attrs.get("units", "")).strip().lower().replace(" ", "")
-        if units in {"cm^2", "cm2"}:
-            values = values / 10_000.0
-        elif units in {"km^2", "km2"}:
-            values = values * 1_000_000.0
-        attrs = dict(da.attrs)
-        attrs["units"] = "m^2"
-        return xr.DataArray(values, dims=da.dims, coords=self._dim_coords(da), attrs=attrs, name=target)
-
-    def _dim_coords(self, da: xr.DataArray) -> dict[str, xr.DataArray]:
-        return {dim: da.coords[dim] for dim in da.dims if dim in da.coords}
+    def _iceh_frequency(self) -> str:
+        freq = str(getattr(self.paths, "iceh_frequency", getattr(self.paths.run, "iceh_frequency", "daily"))).lower()
+        if freq not in {"daily", "hourly"}:
+            raise ValueError(f"Unsupported iceh_frequency={freq!r}; expected 'daily' or 'hourly'.")
+        return freq
 
     # ------------------------------------------------------------------
     # helpers: discovery / update checks
@@ -251,369 +200,18 @@ class NC2Zarr:
     def _build_iceh_static_dataset_from_grid_assets(self, *,
                                                     assets: dict[str, Path | None],
                                                     metadata_file: Path) -> xr.Dataset:
-        """
-        Construct a history-compatible static dataset from CICEGridwork plus any
-        native variables available in the grid file.
-
-        The main recoverable fields are:
-
-        - TLON/TLAT, ULON/ULAT, NLON/NLAT, ELON/ELAT when present in the grid file;
-        - ANGLE/ANGLET;
-        - HTE/HTN and derived dxt/dyt/dxu/dyu/dxe/dye/dxn/dyn fallbacks;
-        - tarea/uarea/earea/narea;
-        - tmask plus derived umask/nmask/emask/blkmask;
-        - bathymetry if a bathymetry file is available;
-        - NCAT if it can be parsed from ice_in or ice_diag.d.
-
-        VGRDa/VGRDb/VGRDi/VGRDs are not invented here because they are not
-        recoverable from a horizontal grid file.
-        """
-        from shuga.grid.cice import CICEGridwork
-        grid_file       = Path(assets["grid_file"]).expanduser()
-        kmt_file        = Path(assets["kmt_file"]).expanduser() if assets.get("kmt_file") is not None else None
-        bathymetry_file = (Path(assets["bathymetry_file"]).expanduser() if assets.get("bathymetry_file") is not None else None)
-        gridwork        = CICEGridwork(self.paths, logger=self.logger)
-        bundle          = gridwork.load_cice_grid(P_grid      = grid_file,
-                                                  P_mask_org  = kmt_file,
-                                                  build_faces = False)
-        ds_static = xr.Dataset()
-        # T-grid fields from CICEGridwork are already normalised consistently.
-        for name in ("TLON", "TLAT"):
-            if name in bundle.tgrid:
-                ds_static = ds_static.assign_coords({name: self._prepare_iceh_static_da(bundle.tgrid[name], name=name, context="grid-assets")})
-        tgrid_var_map = {"ANGLET": "ANGLET",
-                         "HTE"   : "HTE",
-                         "HTN"   : "HTN",
-                         "tarea" : "TAREA"}
-        for target, source in tgrid_var_map.items():
-            if source in bundle.tgrid:
-                da = self._prepare_iceh_static_da(bundle.tgrid[source], name=target, context="grid-assets")
-                da.name = target
-                ds_static[target] = da
-        # Pull native CICE-grid fields that CICEGridwork intentionally does not
-        # fully expose, especially U/N/E lon/lat from ACCESS-OM3-025_Cgrid.nc.
-        ds_grid = xr.open_dataset(grid_file, decode_times=False)
-        try:
-            coord_map = {"TLON": ("TLON", "tlon", "t_lon", "lon_t"),
-                         "TLAT": ("TLAT", "tlat", "t_lat", "lat_t"),
-                         "ULON": ("ULON", "ulon", "u_lon", "lon_u"),
-                         "ULAT": ("ULAT", "ulat", "u_lat", "lat_u"),
-                         "NLON": ("NLON", "nlon", "n_lon", "lon_n"),
-                         "NLAT": ("NLAT", "nlat", "n_lat", "lat_n"),
-                         "ELON": ("ELON", "elon", "e_lon", "lon_e"),
-                         "ELAT": ("ELAT", "elat", "e_lat", "lat_e")}
-            for target, candidates in coord_map.items():
-                if target in ds_static.coords:
-                    continue
-                da = self._native_grid_da(ds_grid, target, candidates, kind="lonlat")
-                if da is not None:
-                    ds_static = ds_static.assign_coords({target: da})
-            var_map = {"ANGLE"  : ("ANGLE", "angle", "angle_u"),
-                       "ANGLET" : ("ANGLET", "anglet", "angleT", "angle_t"),
-                       "HTE"    : ("HTE", "hte"),
-                       "HTN"    : ("HTN", "htn"),
-                       "dxt"    : ("dxt", "DXT"),
-                       "dyt"    : ("dyt", "DYT"),
-                       "dxu"    : ("dxu", "DXU"),
-                       "dyu"    : ("dyu", "DYU"),
-                       "dxe"    : ("dxe", "DXE"),
-                       "dye"    : ("dye", "DYE"),
-                       "dxn"    : ("dxn", "DXN"),
-                       "dyn"    : ("dyn", "DYN"),
-                       "tarea"  : ("tarea", "TAREA", "area_t", "area"),
-                       "uarea"  : ("uarea", "UAREA", "area_u"),
-                       "earea"  : ("earea", "EAREA", "area_e"),
-                       "narea"  : ("narea", "NAREA", "area_n"),
-                       "tmask"  : ("tmask", "TMASK"),
-                       "umask"  : ("umask", "UMASK"),
-                       "emask"  : ("emask", "EMASK"),
-                       "nmask"  : ("nmask", "NMASK"),
-                       "blkmask": ("blkmask", "BLKMASK")}
-            for target, candidates in var_map.items():
-                if target in ds_static:
-                    continue
-                if target in {"ANGLE", "ANGLET"}:
-                    kind = "angle"
-                elif target in {"HTE", "HTN", "dxt", "dyt", "dxu", "dyu", "dxe", "dye", "dxn", "dyn"}:
-                    kind = "metric"
-                elif target in {"tarea", "uarea", "earea", "narea"}:
-                    kind = "area"
-                elif target.endswith("mask") or target == "blkmask":
-                    kind = "mask"
-                else:
-                    kind = None
-                da = self._native_grid_da(ds_grid, target, candidates, kind=kind)
-                if da is not None:
-                    ds_static[target] = da
-        finally:
-            ds_grid.close()
-        # Mask from KMT/bathymetry if not present in the grid file.
-        if "tmask" not in ds_static and bundle.mask is not None:
-            tmask = self._prepare_iceh_static_da(bundle.mask, name="tmask", context="grid-assets-mask")
-            ds_static["tmask"] = tmask.astype(np.int8)
-        # Preserve bathymetry as useful provenance/QC if available.
-        if bathymetry_file is not None and bathymetry_file.exists() and bundle.bathymetry is not None:
-            bathy = self._prepare_iceh_static_da(bundle.bathymetry, name="bathymetry", context="grid-assets-bathymetry")
-            bathy.name = "bathymetry"
-            ds_static["bathymetry"] = bathy
-        ds_static = self._fill_missing_static_geometry_from_tgrid(ds_static)
-        ds_static = self._fill_missing_masks_from_tmask(ds_static)
-        ncat      = self._parse_ncat_from_metadata(metadata_file)
-        if ncat is not None and "NCAT" not in ds_static:
-            ds_static["NCAT"] = xr.DataArray(np.int32(ncat), attrs={"long_name": "number of ice categories"})
-        ds_static.attrs.update({"static_source": "grid_assets",
-                                "run_metadata_file": str(metadata_file),
-                                "grid_file": str(grid_file),
-                                "kmt_file": str(kmt_file) if kmt_file is not None else "",
-                                "bathymetry_file": str(bathymetry_file) if bathymetry_file is not None else ""})
-        return ds_static
+        return CICEStaticBuilder(self.paths,logger = self.logger).build_dataset_from_grid_assets(assets = assets, metadata_file = metadata_file)
 
     def _build_iceh_static_zarr_from_grid_assets(self, *,
                                                  static_store: str | Path | None = None,
                                                  overwrite: bool = False) -> Path | None:
-        """
-        Build a minimal iceh_static.zarr from resolved CICE grid assets.
-
-        This is the fallback used when CICE history files were written with
-        static/grid output disabled.
-        """
-        static_store = Path(static_store).expanduser() if static_store is not None else self.paths.resolve_static_store_target()
-        if static_store.exists() and not overwrite:
-            return static_store
-        if static_store.exists() and overwrite:
-            shutil.rmtree(static_store)
         try:
-            from shuga.grid.cice import CICEGridwork
-            gridwork = CICEGridwork(paths=self.paths, logger=self.logger)
-            bundle = gridwork.load_cice_grid(build_faces=True)
-            ds_static = xr.Dataset()
-            tgrid = bundle.tgrid
-            if "TLON" in tgrid:
-                ds_static = ds_static.assign_coords({"TLON": tgrid["TLON"]})
-            if "TLAT" in tgrid:
-                ds_static = ds_static.assign_coords({"TLAT": tgrid["TLAT"]})
-            if bundle.ugrid is not None:
-                if "ULON" in bundle.ugrid:
-                    ds_static = ds_static.assign_coords({"ULON": bundle.ugrid["ULON"]})
-                if "ULAT" in bundle.ugrid:
-                    ds_static = ds_static.assign_coords({"ULAT": bundle.ugrid["ULAT"]})
-            if bundle.egrid is not None:
-                if "ELON" in bundle.egrid:
-                    ds_static = ds_static.assign_coords({"ELON": bundle.egrid["ELON"]})
-                if "ELAT" in bundle.egrid:
-                    ds_static = ds_static.assign_coords({"ELAT": bundle.egrid["ELAT"]})
-            if bundle.ngrid is not None:
-                if "NLON" in bundle.ngrid:
-                    ds_static = ds_static.assign_coords({"NLON": bundle.ngrid["NLON"]})
-                if "NLAT" in bundle.ngrid:
-                    ds_static = ds_static.assign_coords({"NLAT": bundle.ngrid["NLAT"]})
-            if "ANGLET" in tgrid:
-                ds_static["ANGLET"] = tgrid["ANGLET"]
-                ds_static["ANGLE"] = tgrid["ANGLET"]
-            if "HTE" in tgrid:
-                ds_static["HTE"] = tgrid["HTE"]
-                ds_static["dxt"] = tgrid["HTE"]
-            if "HTN" in tgrid:
-                ds_static["HTN"] = tgrid["HTN"]
-                ds_static["dyt"] = tgrid["HTN"]
-            if "TAREA" in tgrid:
-                ds_static["tarea"] = tgrid["TAREA"]
-            elif "HTE" in tgrid and "HTN" in tgrid:
-                ds_static["tarea"] = tgrid["HTE"] * tgrid["HTN"]
-            if bundle.mask is not None:
-                mask = bundle.mask
-                if tuple(mask.dims) != ("nj", "ni") and mask.ndim == 2:
-                    mask = mask.rename({mask.dims[-2]: "nj", mask.dims[-1]: "ni"})
-                ds_static["tmask"] = mask.astype("int8")
-            ds_static.attrs.update({
-                "source": "resolved CICE grid assets",
-                "note": "Built because iceh history did not contain static grid fields.",
-            })
-            if not ds_static.data_vars and not ds_static.coords:
-                self.logger.warning("Resolved grid assets produced an empty static dataset.")
-                return None
-            ds_static = self._prepare_iceh_static_for_write(ds_static)
-            static_store.parent.mkdir(parents=True, exist_ok=True)
-            ds_static.to_zarr(static_store, mode="w", consolidated=False)
-            self.logger.info("Wrote static store from resolved grid assets: %s", static_store)
-            return static_store
+            return CICEStaticBuilder(self.paths, logger = self.logger).write_zarr_from_resolved_assets(static_store     = static_store,
+                                                                                                       overwrite        = overwrite,
+                                                                                                       require_metadata = True)
         except Exception as exc:
             self.logger.warning("Could not build static store from resolved grid assets: %s", exc)
             return None
-
-    # def build_iceh_static_zarr_from_grid_assets(self, *,
-    #                                             static_store: str | Path | None = None,
-    #                                             overwrite: bool = False) -> Path | None:
-    #     """
-    #     Build ``iceh_static.zarr`` from external CICE grid/mask/bathymetry assets.
-
-    #     This is intended for modern space-saving CICE history output where
-    #     ``f_tlon``, ``f_tlat``, ``f_tmask``, ``f_tarea`` etc. are all disabled.
-
-    #     A run metadata file is required. At least one of these must exist:
-
-    #         <output_root>/ice_in
-    #         <output_root>/ice_diag.d
-
-    #     Without either file, this method returns ``None`` rather than silently
-    #     guessing the grid provenance.
-    #     """
-    #     static_store = (Path(static_store).expanduser() if static_store is not None else self.paths.resolve_static_store_target())
-    #     if static_store.exists() and not overwrite:
-    #         self.logger.info("Static store already exists, skipping: %s", static_store)
-    #         return static_store
-    #     if static_store.exists() and overwrite:
-    #         self.logger.info("Overwriting existing static store: %s", static_store)
-    #         shutil.rmtree(static_store)
-    #     metadata_file = self._resolve_run_metadata_file_for_grid_static()
-    #     if metadata_file is None:
-    #         self.logger.warning("Cannot build %s from grid assets because neither ice_in nor ice_diag.d "
-    #                             "was found under the simulation archive/output roots.", static_store)
-    #         return None
-    #     assets    = self.paths.resolve_cice_grid_assets()
-    #     grid_file = assets.get("grid_file")
-    #     if grid_file is None or not Path(grid_file).exists():
-    #         self.logger.warning("Cannot build %s from grid assets: resolved grid_file is missing or does not exist: %s", static_store, grid_file)
-    #         return None
-    #     ds_static = self._build_iceh_static_dataset_from_grid_assets(assets = assets, metadata_file = metadata_file)
-    #     if not ds_static.data_vars and not ds_static.coords:
-    #         self.logger.warning("Grid-asset fallback produced an empty static dataset; not writing %s", static_store)
-    #         return None
-    #     ds_static = self._prepare_iceh_static_for_write(ds_static)
-    #     static_store.parent.mkdir(parents=True, exist_ok=True)
-    #     ds_static.to_zarr(static_store, mode="w", consolidated=False)
-    #     self.logger.info("Wrote static store from grid assets: %s", static_store)
-    #     return static_store
-
-    def _resolve_run_metadata_file_for_grid_static(self) -> Path | None:
-        """
-        Prefer ice_in over ice_diag.d, but accept either as proof of run/grid provenance.
-        """
-        try:
-            ice_in = self.paths.resolve_ice_in_file()
-        except Exception as exc:
-            self.logger.debug("Could not resolve ice_in file: %s", exc)
-            ice_in = None
-        if ice_in is not None and ice_in.exists():
-            return ice_in
-        resolver = getattr(self.paths, "resolve_ice_diag_file", None)
-        if callable(resolver):
-            try:
-                ice_diag = resolver()
-            except Exception as exc:
-                self.logger.debug("Could not resolve ice_diag.d file: %s", exc)
-                ice_diag = None
-            if ice_diag is not None and ice_diag.exists():
-                return ice_diag
-        # Defensive fallback for older ShugaPaths during transition.
-        for candidate in (self.paths.output_root / "ice_diag.d",
-                          self.paths.output_root / "run" / "ice_diag.d",
-                          self.paths.output_root / "config" / "ice_diag.d",
-                          self.paths.output_root / "history" / "ice_diag.d"):
-            if candidate.exists():
-                return candidate
-        return None
-
-    def _pick_native_grid_name(self, ds: xr.Dataset, candidates: tuple[str, ...]) -> str | None:
-        for name in candidates:
-            if name in ds.variables:
-                return name
-        return None
-
-    def _native_grid_da(self,
-                        ds: xr.Dataset,
-                        target: str,
-                        candidates: tuple[str, ...],
-                        *,
-                        kind: str | None = None) -> xr.DataArray | None:
-        source = self._pick_native_grid_name(ds, candidates)
-        if source is None:
-            return None
-        da = ds[source]
-        da = self._prepare_iceh_static_da(da, name=target, context="native-grid")
-        if da.ndim == 2:
-            rename: dict[str, str] = {}
-            if da.dims[-2] != "nj":
-                rename[da.dims[-2]] = "nj"
-            if da.dims[-1] != "ni":
-                rename[da.dims[-1]] = "ni"
-            if rename:
-                da = da.rename(rename)
-        if kind == "lonlat":
-            da = self._latlon_to_degrees(da, target)
-        elif kind == "angle":
-            da = self._angle_to_radians(da, target)
-        elif kind == "metric":
-            da = self._metric_to_meters(da, target)
-        elif kind == "area":
-            da = self._area_to_m2(da, target)
-        elif kind == "mask":
-            da = da.astype(np.int8)
-        da.name = target
-        return da
-
-    def _fill_missing_static_geometry_from_tgrid(self, ds_static: xr.Dataset) -> xr.Dataset:
-        ds = ds_static.copy()
-        # Conservative fallbacks: enough for loaders/plotters/metrics that need
-        # dimensions and approximate geometry, without pretending to reconstruct
-        # unavailable CICE internals exactly.
-        if "tarea" in ds:
-            for name in ("uarea", "earea", "narea"):
-                if name not in ds:
-                    ds[name] = ds["tarea"].copy()
-                    ds[name].attrs.update({"long_name": f"{name} fallback copied from tarea",
-                                           "units"    : ds["tarea"].attrs.get("units", "m^2")})
-        metric_fallbacks = {"dxt": "HTE",
-                            "dxu": "HTE",
-                            "dxe": "HTE",
-                            "dxn": "HTE",
-                            "dyt": "HTN",
-                            "dyu": "HTN",
-                            "dye": "HTN",
-                            "dyn": "HTN"}
-
-        for target, source in metric_fallbacks.items():
-            if target not in ds and source in ds:
-                ds[target] = ds[source].copy()
-                ds[target].attrs.update({"long_name": f"{target} fallback copied from {source}",
-                                         "units"    : ds[source].attrs.get("units", "m")})
-        return ds
-
-    def _fill_missing_masks_from_tmask(self, ds_static: xr.Dataset) -> xr.Dataset:
-        ds = ds_static.copy()
-        if "tmask" not in ds:
-            return ds
-        ocean = ds["tmask"].astype(bool)
-        # CICE-style conservative masks from neighbouring T cells.
-        east      = ocean.roll(ni=-1, roll_coords=False)
-        north     = ocean.shift(nj=-1, fill_value=False)
-        northeast = east.shift(nj=-1, fill_value=False)
-        derived   = {"emask"  : ocean & east,
-                     "nmask"  : ocean & north,
-                     "umask"  : ocean & east & north & northeast,
-                     "blkmask": ocean}
-        for name, mask in derived.items():
-            if name not in ds:
-                ds[name] = mask.astype(np.int8)
-                ds[name].attrs.update({"long_name": f"{name} derived from tmask"})
-        ds["tmask"] = ds["tmask"].astype(np.int8)
-        return ds
-
-    def _parse_ncat_from_metadata(self, metadata_file: Path) -> int | None:
-        try:
-            text = metadata_file.read_text(errors="ignore")
-        except Exception:
-            return None
-        parsed = ShugaPaths._parse_ice_in_scalar_lines(text)
-        for key in ("ncat", "ncat_in", "ncat_ice"):
-            value = parsed.get(key)
-            if value is None:
-                continue
-            try:
-                return int(float(str(value).strip()))
-            except ValueError:
-                continue
-        return None
 
     def _get_iceh_static_field_names(self, extra_coords=None, extra_vars=None) -> dict[str, list[str]]:
         default_coords = ["ELAT", "ELON",
@@ -632,16 +230,6 @@ class NC2Zarr:
         coords = list(dict.fromkeys(default_coords + list(extra_coords or [])))
         vars_ = list(dict.fromkeys(default_vars + list(extra_vars or [])))
         return {"coords": coords, "vars": vars_, "all": coords + vars_}
-
-    def _prepare_iceh_static_da(self, da: xr.DataArray, *, name: str | None = None, context: str = "static") -> xr.DataArray:
-        da = da.copy()
-        if "time" in da.dims:
-            self.logger.warning("%s: %r unexpectedly has a time dimension; using the first time slice for static handling.", context, name or da.name)
-            da = da.isel(time=0, drop=True)
-        drop_now = [c for c in da.coords if (c == "time" or c == "time_bounds" or c not in da.dims)]
-        if drop_now:
-            da = da.drop_vars(drop_now, errors="ignore")
-        return da
 
     def _build_iceh_static_dataset(self, ds: xr.Dataset, *,
                                    static_coords=None,
@@ -674,17 +262,6 @@ class NC2Zarr:
             if missing_vars:
                 self.logger.warning("Missing expected iceh static vars: %s", missing_vars)
         return ds_out
-
-    def _prepare_iceh_static_for_write(self, ds_static: xr.Dataset, *, cast_float32: bool = True) -> xr.Dataset:
-        ds = ds_static.copy().drop_vars(["time", "time_bounds"], errors="ignore")
-        if cast_float32:
-            for name in list(ds.coords):
-                if np.issubdtype(ds[name].dtype, np.floating) and ds[name].dtype != np.float32:
-                    ds = ds.assign_coords({name: ds[name].astype(np.float32)})
-            for name in list(ds.data_vars):
-                if np.issubdtype(ds[name].dtype, np.floating) and ds[name].dtype != np.float32:
-                    ds[name] = ds[name].astype(np.float32)
-        return self._strip_unsafe_zarr_encoding(ds)
 
     def _warn_if_iceh_static_differs(self, ds_new: xr.Dataset, ds_ref: xr.Dataset, *, context: str = "") -> None:
         names = self._get_iceh_static_field_names()["all"]
@@ -749,21 +326,6 @@ class NC2Zarr:
         ds_to_write = self._prepare_iceh_static_for_write(ds_static_new)
         ds_to_write.to_zarr(static_store, mode="w", consolidated=False)
         self.logger.info("[%s] wrote static store %s", context, static_store)
-
-    # ------------------------------------------------------------------
-    # helpers: zarr hygiene
-    # ------------------------------------------------------------------
-
-
-    # ------------------------------------------------------------------
-    # helpers: 
-    # ------------------------------------------------------------------
-
-    def _iceh_frequency(self) -> str:
-        freq = str(getattr(self.paths, "iceh_frequency", getattr(self.paths.run, "iceh_frequency", "daily"))).lower()
-        if freq not in {"daily", "hourly"}:
-            raise ValueError(f"Unsupported iceh_frequency={freq!r}; expected 'daily' or 'hourly'.")
-        return freq
 
     # ------------------------------------------------------------------
     # public API
