@@ -7,15 +7,13 @@ import numpy as np
 import xarray as xr
 from shuga.core.paths import ShugaPaths
 from shuga.grid.cice import CICEGridwork
-from shuga.grid.geometry import (
-    angle_to_radians,
-    area_to_m2,
-    coerce_2d_dims_to_nj_ni,
-    dim_coords,
-    latlon_to_degrees,
-    metric_to_meters,
-    pick_variable,
-)
+from shuga.grid.geometry import (angle_to_radians,
+                                 area_to_m2,
+                                 coerce_2d_dims_to_nj_ni,
+                                 dim_coords,
+                                 latlon_to_degrees,
+                                 metric_to_meters,
+                                 pick_variable)
 
 
 class CICEStaticBuilder:
@@ -29,12 +27,7 @@ class CICEStaticBuilder:
     - parse NCAT from ice_in or ice_diag.d when available.
     """
 
-    def __init__(
-        self,
-        paths: ShugaPaths,
-        *,
-        logger: logging.Logger | None = None,
-    ) -> None:
+    def __init__(self, paths: ShugaPaths, *, logger: logging.Logger | None = None) -> None:
         self.paths = paths
         self.logger = logger or logging.getLogger(__name__)
 
@@ -42,6 +35,90 @@ class CICEStaticBuilder:
     def lon_type(self) -> str:
         spec = self.paths.cice_grid
         return getattr(spec, "lon_type", "-180-180") if spec is not None else "-180-180"
+
+    @staticmethod
+    def _tgrid_shape(ds: xr.Dataset) -> tuple[int, int] | None:
+        """
+        Return the canonical T-grid shape from an existing static dataset.
+
+        The static builder treats any variable/coordinate on dims ('nj', 'ni')
+        as the T-grid template. Fields on other dimensions, e.g. corner/edge
+        grids, are allowed to coexist.
+        """
+        for name in ("TLAT", "TLON", "tarea", "HTE", "HTN"):
+            if name in ds:
+                da = ds[name]
+            elif name in ds.coords:
+                da = ds.coords[name]
+            else:
+                continue
+
+            if da.ndim == 2 and tuple(da.dims) == ("nj", "ni"):
+                return int(da.sizes["nj"]), int(da.sizes["ni"])
+
+        if "nj" in ds.sizes and "ni" in ds.sizes:
+            return int(ds.sizes["nj"]), int(ds.sizes["ni"])
+
+        return None
+
+    def _compatible_with_tgrid(
+        self,
+        ds: xr.Dataset,
+        da: xr.DataArray,
+        *,
+        name: str,
+        source: str,
+    ) -> bool:
+        """
+        Validate fields that claim to live on the T grid.
+
+        Only dims exactly ('nj', 'ni') are checked here. Non-T-grid fields
+        such as ('nj_b', 'ni_b') are allowed.
+        """
+        if da.ndim != 2 or tuple(da.dims) != ("nj", "ni"):
+            return True
+
+        expected = self._tgrid_shape(ds)
+        if expected is None:
+            return True
+
+        actual = (int(da.sizes["nj"]), int(da.sizes["ni"]))
+        if actual == expected:
+            return True
+
+        self.logger.warning(
+            "Skipping static field %s from %s because shape %s does not match "
+            "existing T-grid shape %s.",
+            name,
+            source,
+            actual,
+            expected,
+        )
+        return False
+
+    def _assign_data_var_if_compatible(
+        self,
+        ds: xr.Dataset,
+        name: str,
+        da: xr.DataArray,
+        *,
+        source: str,
+    ) -> xr.Dataset:
+        if self._compatible_with_tgrid(ds, da, name=name, source=source):
+            ds[name] = da
+        return ds
+
+    def _assign_coord_if_compatible(
+        self,
+        ds: xr.Dataset,
+        name: str,
+        da: xr.DataArray,
+        *,
+        source: str,
+    ) -> xr.Dataset:
+        if self._compatible_with_tgrid(ds, da, name=name, source=source):
+            ds = ds.assign_coords({name: da})
+        return ds
 
     def resolve_run_metadata_file(self) -> Path | None:
         """
@@ -171,7 +248,7 @@ class CICEStaticBuilder:
         for name in ("TLON", "TLAT"):
             if name in bundle.tgrid:
                 da = self.prepare_da(bundle.tgrid[name], name=name, context="grid-assets")
-                ds_static = ds_static.assign_coords({name: da})
+                ds_static = self._assign_coord_if_compatible(ds_static, name, da, source="CICEGridwork.tgrid")
 
         tgrid_var_map = {
             "ANGLET": "ANGLET",
@@ -182,7 +259,7 @@ class CICEStaticBuilder:
         for target, source in tgrid_var_map.items():
             if source in bundle.tgrid:
                 da = self.prepare_da(bundle.tgrid[source], name=target, context="grid-assets")
-                ds_static[target] = da
+                ds_static = self._assign_data_var_if_compatible(ds_static, target, da, source="CICEGridwork.tgrid")
 
         # Constructed face/edge coordinates. Native grid-file values override below
         # only if these were not already present.
@@ -225,7 +302,7 @@ class CICEStaticBuilder:
                     continue
                 da = self.native_grid_da(ds_grid, target, candidates, kind="lonlat")
                 if da is not None:
-                    ds_static = ds_static.assign_coords({target: da})
+                    ds_static = self._assign_coord_if_compatible(ds_static, target, da, source=str(grid_file))
 
             var_map = {
                 "ANGLE": ("ANGLE", "angle", "angle_u"),
@@ -267,38 +344,29 @@ class CICEStaticBuilder:
 
                 da = self.native_grid_da(ds_grid, target, candidates, kind=kind)
                 if da is not None:
-                    ds_static[target] = da
+                    ds_static = self._assign_data_var_if_compatible(ds_static, target, da, source=str(grid_file))
         finally:
             ds_grid.close()
 
         if "tmask" not in ds_static and bundle.mask is not None:
-            tmask = self.prepare_da(bundle.mask, name="tmask", context="grid-assets-mask")
-            ds_static["tmask"] = coerce_2d_dims_to_nj_ni(tmask).astype(np.int8)
-
+            tmask     = self.prepare_da(bundle.mask, name="tmask", context="grid-assets-mask")
+            tmask     = coerce_2d_dims_to_nj_ni(tmask).astype(np.int8)
+            ds_static = self._assign_data_var_if_compatible(ds_static, "tmask", tmask,
+                                                            source = str(kmt_file) if kmt_file is not None else "CICEGridwork.mask")
         if bathymetry_file is not None and bathymetry_file.exists() and bundle.bathymetry is not None:
-            bathy = self.prepare_da(bundle.bathymetry, name="bathymetry", context="grid-assets-bathymetry")
-            ds_static["bathymetry"] = coerce_2d_dims_to_nj_ni(bathy)
-
+            bathy     = self.prepare_da(bundle.bathymetry, name="bathymetry", context="grid-assets-bathymetry")
+            bathy     = coerce_2d_dims_to_nj_ni(bathy)
+            ds_static = self._assign_data_var_if_compaible(ds_static, "bathymetry", bathy, source = str(bathymetry_file))
         ds_static = self.fill_missing_static_geometry_from_tgrid(ds_static)
         ds_static = self.fill_missing_masks_from_tmask(ds_static)
-
         ncat = self.parse_ncat_from_metadata(metadata_file)
         if ncat is not None and "NCAT" not in ds_static:
-            ds_static["NCAT"] = xr.DataArray(
-                np.int32(ncat),
-                attrs={"long_name": "number of ice categories"},
-            )
-
-        ds_static.attrs.update(
-            {
-                "static_source": "grid_assets",
-                "run_metadata_file": str(metadata_file) if metadata_file is not None else "",
-                "grid_file": str(grid_file),
-                "kmt_file": str(kmt_file) if kmt_file is not None else "",
-                "bathymetry_file": str(bathymetry_file) if bathymetry_file is not None else "",
-            }
-        )
-
+            ds_static["NCAT"] = xr.DataArray(np.int32(ncat), attrs = {"long_name": "number of ice categories"})
+        ds_static.attrs.update({"static_source"    : "grid_assets",
+                                "run_metadata_file": str(metadata_file) if metadata_file is not None else "",
+                                "grid_file"        : str(grid_file),
+                                "kmt_file"         : str(kmt_file) if kmt_file is not None else "",
+                                "bathymetry_file"  : str(bathymetry_file) if bathymetry_file is not None else ""})
         return ds_static
 
     def prepare_da(self, da: xr.DataArray, *, name: str, context: str) -> xr.DataArray:

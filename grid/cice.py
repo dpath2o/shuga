@@ -99,6 +99,16 @@ class CICEGridwork:
                                   P_topog: str | Path | None = None,
                                   nx     : int | None = None,
                                   ny     : int | None = None) -> xr.DataArray | None:
+        def _shape_ok(da: xr.DataArray, source: str) -> bool:
+            if da.ndim != 2:
+                return False
+            if ny is None or nx is None:
+                return True
+            if da.shape != (int(ny), int(nx)):
+                self._warn(f"Skipping {source} mask because shape {da.shape} does not "
+                           f"match target T-grid shape {(int(ny), int(nx))}.")
+                return False
+            return True
         if P_mask is None:
             P_mask = self.paths.cice_kmt_path
         if P_mask is not None and Path(P_mask).exists():
@@ -109,6 +119,8 @@ class CICEGridwork:
                 if da.ndim == 2:
                     if tuple(da.dims) != ("nj", "ni"):
                         da = da.rename({da.dims[-2]: "nj", da.dims[-1]: "ni"})
+                    if not _shape_ok(da, str(P_mask)):
+                        return None
                     return xr.where(np.isfinite(da) & (da > 0), True, False)
         if P_topog is None:
             P_topog = self.paths.cice_bathymetry_path
@@ -120,6 +132,8 @@ class CICEGridwork:
                 if da.ndim == 2:
                     if tuple(da.dims) != ("nj", "ni"):
                         da = da.rename({da.dims[-2]: "nj", da.dims[-1]: "ni"})
+                    if not _shape_ok(da, str(P_topog)):
+                        return None
                     return xr.where(np.isfinite(da) & (da > 0), True, False)
         return None
 
@@ -290,8 +304,8 @@ class CICEGridwork:
             else:
                 selector = tgrid["TLAT"] >= 0.0
             tgrid = tgrid.where(selector)
-        mask_org   = self._open_ocean_mask_on_tgrid(P_mask=P_mask_org)
-        mask_mod   = self._open_ocean_mask_on_tgrid(P_mask=P_mask_mod) if P_mask_mod is not None else None
+        mask_org   = self._open_ocean_mask_on_tgrid(P_mask=P_mask_org, nx=ni, ny=nj)
+        mask_mod   = self._open_ocean_mask_on_tgrid(P_mask=P_mask_mod, nx=ni, ny=nj) if P_mask_mod is not None else None
         bathy      = None
         bathy_path = self.paths.cice_bathymetry_path
         if bathy_path is not None and Path(bathy_path).exists():
