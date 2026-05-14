@@ -49,6 +49,9 @@ from shuga.metrics.calculations import (compute_area_series,
                                         compute_spatial_rate_year,
                                         compute_region_series,
                                         compute_area_weighted_stress)
+from shuga.metrics.io import (output_chunk_map,
+                              open_existing_metrics,
+                              backup_legacy_store)
 
 """
 Incremental CICE metrics builder for fast-ice and sea-ice diagnostics.
@@ -222,14 +225,29 @@ class CICEMetrics:
 
     # Backwards-compatible regional/spatial helper aliases.
     _ensure_2d_static = staticmethod(ensure_2d_static)
-    _lon_to_180 = staticmethod(lon_to_180)
-    _detect_lonlat = staticmethod(detect_lonlat)
-    _spatial_dims = staticmethod(spatial_dims)
+    _lon_to_180       = staticmethod(lon_to_180)
+    _detect_lonlat    = staticmethod(detect_lonlat)
+    _spatial_dims     = staticmethod(spatial_dims)
     def _region_mask(self, template: xr.DataArray, lon: xr.DataArray, lat: xr.DataArray) -> xr.DataArray:
         return region_mask(template    = template,
                            lon         = lon,
                            lat         = lat,
                            region_defs = self.region_defs)
+
+    # Backwards-compatible metric-calculation aliases. The canonical
+    # implementations live in shuga.metrics.calculations.
+    compute_area_series                      = staticmethod(compute_area_series)
+    compute_volume_series                    = staticmethod(compute_volume_series)
+    compute_thickness_series                 = staticmethod(compute_thickness_series)
+    compute_strength_series                  = staticmethod(compute_strength_series)
+    compute_persistence_mask                 = staticmethod(compute_persistence_mask)
+    compute_temporal_mean                    = staticmethod(compute_temporal_mean)
+    _convert_thickness_tendency_to_m_per_day = staticmethod(convert_thickness_tendency_to_m_per_day)
+    compute_volume_rate                      = staticmethod(compute_volume_rate)
+    compute_area_rate                        = staticmethod(compute_area_rate)
+    compute_spatial_rate_year                = staticmethod(compute_spatial_rate_year)
+    compute_region_series                    = staticmethod(compute_region_series)
+    compute_area_weighted_stress             = staticmethod(compute_area_weighted_stress)
 
     #----------------------------------------------------------------------------------
     # helpers
@@ -266,16 +284,7 @@ class CICEMetrics:
         return self._plotter().plot_triptych(*args, **kwargs)
 
     def _output_chunk_map(self, ds: xr.Dataset) -> dict[str, int]:
-        chunk_map = {}
-        if "time" in ds.dims:
-            chunk_map["time"] = min(31, ds.sizes["time"])
-        if "nj" in ds.dims:
-            chunk_map["nj"] = min(128, ds.sizes["nj"])
-        if "ni" in ds.dims:
-            chunk_map["ni"] = min(128, ds.sizes["ni"])
-        if "region" in ds.dims:
-            chunk_map["region"] = ds.sizes["region"]
-        return chunk_map
+        return output_chunk_map(ds)
 
     def _si_mask(self, aice: xr.DataArray) -> xr.DataArray:
         thresh = float(getattr(self.classify, "aice_thresh", 0.15))
@@ -285,24 +294,12 @@ class CICEMetrics:
         return expand_metric_names(metric_names=metric_names, metric_groups=metric_groups)
 
     def _open_existing_metrics(self, method: str) -> xr.Dataset | None:
-        norm = normalize_method(method)
-        if norm in self._metrics_cache:
-            return self._metrics_cache[norm]
-        store = self.paths.metrics_store(norm)
-        if not store.exists():
-            return None
-        ds = xr.open_zarr(store, consolidated=False)
-        self._metrics_cache[norm] = ds
-        return ds
+        return open_existing_metrics(paths  = self.paths,
+                                     cache  = self._metrics_cache,
+                                     method = method)
 
     def _backup_legacy_store(self, store: Path) -> Path:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup = store.with_name(f"{store.name}.legacy_badcoords_{stamp}")
-        if backup.exists():
-            shutil.rmtree(backup)
-        shutil.move(str(store), str(backup))
-        self.logger.warning("Backed up legacy metrics store to: %s", backup)
-        return backup
+        return backup_legacy_store(store, logger=self.logger)
 
     def _get_cice(self) -> xr.Dataset:
         if self._cice_cache is None:
@@ -710,497 +707,497 @@ class CICEMetrics:
         #ds_out = _sanitize_for_zarr_write(ds_out)
         return ds_out
 
-    #----------------------------------------------------------------------------------
-    # APIs
-    #----------------------------------------------------------------------------------
-    def compute_area_series(self, sic: xr.DataArray, area: xr.DataArray,
-                            mask      : xr.DataArray | None = None, *,
-                            name      : str,
-                            long_name : str,
-                            scale     : float | None        = None) -> xr.DataArray:
-        """
-        Compute a time series of integrated ice-covered area.
+    # #----------------------------------------------------------------------------------
+    # # APIs
+    # #----------------------------------------------------------------------------------
+    # def compute_area_series(self, sic: xr.DataArray, area: xr.DataArray,
+    #                         mask      : xr.DataArray | None = None, *,
+    #                         name      : str,
+    #                         long_name : str,
+    #                         scale     : float | None        = None) -> xr.DataArray:
+    #     """
+    #     Compute a time series of integrated ice-covered area.
 
-        The input concentration field is optionally masked, multiplied by grid-cell
-        area, and summed over the metric object's spatial dimensions. This is used
-        for quantities such as fast-ice area (FIA) or sea-ice area (SIA).
+    #     The input concentration field is optionally masked, multiplied by grid-cell
+    #     area, and summed over the metric object's spatial dimensions. This is used
+    #     for quantities such as fast-ice area (FIA) or sea-ice area (SIA).
 
-        Parameters
-        ----------
-        sic : xr.DataArray
-            Ice concentration or fractional coverage field.
-        area : xr.DataArray
-            Grid-cell area field in square metres.
-        mask : xr.DataArray | None, optional
-            Optional boolean mask restricting the calculation to a subset of grid
-            cells. Cells outside the mask are treated as zero contribution.
-        name : str
-            Name assigned to the returned series.
-        long_name : str
-            Descriptive long name written to the output attributes.
-        scale : float | None, optional
-            Optional scale factor applied after spatial integration. When supplied,
-            the result is divided by this value and reported in ``10^3 km^2``;
-            otherwise the output remains in ``m^2``.
+    #     Parameters
+    #     ----------
+    #     sic : xr.DataArray
+    #         Ice concentration or fractional coverage field.
+    #     area : xr.DataArray
+    #         Grid-cell area field in square metres.
+    #     mask : xr.DataArray | None, optional
+    #         Optional boolean mask restricting the calculation to a subset of grid
+    #         cells. Cells outside the mask are treated as zero contribution.
+    #     name : str
+    #         Name assigned to the returned series.
+    #     long_name : str
+    #         Descriptive long name written to the output attributes.
+    #     scale : float | None, optional
+    #         Optional scale factor applied after spatial integration. When supplied,
+    #         the result is divided by this value and reported in ``10^3 km^2``;
+    #         otherwise the output remains in ``m^2``.
 
-        Returns
-        -------
-        xr.DataArray
-            Spatially integrated area series.
+    #     Returns
+    #     -------
+    #     xr.DataArray
+    #         Spatially integrated area series.
 
-        Notes
-        -----
-        - If ``mask`` is provided, the concentration field is zeroed outside the
-          mask before integration.
-        - The summation is performed over ``self._spatial_dims(sic)``.
-        """
-        weighted = sic.where(mask, 0.0) if mask is not None else sic
-        da       = (weighted * area).sum(dim=self._spatial_dims(sic))
-        if scale is not None:
-            da    = da / scale
-            units = "10^3 km^2"
-        else:
-            units = "m^2"
-        da.name = name
-        da.attrs.update({"long_name": long_name, "units": units})
-        return da
+    #     Notes
+    #     -----
+    #     - If ``mask`` is provided, the concentration field is zeroed outside the
+    #       mask before integration.
+    #     - The summation is performed over ``self._spatial_dims(sic)``.
+    #     """
+    #     weighted = sic.where(mask, 0.0) if mask is not None else sic
+    #     da       = (weighted * area).sum(dim=self._spatial_dims(sic))
+    #     if scale is not None:
+    #         da    = da / scale
+    #         units = "10^3 km^2"
+    #     else:
+    #         units = "m^2"
+    #     da.name = name
+    #     da.attrs.update({"long_name": long_name, "units": units})
+    #     return da
 
-    def compute_volume_series(self, sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray,
-                              mask      : xr.DataArray | None = None, *,
-                              name      : str,
-                              long_name : str,
-                              scale     : float | None        = None) -> xr.DataArray:
-        """
-        Compute a time series of integrated ice volume.
+    # def compute_volume_series(self, sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray,
+    #                           mask      : xr.DataArray | None = None, *,
+    #                           name      : str,
+    #                           long_name : str,
+    #                           scale     : float | None        = None) -> xr.DataArray:
+    #     """
+    #     Compute a time series of integrated ice volume.
 
-        Ice concentration, thickness, and grid-cell area are multiplied together
-        and summed over the metric object's spatial dimensions. Missing thickness
-        values are filled with zero before the calculation.
+    #     Ice concentration, thickness, and grid-cell area are multiplied together
+    #     and summed over the metric object's spatial dimensions. Missing thickness
+    #     values are filled with zero before the calculation.
 
-        Parameters
-        ----------
-        sic : xr.DataArray
-            Ice concentration or fractional coverage field.
-        hi : xr.DataArray
-            Ice thickness field in metres.
-        area : xr.DataArray
-            Grid-cell area field in square metres.
-        mask : xr.DataArray | None, optional
-            Optional boolean mask restricting the calculation to a subset of grid
-            cells. Cells outside the mask are treated as zero contribution.
-        name : str
-            Name assigned to the returned series.
-        long_name : str
-            Descriptive long name written to the output attributes.
-        scale : float | None, optional
-            Optional scale factor applied after spatial integration. When supplied,
-            the result is divided by this value and reported in ``10^3 km^3``;
-            otherwise the output remains in ``m^3``.
+    #     Parameters
+    #     ----------
+    #     sic : xr.DataArray
+    #         Ice concentration or fractional coverage field.
+    #     hi : xr.DataArray
+    #         Ice thickness field in metres.
+    #     area : xr.DataArray
+    #         Grid-cell area field in square metres.
+    #     mask : xr.DataArray | None, optional
+    #         Optional boolean mask restricting the calculation to a subset of grid
+    #         cells. Cells outside the mask are treated as zero contribution.
+    #     name : str
+    #         Name assigned to the returned series.
+    #     long_name : str
+    #         Descriptive long name written to the output attributes.
+    #     scale : float | None, optional
+    #         Optional scale factor applied after spatial integration. When supplied,
+    #         the result is divided by this value and reported in ``10^3 km^3``;
+    #         otherwise the output remains in ``m^3``.
 
-        Returns
-        -------
-        xr.DataArray
-            Spatially integrated volume series.
+    #     Returns
+    #     -------
+    #     xr.DataArray
+    #         Spatially integrated volume series.
 
-        Notes
-        -----
-        - ``hi`` is filled with ``0.0`` where missing before multiplication.
-        - If ``mask`` is provided, both concentration and thickness contributions
-          are zeroed outside the mask.
-        """
-        c  = sic.where(mask, 0.0) if mask is not None else sic
-        h  = hi.fillna(0.0).where(mask, 0.0) if mask is not None else hi.fillna(0.0)
-        da = (c * h * area).sum(dim=self._spatial_dims(sic))
-        if scale is not None:
-            da    = da / scale
-            units = "10^3 km^3"
-        else:
-            units = "m^3"
-        da.name = name
-        da.attrs.update({"long_name": long_name, "units": units})
-        return da
+    #     Notes
+    #     -----
+    #     - ``hi`` is filled with ``0.0`` where missing before multiplication.
+    #     - If ``mask`` is provided, both concentration and thickness contributions
+    #       are zeroed outside the mask.
+    #     """
+    #     c  = sic.where(mask, 0.0) if mask is not None else sic
+    #     h  = hi.fillna(0.0).where(mask, 0.0) if mask is not None else hi.fillna(0.0)
+    #     da = (c * h * area).sum(dim=self._spatial_dims(sic))
+    #     if scale is not None:
+    #         da    = da / scale
+    #         units = "10^3 km^3"
+    #     else:
+    #         units = "m^3"
+    #     da.name = name
+    #     da.attrs.update({"long_name": long_name, "units": units})
+    #     return da
 
-    def compute_thickness_series(self, sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray,
-                                 mask      : xr.DataArray | None = None, *,
-                                 name      : str,
-                                 long_name : str) -> xr.DataArray:
-        """
-        Compute an area-weighted mean ice thickness time series.
+    # def compute_thickness_series(self, sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray,
+    #                              mask      : xr.DataArray | None = None, *,
+    #                              name      : str,
+    #                              long_name : str) -> xr.DataArray:
+    #     """
+    #     Compute an area-weighted mean ice thickness time series.
 
-        Thickness is calculated as integrated ice volume divided by integrated
-        ice-covered area over the selected domain. Missing thickness values are
-        filled with zero before the volume term is formed.
+    #     Thickness is calculated as integrated ice volume divided by integrated
+    #     ice-covered area over the selected domain. Missing thickness values are
+    #     filled with zero before the volume term is formed.
 
-        Parameters
-        ----------
-        sic : xr.DataArray
-            Ice concentration or fractional coverage field.
-        hi : xr.DataArray
-            Ice thickness field in metres.
-        area : xr.DataArray
-            Grid-cell area field in square metres.
-        mask : xr.DataArray | None, optional
-            Optional boolean mask restricting the calculation to a subset of grid
-            cells. Cells outside the mask are treated as zero contribution.
-        name : str
-            Name assigned to the returned series.
-        long_name : str
-            Descriptive long name written to the output attributes.
+    #     Parameters
+    #     ----------
+    #     sic : xr.DataArray
+    #         Ice concentration or fractional coverage field.
+    #     hi : xr.DataArray
+    #         Ice thickness field in metres.
+    #     area : xr.DataArray
+    #         Grid-cell area field in square metres.
+    #     mask : xr.DataArray | None, optional
+    #         Optional boolean mask restricting the calculation to a subset of grid
+    #         cells. Cells outside the mask are treated as zero contribution.
+    #     name : str
+    #         Name assigned to the returned series.
+    #     long_name : str
+    #         Descriptive long name written to the output attributes.
 
-        Returns
-        -------
-        xr.DataArray
-            Area-weighted mean thickness series in metres.
+    #     Returns
+    #     -------
+    #     xr.DataArray
+    #         Area-weighted mean thickness series in metres.
 
-        Notes
-        -----
-        - The numerator is ``sic * hi * area`` summed over space.
-        - The denominator is ``sic * area`` summed over space.
-        - Where the denominator is zero, the output is set to ``NaN``.
-        """
-        c       = sic.where(mask, 0.0) if mask is not None else sic
-        h       = hi.fillna(0.0).where(mask, 0.0) if mask is not None else hi.fillna(0.0)
-        vol     = (c * h * area).sum(dim=self._spatial_dims(sic))
-        are     = (c * area).sum(dim=self._spatial_dims(sic))
-        da      = xr.where(are > 0, vol / are, np.nan)
-        da.name = name
-        da.attrs.update({"long_name": long_name, "units": "m"})
-        return da
+    #     Notes
+    #     -----
+    #     - The numerator is ``sic * hi * area`` summed over space.
+    #     - The denominator is ``sic * area`` summed over space.
+    #     - Where the denominator is zero, the output is set to ``NaN``.
+    #     """
+    #     c       = sic.where(mask, 0.0) if mask is not None else sic
+    #     h       = hi.fillna(0.0).where(mask, 0.0) if mask is not None else hi.fillna(0.0)
+    #     vol     = (c * h * area).sum(dim=self._spatial_dims(sic))
+    #     are     = (c * area).sum(dim=self._spatial_dims(sic))
+    #     da      = xr.where(are > 0, vol / are, np.nan)
+    #     da.name = name
+    #     da.attrs.update({"long_name": long_name, "units": "m"})
+    #     return da
 
-    def compute_persistence_mask(self, mask: xr.DataArray, *, name: str, long_name: str) -> xr.DataArray:
-        """
-        Compute temporal persistence from a boolean mask.
+    # def compute_persistence_mask(self, mask: xr.DataArray, *, name: str, long_name: str) -> xr.DataArray:
+    #     """
+    #     Compute temporal persistence from a boolean mask.
 
-        Persistence is defined here as the fraction of time steps for which the
-        mask is ``True`` at each grid cell.
+    #     Persistence is defined here as the fraction of time steps for which the
+    #     mask is ``True`` at each grid cell.
 
-        Parameters
-        ----------
-        mask : xr.DataArray
-            Boolean classification mask with a ``time`` dimension.
-        name : str
-            Name assigned to the returned persistence field.
-        long_name : str
-            Descriptive long name written to the output attributes.
+    #     Parameters
+    #     ----------
+    #     mask : xr.DataArray
+    #         Boolean classification mask with a ``time`` dimension.
+    #     name : str
+    #         Name assigned to the returned persistence field.
+    #     long_name : str
+    #         Descriptive long name written to the output attributes.
 
-        Returns
-        -------
-        xr.DataArray
-            Persistence field on the native spatial grid, with values between
-            0 and 1.
+    #     Returns
+    #     -------
+    #     xr.DataArray
+    #         Persistence field on the native spatial grid, with values between
+    #         0 and 1.
 
-        Notes
-        -----
-        - The mask is converted to ``float32`` before averaging over time.
-        - Output units are dimensionless and recorded as ``"1"``.
-        """
-        da      = mask.astype("float32").mean(dim="time")
-        da.name = name
-        da.attrs.update({"long_name": long_name, "units": "1"})
-        return da
+    #     Notes
+    #     -----
+    #     - The mask is converted to ``float32`` before averaging over time.
+    #     - Output units are dimensionless and recorded as ``"1"``.
+    #     """
+    #     da      = mask.astype("float32").mean(dim="time")
+    #     da.name = name
+    #     da.attrs.update({"long_name": long_name, "units": "1"})
+    #     return da
 
-    def compute_temporal_mean(self, da: xr.DataArray, *, name: str, long_name: str) -> xr.DataArray:
-        """
-        Compute the temporal mean of a data array.
+    # def compute_temporal_mean(self, da: xr.DataArray, *, name: str, long_name: str) -> xr.DataArray:
+    #     """
+    #     Compute the temporal mean of a data array.
 
-        Parameters
-        ----------
-        da : xr.DataArray
-            Input field with a ``time`` dimension.
-        name : str
-            Name assigned to the returned mean field.
-        long_name : str
-            Descriptive long name written to the output attributes.
+    #     Parameters
+    #     ----------
+    #     da : xr.DataArray
+    #         Input field with a ``time`` dimension.
+    #     name : str
+    #         Name assigned to the returned mean field.
+    #     long_name : str
+    #         Descriptive long name written to the output attributes.
 
-        Returns
-        -------
-        xr.DataArray
-            Time-mean field.
+    #     Returns
+    #     -------
+    #     xr.DataArray
+    #         Time-mean field.
 
-        Notes
-        -----
-        - The mean is taken over the ``time`` dimension only.
-        - The output inherits its units from ``da.attrs["units"]`` when present.
-        """
-        out      = da.mean(dim="time")
-        out.name = name
-        out.attrs.update({"long_name": long_name, "units": da.attrs.get("units", "")})
-        return out
+    #     Notes
+    #     -----
+    #     - The mean is taken over the ``time`` dimension only.
+    #     - The output inherits its units from ``da.attrs["units"]`` when present.
+    #     """
+    #     out      = da.mean(dim="time")
+    #     out.name = name
+    #     out.attrs.update({"long_name": long_name, "units": da.attrs.get("units", "")})
+    #     return out
 
-    def compute_strength_series(self, sic: xr.DataArray, hi: xr.DataArray, strength: xr.DataArray, area: xr.DataArray,
-                                mask      : xr.DataArray | None = None, *,
-                                name      : str,
-                                long_name : str) -> xr.DataArray:
-        """
-        Compute an area-weighted mean ice strength diagnostic in hectopascals.
+    # def compute_strength_series(self, sic: xr.DataArray, hi: xr.DataArray, strength: xr.DataArray, area: xr.DataArray,
+    #                             mask      : xr.DataArray | None = None, *,
+    #                             name      : str,
+    #                             long_name : str) -> xr.DataArray:
+    #     """
+    #     Compute an area-weighted mean ice strength diagnostic in hectopascals.
 
-        The calculation first converts the supplied strength field into an
-        effective pressure-like quantity by dividing by ice thickness where
-        thickness is positive. The result is then averaged over the domain using
-        concentration-weighted cell area.
+    #     The calculation first converts the supplied strength field into an
+    #     effective pressure-like quantity by dividing by ice thickness where
+    #     thickness is positive. The result is then averaged over the domain using
+    #     concentration-weighted cell area.
 
-        Parameters
-        ----------
-        sic : xr.DataArray
-            Ice concentration or fractional coverage field.
-        hi : xr.DataArray
-            Ice thickness field in metres.
-        strength : xr.DataArray
-            Ice strength-related field to be normalised by thickness.
-        area : xr.DataArray
-            Grid-cell area field in square metres.
-        mask : xr.DataArray | None, optional
-            Optional boolean mask restricting the calculation to a subset of grid
-            cells.
-        name : str
-            Name assigned to the returned series.
-        long_name : str
-            Descriptive long name written to the output attributes.
+    #     Parameters
+    #     ----------
+    #     sic : xr.DataArray
+    #         Ice concentration or fractional coverage field.
+    #     hi : xr.DataArray
+    #         Ice thickness field in metres.
+    #     strength : xr.DataArray
+    #         Ice strength-related field to be normalised by thickness.
+    #     area : xr.DataArray
+    #         Grid-cell area field in square metres.
+    #     mask : xr.DataArray | None, optional
+    #         Optional boolean mask restricting the calculation to a subset of grid
+    #         cells.
+    #     name : str
+    #         Name assigned to the returned series.
+    #     long_name : str
+    #         Descriptive long name written to the output attributes.
 
-        Returns
-        -------
-        xr.DataArray
-            Area-weighted mean strength diagnostic in ``hPa``.
+    #     Returns
+    #     -------
+    #     xr.DataArray
+    #         Area-weighted mean strength diagnostic in ``hPa``.
 
-        Notes
-        -----
-        - Only cells with ``hi > 0`` are considered valid.
-        - If ``mask`` is provided, validity is additionally restricted by the mask.
-        - The pressure-like field is computed as ``strength / hi`` over valid
-          cells.
-        - Area weights are ``sic * area`` over valid cells.
-        - The final result is divided by ``100`` to convert from pascals to
-          hectopascals.
-        """
-        valid = hi > 0
-        if mask is not None:
-            valid = valid & mask
-        pressure_pa = xr.where(valid, strength / hi.where(hi > 0), np.nan)
-        weights     = xr.where(valid, sic * area, 0.0)
-        num         = (pressure_pa * weights).sum(dim=self._spatial_dims(sic), skipna=True)
-        den         = weights.sum(dim=self._spatial_dims(sic))
-        da          = xr.where(den > 0, num / den / 100.0, np.nan)
-        da.name     = name
-        da.attrs.update({"long_name": long_name, "units": "hPa"})
-        return da
+    #     Notes
+    #     -----
+    #     - Only cells with ``hi > 0`` are considered valid.
+    #     - If ``mask`` is provided, validity is additionally restricted by the mask.
+    #     - The pressure-like field is computed as ``strength / hi`` over valid
+    #       cells.
+    #     - Area weights are ``sic * area`` over valid cells.
+    #     - The final result is divided by ``100`` to convert from pascals to
+    #       hectopascals.
+    #     """
+    #     valid = hi > 0
+    #     if mask is not None:
+    #         valid = valid & mask
+    #     pressure_pa = xr.where(valid, strength / hi.where(hi > 0), np.nan)
+    #     weights     = xr.where(valid, sic * area, 0.0)
+    #     num         = (pressure_pa * weights).sum(dim=self._spatial_dims(sic), skipna=True)
+    #     den         = weights.sum(dim=self._spatial_dims(sic))
+    #     da          = xr.where(den > 0, num / den / 100.0, np.nan)
+    #     da.name     = name
+    #     da.attrs.update({"long_name": long_name, "units": "hPa"})
+    #     return da
 
-    def compute_volume_rate(self, dvt: xr.DataArray, sic: xr.DataArray, area: xr.DataArray,
-                            mask      : xr.DataArray | None = None, *,
-                            name      : str,
-                            long_name : str) -> xr.DataArray:
-        """
-        Compute a domain-integrated volume tendency series.
+    # def compute_volume_rate(self, dvt: xr.DataArray, sic: xr.DataArray, area: xr.DataArray,
+    #                         mask      : xr.DataArray | None = None, *,
+    #                         name      : str,
+    #                         long_name : str) -> xr.DataArray:
+    #     """
+    #     Compute a domain-integrated volume tendency series.
 
-        The supplied thickness tendency is first converted to metres per day using
-        ``_convert_thickness_tendency_to_m_per_day()``, then multiplied by ice
-        concentration and grid-cell area before being summed over space.
+    #     The supplied thickness tendency is first converted to metres per day using
+    #     ``_convert_thickness_tendency_to_m_per_day()``, then multiplied by ice
+    #     concentration and grid-cell area before being summed over space.
 
-        Parameters
-        ----------
-        dvt : xr.DataArray
-            Ice-thickness tendency field.
-        sic : xr.DataArray
-            Ice concentration or fractional coverage field.
-        area : xr.DataArray
-            Grid-cell area field in square metres.
-        mask : xr.DataArray | None, optional
-            Optional boolean mask restricting the calculation to a subset of grid
-            cells.
-        name : str
-            Name assigned to the returned series.
-        long_name : str
-            Descriptive long name written to the output attributes.
+    #     Parameters
+    #     ----------
+    #     dvt : xr.DataArray
+    #         Ice-thickness tendency field.
+    #     sic : xr.DataArray
+    #         Ice concentration or fractional coverage field.
+    #     area : xr.DataArray
+    #         Grid-cell area field in square metres.
+    #     mask : xr.DataArray | None, optional
+    #         Optional boolean mask restricting the calculation to a subset of grid
+    #         cells.
+    #     name : str
+    #         Name assigned to the returned series.
+    #     long_name : str
+    #         Descriptive long name written to the output attributes.
 
-        Returns
-        -------
-        xr.DataArray
-            Domain-integrated volume-rate series in ``10^3 km^3/day``.
+    #     Returns
+    #     -------
+    #     xr.DataArray
+    #         Domain-integrated volume-rate series in ``10^3 km^3/day``.
 
-        Notes
-        -----
-        - The final scaling uses ``self.metrics.volume_scale``.
-        - If ``mask`` is provided, both the thickness-tendency and concentration
-          contributions are zeroed outside the mask.
-        """
-        thick_rate = self._convert_thickness_tendency_to_m_per_day(dvt)
-        c          = sic.where(mask, 0.0) if mask is not None else sic
-        dV_day     = (thick_rate.where(mask, 0.0) if mask is not None else thick_rate) * c * area
-        da         = dV_day.sum(dim=self._spatial_dims(sic)) / self.metrics.volume_scale
-        da.name    = name
-        da.attrs.update({"long_name": long_name, "units": "10^3 km^3/day"})
-        return da
+    #     Notes
+    #     -----
+    #     - The final scaling uses ``self.metrics.volume_scale``.
+    #     - If ``mask`` is provided, both the thickness-tendency and concentration
+    #       contributions are zeroed outside the mask.
+    #     """
+    #     thick_rate = self._convert_thickness_tendency_to_m_per_day(dvt)
+    #     c          = sic.where(mask, 0.0) if mask is not None else sic
+    #     dV_day     = (thick_rate.where(mask, 0.0) if mask is not None else thick_rate) * c * area
+    #     da         = dV_day.sum(dim=self._spatial_dims(sic)) / self.metrics.volume_scale
+    #     da.name    = name
+    #     da.attrs.update({"long_name": long_name, "units": "10^3 km^3/day"})
+    #     return da
 
-    def compute_area_rate(self, dat: xr.DataArray, area: xr.DataArray,
-                          mask      : xr.DataArray | None = None, *,
-                          name      : str,
-                          long_name : str) -> xr.DataArray:
-        """
-        Compute a domain-integrated area tendency series.
+    # def compute_area_rate(self, dat: xr.DataArray, area: xr.DataArray,
+    #                       mask      : xr.DataArray | None = None, *,
+    #                       name      : str,
+    #                       long_name : str) -> xr.DataArray:
+    #     """
+    #     Compute a domain-integrated area tendency series.
 
-        The supplied area-fraction tendency is multiplied by grid-cell area and
-        summed over space, then converted to ``10^3 km^2/day``.
+    #     The supplied area-fraction tendency is multiplied by grid-cell area and
+    #     summed over space, then converted to ``10^3 km^2/day``.
 
-        Parameters
-        ----------
-        dat : xr.DataArray
-            Area-fraction tendency field.
-        area : xr.DataArray
-            Grid-cell area field in square metres.
-        mask : xr.DataArray | None, optional
-            Optional boolean mask restricting the calculation to a subset of grid
-            cells.
-        name : str
-            Name assigned to the returned series.
-        long_name : str
-            Descriptive long name written to the output attributes.
+    #     Parameters
+    #     ----------
+    #     dat : xr.DataArray
+    #         Area-fraction tendency field.
+    #     area : xr.DataArray
+    #         Grid-cell area field in square metres.
+    #     mask : xr.DataArray | None, optional
+    #         Optional boolean mask restricting the calculation to a subset of grid
+    #         cells.
+    #     name : str
+    #         Name assigned to the returned series.
+    #     long_name : str
+    #         Descriptive long name written to the output attributes.
 
-        Returns
-        -------
-        xr.DataArray
-            Domain-integrated area-rate series in ``10^3 km^2/day``.
+    #     Returns
+    #     -------
+    #     xr.DataArray
+    #         Domain-integrated area-rate series in ``10^3 km^2/day``.
 
-        Notes
-        -----
-        - The conversion applies ``/ 1e6 * 86400 / 1e3`` after spatial summation.
-        - If ``mask`` is provided, the tendency field is zeroed outside the mask.
-        """
-        field   = dat.where(mask, 0.0) if mask is not None else dat
-        da      = (field * area).sum(dim=self._spatial_dims(field))
-        da      = da / 1e6 * 86400.0 / 1e3
-        da.name = name
-        da.attrs.update({"long_name": long_name, "units": "10^3 km^2/day"})
-        return da
+    #     Notes
+    #     -----
+    #     - The conversion applies ``/ 1e6 * 86400 / 1e3`` after spatial summation.
+    #     - If ``mask`` is provided, the tendency field is zeroed outside the mask.
+    #     """
+    #     field   = dat.where(mask, 0.0) if mask is not None else dat
+    #     da      = (field * area).sum(dim=self._spatial_dims(field))
+    #     da      = da / 1e6 * 86400.0 / 1e3
+    #     da.name = name
+    #     da.attrs.update({"long_name": long_name, "units": "10^3 km^2/day"})
+    #     return da
 
-    def compute_spatial_rate_year(self, da: xr.DataArray,
-                                  mask      : xr.DataArray | None = None, *,
-                                  name      : str,
-                                  long_name : str,
-                                  area      : xr.DataArray | None = None) -> xr.DataArray:
-        """
-        Compute a time-mean annualised rate field.
+    # def compute_spatial_rate_year(self, da: xr.DataArray,
+    #                               mask      : xr.DataArray | None = None, *,
+    #                               name      : str,
+    #                               long_name : str,
+    #                               area      : xr.DataArray | None = None) -> xr.DataArray:
+    #     """
+    #     Compute a time-mean annualised rate field.
 
-        This method converts the input field to approximate annual units where
-        possible, then averages over time. Supported conversions depend on the
-        input units or on whether an area field is supplied.
+    #     This method converts the input field to approximate annual units where
+    #     possible, then averages over time. Supported conversions depend on the
+    #     input units or on whether an area field is supplied.
 
-        Parameters
-        ----------
-        da : xr.DataArray
-            Input rate field with a ``time`` dimension.
-        mask : xr.DataArray | None, optional
-            Optional boolean mask applied before temporal averaging. Masked cells
-            are set to ``NaN``.
-        name : str
-            Name assigned to the returned field.
-        long_name : str
-            Descriptive long name written to the output attributes.
-        area : xr.DataArray | None, optional
-            Optional area field. When provided, the method computes
-            ``(field * area) / 31536000`` before averaging, and reports units of
-            ``m^2 yr^-1``.
+    #     Parameters
+    #     ----------
+    #     da : xr.DataArray
+    #         Input rate field with a ``time`` dimension.
+    #     mask : xr.DataArray | None, optional
+    #         Optional boolean mask applied before temporal averaging. Masked cells
+    #         are set to ``NaN``.
+    #     name : str
+    #         Name assigned to the returned field.
+    #     long_name : str
+    #         Descriptive long name written to the output attributes.
+    #     area : xr.DataArray | None, optional
+    #         Optional area field. When provided, the method computes
+    #         ``(field * area) / 31536000`` before averaging, and reports units of
+    #         ``m^2 yr^-1``.
 
-        Returns
-        -------
-        xr.DataArray
-            Annualised temporal-mean field.
+    #     Returns
+    #     -------
+    #     xr.DataArray
+    #         Annualised temporal-mean field.
 
-        Notes
-        -----
-        - Supported input-unit conversions include:
-          - ``cm/day`` -> ``m/yr``
-          - ``m/day``  -> ``m/yr``
-          - ``m/s``    -> ``m/yr``
-        - If units are not recognised, the field is simply averaged over time and
-          its original units are retained.
-        """
-        field = da.where(mask, np.nan) if mask is not None else da
-        units = str(da.attrs.get("units", "")).lower().replace(" ", "")
-        if area is not None:
-            out = ((field * area) / 31536000.0).mean(dim="time")
-            out.attrs["units"] = "m^2 yr^-1"
-        elif units in {"cm/day", "cmday-1", "cmd-1"}:
-            out = (field / 100.0) * 365.0
-            out = out.mean(dim="time")
-            out.attrs["units"] = "m/yr"
-        elif units in {"m/day", "mday-1", "md-1"}:
-            out = (field * 365.0).mean(dim="time")
-            out.attrs["units"] = "m/yr"
-        elif units in {"m/s", "ms-1"}:
-            out = (field * 31536000.0).mean(dim="time")
-            out.attrs["units"] = "m/yr"
-        else:
-            out = field.mean(dim="time")
-            out.attrs["units"] = da.attrs.get("units", "")
-        out.name               = name
-        out.attrs["long_name"] = long_name
-        return out
+    #     Notes
+    #     -----
+    #     - Supported input-unit conversions include:
+    #       - ``cm/day`` -> ``m/yr``
+    #       - ``m/day``  -> ``m/yr``
+    #       - ``m/s``    -> ``m/yr``
+    #     - If units are not recognised, the field is simply averaged over time and
+    #       its original units are retained.
+    #     """
+    #     field = da.where(mask, np.nan) if mask is not None else da
+    #     units = str(da.attrs.get("units", "")).lower().replace(" ", "")
+    #     if area is not None:
+    #         out = ((field * area) / 31536000.0).mean(dim="time")
+    #         out.attrs["units"] = "m^2 yr^-1"
+    #     elif units in {"cm/day", "cmday-1", "cmd-1"}:
+    #         out = (field / 100.0) * 365.0
+    #         out = out.mean(dim="time")
+    #         out.attrs["units"] = "m/yr"
+    #     elif units in {"m/day", "mday-1", "md-1"}:
+    #         out = (field * 365.0).mean(dim="time")
+    #         out.attrs["units"] = "m/yr"
+    #     elif units in {"m/s", "ms-1"}:
+    #         out = (field * 31536000.0).mean(dim="time")
+    #         out.attrs["units"] = "m/yr"
+    #     else:
+    #         out = field.mean(dim="time")
+    #         out.attrs["units"] = da.attrs.get("units", "")
+    #     out.name               = name
+    #     out.attrs["long_name"] = long_name
+    #     return out
 
-    def compute_region_series(self, sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray, region_mask: xr.DataArray,
-                              mask                : xr.DataArray | None = None, *,
-                              area_name           : str,
-                              thickness_name      : str,
-                              area_long_name      : str,
-                              thickness_long_name : str) -> tuple[xr.DataArray, xr.DataArray]:
-        """
-        Compute regional area and thickness time series.
+    # def compute_region_series(self, sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray, region_mask: xr.DataArray,
+    #                           mask                : xr.DataArray | None = None, *,
+    #                           area_name           : str,
+    #                           thickness_name      : str,
+    #                           area_long_name      : str,
+    #                           thickness_long_name : str) -> tuple[xr.DataArray, xr.DataArray]:
+    #     """
+    #     Compute regional area and thickness time series.
 
-        The method expands the weighted area and weighted volume fields across the
-        supplied region dimension, applies the regional masks, and then integrates
-        over the spatial dimensions to produce time-by-region series.
+    #     The method expands the weighted area and weighted volume fields across the
+    #     supplied region dimension, applies the regional masks, and then integrates
+    #     over the spatial dimensions to produce time-by-region series.
 
-        Parameters
-        ----------
-        sic : xr.DataArray
-            Ice concentration or fractional coverage field.
-        hi : xr.DataArray
-            Ice thickness field in metres.
-        area : xr.DataArray
-            Grid-cell area field in square metres.
-        region_mask : xr.DataArray
-            Boolean mask with a ``region`` dimension identifying the cells
-            belonging to each region.
-        mask : xr.DataArray | None, optional
-            Optional boolean mask restricting the calculation to a subset of grid
-            cells before regional aggregation.
-        area_name : str
-            Name assigned to the returned regional area series.
-        thickness_name : str
-            Name assigned to the returned regional thickness series.
-        area_long_name : str
-            Descriptive long name for the regional area series.
-        thickness_long_name : str
-            Descriptive long name for the regional thickness series.
+    #     Parameters
+    #     ----------
+    #     sic : xr.DataArray
+    #         Ice concentration or fractional coverage field.
+    #     hi : xr.DataArray
+    #         Ice thickness field in metres.
+    #     area : xr.DataArray
+    #         Grid-cell area field in square metres.
+    #     region_mask : xr.DataArray
+    #         Boolean mask with a ``region`` dimension identifying the cells
+    #         belonging to each region.
+    #     mask : xr.DataArray | None, optional
+    #         Optional boolean mask restricting the calculation to a subset of grid
+    #         cells before regional aggregation.
+    #     area_name : str
+    #         Name assigned to the returned regional area series.
+    #     thickness_name : str
+    #         Name assigned to the returned regional thickness series.
+    #     area_long_name : str
+    #         Descriptive long name for the regional area series.
+    #     thickness_long_name : str
+    #         Descriptive long name for the regional thickness series.
 
-        Returns
-        -------
-        tuple[xr.DataArray, xr.DataArray]
-            Two ``(time, region)`` arrays:
-            - regional integrated area in ``10^3 km^2``
-            - regional mean thickness in ``m``
+    #     Returns
+    #     -------
+    #     tuple[xr.DataArray, xr.DataArray]
+    #         Two ``(time, region)`` arrays:
+    #         - regional integrated area in ``10^3 km^2``
+    #         - regional mean thickness in ``m``
 
-        Notes
-        -----
-        - Regional area uses ``self.metrics.area_scale`` for conversion.
-        - Regional thickness is computed as regional volume divided by regional
-          ice-covered area.
-        - Where regional denominator area is zero, thickness is set to ``NaN``.
-        """
-        c              = sic.where(mask, 0.0) if mask is not None else sic
-        h              = hi.fillna(0.0).where(mask, 0.0) if mask is not None else hi.fillna(0.0)
-        weighted_area  = c * area
-        weighted_vol   = c * h * area
-        spatial_dims   = self._spatial_dims(sic)
-        region_area    = weighted_area.expand_dims(region=region_mask.region).where(region_mask, 0.0)
-        region_vol     = weighted_vol.expand_dims(region=region_mask.region).where(region_mask, 0.0)
-        area_reg       = (region_area.sum(dim=spatial_dims) / self.metrics.area_scale).transpose("time", "region")
-        thick_num      = region_vol.sum(dim=spatial_dims).transpose("time", "region")
-        thick_den      = region_area.sum(dim=spatial_dims).transpose("time", "region")
-        thick_reg      = xr.where(thick_den > 0, thick_num / thick_den, np.nan)
-        area_reg.name  = area_name
-        thick_reg.name = thickness_name
-        area_reg.attrs.update({"long_name": area_long_name, "units": "10^3 km^2"})
-        thick_reg.attrs.update({"long_name": thickness_long_name, "units": "m"})
-        return area_reg, thick_reg
+    #     Notes
+    #     -----
+    #     - Regional area uses ``self.metrics.area_scale`` for conversion.
+    #     - Regional thickness is computed as regional volume divided by regional
+    #       ice-covered area.
+    #     - Where regional denominator area is zero, thickness is set to ``NaN``.
+    #     """
+    #     c              = sic.where(mask, 0.0) if mask is not None else sic
+    #     h              = hi.fillna(0.0).where(mask, 0.0) if mask is not None else hi.fillna(0.0)
+    #     weighted_area  = c * area
+    #     weighted_vol   = c * h * area
+    #     spatial_dims   = self._spatial_dims(sic)
+    #     region_area    = weighted_area.expand_dims(region=region_mask.region).where(region_mask, 0.0)
+    #     region_vol     = weighted_vol.expand_dims(region=region_mask.region).where(region_mask, 0.0)
+    #     area_reg       = (region_area.sum(dim=spatial_dims) / self.metrics.area_scale).transpose("time", "region")
+    #     thick_num      = region_vol.sum(dim=spatial_dims).transpose("time", "region")
+    #     thick_den      = region_area.sum(dim=spatial_dims).transpose("time", "region")
+    #     thick_reg      = xr.where(thick_den > 0, thick_num / thick_den, np.nan)
+    #     area_reg.name  = area_name
+    #     thick_reg.name = thickness_name
+    #     area_reg.attrs.update({"long_name": area_long_name, "units": "10^3 km^2"})
+    #     thick_reg.attrs.update({"long_name": thickness_long_name, "units": "m"})
+    #     return area_reg, thick_reg
 
     def compute_seasonal_summary(self, da: xr.DataArray, prefix: str) -> dict[str, xr.DataArray]:
         """
@@ -1309,62 +1306,62 @@ class CICEMetrics:
                 "persistent_winter_area" : persistent_area / self.metrics.area_scale,
                 "ever_winter_area"       : ever_area / self.metrics.area_scale}
 
-    def compute_area_weighted_stress(self, tau: xr.DataArray, area: xr.DataArray,
-                                     mask      : xr.DataArray | None, *,
-                                     base_name : str) -> xr.Dataset:
-        """
-        Compute area-weighted mean and mean-absolute stress diagnostics.
+    # def compute_area_weighted_stress(self, tau: xr.DataArray, area: xr.DataArray,
+    #                                  mask      : xr.DataArray | None, *,
+    #                                  base_name : str) -> xr.Dataset:
+    #     """
+    #     Compute area-weighted mean and mean-absolute stress diagnostics.
 
-        This method evaluates a stress-like field over the valid spatial domain and
-        returns three outputs: the area-weighted signed mean, the area-weighted
-        mean absolute value, and the total valid contributing area.
+    #     This method evaluates a stress-like field over the valid spatial domain and
+    #     returns three outputs: the area-weighted signed mean, the area-weighted
+    #     mean absolute value, and the total valid contributing area.
 
-        Parameters
-        ----------
-        tau : xr.DataArray
-            Stress field to be spatially averaged.
-        area : xr.DataArray
-            Grid-cell area field in square metres.
-        mask : xr.DataArray | None
-            Optional boolean mask restricting the valid domain. When provided, it
-            is aligned to the stress field via ``_match_mask_to_field``.
-        base_name : str
-            Base variable name used to construct the returned dataset variable
-            names.
+    #     Parameters
+    #     ----------
+    #     tau : xr.DataArray
+    #         Stress field to be spatially averaged.
+    #     area : xr.DataArray
+    #         Grid-cell area field in square metres.
+    #     mask : xr.DataArray | None
+    #         Optional boolean mask restricting the valid domain. When provided, it
+    #         is aligned to the stress field via ``_match_mask_to_field``.
+    #     base_name : str
+    #         Base variable name used to construct the returned dataset variable
+    #         names.
 
-        Returns
-        -------
-        xr.Dataset
-            Dataset containing:
-            - ``{base_name}_mean``
-            - ``{base_name}_abs_mean``
-            - ``{base_name}_valid_area_m2``
+    #     Returns
+    #     -------
+    #     xr.Dataset
+    #         Dataset containing:
+    #         - ``{base_name}_mean``
+    #         - ``{base_name}_abs_mean``
+    #         - ``{base_name}_valid_area_m2``
 
-        Notes
-        -----
-        - Valid cells are those where ``tau`` is finite, optionally intersected
-          with the supplied mask.
-        - Signed and absolute means are both weighted by grid-cell area.
-        - Units for the mean fields default to ``tau.attrs["units"]`` or ``"Pa"``.
-        """
-        spatial_dims = self._spatial_dims(tau)
-        valid        = np.isfinite(tau)
-        mask_use     = self._match_mask_to_field(mask, tau)
-        if mask_use is not None:
-            valid = valid & mask_use
-        weights       = xr.where(valid, area, 0.0)
-        num_mean      = (tau.where(valid, 0.0) * weights).sum(dim=spatial_dims)
-        num_abs       = (np.abs(tau.where(valid, 0.0)) * weights).sum(dim=spatial_dims)
-        den           = weights.sum(dim=spatial_dims)
-        mean          = xr.where(den > 0, num_mean / den, np.nan)
-        abs_mean      = xr.where(den > 0, num_abs / den, np.nan)
-        mean.name     = f"{base_name}_mean"
-        abs_mean.name = f"{base_name}_abs_mean"
-        den.name      = f"{base_name}_valid_area_m2"
-        mean.attrs.update({"long_name": f"{base_name} area-weighted mean stress", "units": tau.attrs.get("units", "Pa")})
-        abs_mean.attrs.update({"long_name": f"{base_name} area-weighted mean absolute stress", "units": tau.attrs.get("units", "Pa")})
-        den.attrs.update({"long_name": f"{base_name} valid area", "units": "m^2"})
-        return xr.Dataset({mean.name: mean, abs_mean.name: abs_mean, den.name: den})
+    #     Notes
+    #     -----
+    #     - Valid cells are those where ``tau`` is finite, optionally intersected
+    #       with the supplied mask.
+    #     - Signed and absolute means are both weighted by grid-cell area.
+    #     - Units for the mean fields default to ``tau.attrs["units"]`` or ``"Pa"``.
+    #     """
+    #     spatial_dims = self._spatial_dims(tau)
+    #     valid        = np.isfinite(tau)
+    #     mask_use     = self._match_mask_to_field(mask, tau)
+    #     if mask_use is not None:
+    #         valid = valid & mask_use
+    #     weights       = xr.where(valid, area, 0.0)
+    #     num_mean      = (tau.where(valid, 0.0) * weights).sum(dim=spatial_dims)
+    #     num_abs       = (np.abs(tau.where(valid, 0.0)) * weights).sum(dim=spatial_dims)
+    #     den           = weights.sum(dim=spatial_dims)
+    #     mean          = xr.where(den > 0, num_mean / den, np.nan)
+    #     abs_mean      = xr.where(den > 0, num_abs / den, np.nan)
+    #     mean.name     = f"{base_name}_mean"
+    #     abs_mean.name = f"{base_name}_abs_mean"
+    #     den.name      = f"{base_name}_valid_area_m2"
+    #     mean.attrs.update({"long_name": f"{base_name} area-weighted mean stress", "units": tau.attrs.get("units", "Pa")})
+    #     abs_mean.attrs.update({"long_name": f"{base_name} area-weighted mean absolute stress", "units": tau.attrs.get("units", "Pa")})
+    #     den.attrs.update({"long_name": f"{base_name} valid area", "units": "m^2"})
+    #     return xr.Dataset({mean.name: mean, abs_mean.name: abs_mean, den.name: den})
 
     def compute_metrics(self, method: str, *,
                         overwrite                 : bool                       = False,
