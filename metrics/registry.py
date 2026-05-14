@@ -192,7 +192,6 @@ SIT_SEASONAL_NAMES = {
     "SIT_doy_min_std",
 }
 
-
 def as_list(value: str | Iterable[str] | None) -> list[str]:
     if value is None:
         return []
@@ -200,28 +199,24 @@ def as_list(value: str | Iterable[str] | None) -> list[str]:
         return [v.strip() for v in value.split(",") if v.strip()]
     return [str(v).strip() for v in value if str(v).strip()]
 
-
-def expand_metric_names(
-    metric_names=None,
-    metric_groups=None,
-    *,
-    default_group: str = "default",
-) -> list[str]:
+def expand_metric_names(metric_names=None, metric_groups=None, *, default_group: str = "default") -> list[str]:
     explicit = as_list(metric_names)
-    groups = as_list(metric_groups)
-
+    groups   = as_list(metric_groups)
     if not explicit and not groups:
         groups = [default_group]
-
-    out = set(explicit)
-
+    out: list[str] = []
+    seen: set[str] = set()
+    def _add_many(names: Iterable[str]) -> None:
+        for name in names:
+            token = str(name).strip()
+            if not token or token in seen:
+                continue
+            out.append(token)
+            seen.add(token)
+    _add_many(explicit)
     for group in groups:
         key = group.strip().lower()
         if key not in METRIC_GROUPS:
-            raise ValueError(
-                f"Unknown metric group {group!r}. "
-                f"Valid groups: {sorted(METRIC_GROUPS)}"
-            )
-        out.update(METRIC_GROUPS[key])
-
-    return sorted(out)
+            raise ValueError(f"Unknown metric group {group!r}. Valid groups: {sorted(METRIC_GROUPS)}")
+        _add_many(METRIC_GROUPS[key])
+    return out
