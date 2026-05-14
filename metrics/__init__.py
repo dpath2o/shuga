@@ -5,11 +5,14 @@ from .calculations import (compute_area_series,
                            compute_volume_series,
                            compute_thickness_series,
                            compute_persistence_mask)
+from .dispatch import MetricDispatcher, MetricDispatchContext
 __all__ = ["CICEMetrics",
            "compute_extrema_table",
            "skill_stats",
            "compute_area_series",
            "compute_volume_series",
            "compute_thickness_series",
-           "compute_persistence_mask"]
+           "compute_persistence_mask",
+           "MetricDispatcher",
+           "MetricDispatchContext"]
 

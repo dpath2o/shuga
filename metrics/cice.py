@@ -52,6 +52,17 @@ from shuga.metrics.calculations import (compute_area_series,
 from shuga.metrics.io import (output_chunk_map,
                               open_existing_metrics,
                               backup_legacy_store)
+from shuga.metrics.dispatch import (MetricDispatchContext,
+                                    MetricDispatcher,
+                                    PRIMARY_METRIC_NAMES,
+                                    PRIMARY_METRIC_SET,
+                                    needs_fast_ice_mask)
+from shuga.metrics.stress import (compute_stress_dataset,
+                                  stress_requested)
+from shuga.metrics.secondary import (attach_common_metrics_attrs,
+                                     compute_fipsi_dataset,
+                                     compute_obs_skill_dataset,
+                                     compute_seasonal_summary_dataset)
 
 """
 Incremental CICE metrics builder for fast-ice and sea-ice diagnostics.
@@ -363,294 +374,163 @@ class CICEMetrics:
         except Exception:
             return None
 
-    def _convert_thickness_tendency_to_m_per_day(self, da: xr.DataArray) -> xr.DataArray:
-        units = str(da.attrs.get("units", "")).lower().replace(" ", "")
-        if units in {"cm/day", "cmday-1", "cmd-1"}:
-            return da / 100.0
-        if units in {"m/day", "mday-1", "md-1"}:
-            return da
-        if units in {"m/s", "ms-1"}:
-            return da * 86400.0
-        return da / 100.0
-
     #----------------------------------------------------------------------------------
     # the following functions are the backbone of this module
     # essentially, _compute_requested_metrics does all the heavy lifting for batch
     # processing of metric computations
-    #----------------------------------------------------------------------------------
+    #---------------------------------------------------------------------------------
     def _compute_requested_metrics(self, method: str, requested: set[str]) -> xr.Dataset:
-        def maybe_stress(prefix: str, mask: xr.DataArray | None):
-            area_e  = self._ensure_2d_static(ds["earea"]) if "earea" in ds else area
-            area_n  = self._ensure_2d_static(ds["narea"]) if "narea" in ds else area
-            mapping = [("KuxE", area_e, f"{prefix}KuxE"),
-                       ("KuyE", area_e, f"{prefix}KuyE"),
-                       ("KuxN", area_n, f"{prefix}KuxN"),
-                       ("KuyN", area_n, f"{prefix}KuyN")]
-            for varname, weights, base in mapping:
-                needed = {f"{base}_mean", f"{base}_abs_mean", f"{base}_valid_area_m2"}
-                if requested & needed and varname in ds:
-                    dsi = self.compute_area_weighted_stress(ds[varname], weights, mask, base_name=base)
-                    for nm in dsi.data_vars:
-                        if nm in requested:
-                            out[nm] = dsi[nm]
-            mag_specs = [("KuxE", "KuyE", area_e, f"{prefix}KuE_mag"),
-                         ("KuxN", "KuyN", area_n, f"{prefix}KuN_mag")]
-            for xname, yname, weights, base in mag_specs:
-                needed = {f"{base}_mean", f"{base}_abs_mean", f"{base}_valid_area_m2"}
-                if requested & needed and xname in ds and yname in ds:
-                    mag = xr.apply_ufunc(np.hypot, ds[xname], ds[yname], dask="allowed")
-                    mag.attrs["units"] = ds[xname].attrs.get("units", "Pa")
-                    dsi = self.compute_area_weighted_stress(mag, weights, mask, base_name=base)
-                    for nm in dsi.data_vars:
-                        if nm in requested:
-                            out[nm] = dsi[nm]
-        ds          = self._get_cice()
-        aice        = ds["aice"]
-        hi          = ds["hi"]
-        area        = self._ensure_2d_static(ds["tarea"])
-        lon, lat    = self._detect_lonlat(ds)
-        region_mask = self._region_mask(area, lon, lat)
-        need_fi     = any(name.startswith("FI")
-                          or name.startswith("FIA_")
-                          or name.startswith("FIT_")
-                          or name in self.FIPSI_NAMES for name in requested)
-        ds_mask     = self._get_classified(method) if need_fi else None
-        fi_mask     = ds_mask["FI_mask"].astype(bool) if ds_mask is not None else None
+        """
+        Compute requested metrics for a classification method.
+
+        Primary metric dispatch is delegated to MetricDispatcher. This method
+        remains responsible for:
+        - loading CICE/classification context;
+        - constructing region masks;
+        - running seasonal summaries;
+        - running FIPSI diagnostics;
+        - running obs skill diagnostics;
+        - running stress diagnostics;
+        - attaching common metadata.
+        """
+        ds = self._get_cice()
+
+        aice = ds["aice"]
+        hi = ds["hi"]
+        area = self._ensure_2d_static(ds["tarea"])
+
+        lon, lat = self._detect_lonlat(ds)
+        regional_mask = self._region_mask(area, lon, lat)
+
+        need_fi = needs_fast_ice_mask(requested, self.FIPSI_NAMES)
+        ds_mask = self._get_classified(method) if need_fi else None
+        fi_mask = ds_mask["FI_mask"].astype(bool) if ds_mask is not None else None
+
         if fi_mask is not None:
             aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
+
         si_mask = self._si_mask(aice)
-        out     = xr.Dataset()
-        memo: dict[str, xr.DataArray] = {}
-        def remember(name: str, da: xr.DataArray, publish: bool = False) -> xr.DataArray:
-            memo[name] = da
-            if publish:
+
+        ctx = MetricDispatchContext(
+            ds=ds,
+            aice=aice,
+            hi=hi,
+            area=area,
+            region_mask=regional_mask,
+            fi_mask=fi_mask,
+            si_mask=si_mask,
+            area_scale=self.metrics.area_scale,
+            volume_scale=self.metrics.volume_scale,
+        )
+        dispatcher = MetricDispatcher(context=ctx, calculator=self)
+
+        out = xr.Dataset()
+
+        def publish(name: str) -> xr.DataArray | None:
+            da = dispatcher.get(name)
+            if da is not None:
                 out[name] = da
             return da
-        def get_or_compute(name: str, publish: bool = False) -> xr.DataArray | None:
-            if name in memo:
-                if publish:
-                    out[name] = memo[name]
-                return memo[name]
-            if name == "FIA" and fi_mask is not None:
-                return remember(name, self.compute_area_series(aice, area, fi_mask,
-                                                               name      = "FIA",
-                                                               long_name = "Fast Ice Area",
-                                                               scale     = self.metrics.area_scale),
-                                publish=publish)
-            elif name == "FIV" and fi_mask is not None:
-                return remember(name, self.compute_volume_series(aice, hi, area, fi_mask,
-                                                                 name      = "FIV",
-                                                                 long_name = "Fast Ice Volume",
-                                                                 scale     = self.metrics.volume_scale),
-                                publish=publish)
-            elif name == "FIT" and fi_mask is not None:
-                return remember(name, self.compute_thickness_series(aice, hi, area, fi_mask,
-                                                                    name      = "FIT",
-                                                                    long_name = "Fast Ice Thickness"),
-                                publish=publish)
-            elif name == "FIP" and fi_mask is not None:
-                return remember(name, self.compute_persistence_mask(fi_mask,
-                                                                    name      = "FIP",
-                                                                    long_name = "Fast Ice Persistence"),
-                                publish=publish)
-            elif name == "FIS" and fi_mask is not None and "strength" in ds:
-                return remember(name, self.compute_strength_series(aice, hi, ds["strength"], area, fi_mask,
-                                                                   name      = "FIS",
-                                                                   long_name = "Fast Ice Strength"),
-                                publish=publish)
-            elif name == "FITVR" and fi_mask is not None and "dvidtt" in ds:
-                return remember(name, self.compute_volume_rate(ds["dvidtt"], aice, area, fi_mask,
-                                                               name      = "FITVR",
-                                                               long_name = "Fast Ice Thermodynamic Volume Rate"),
-                                publish=publish)
-            elif name == "FIMVR" and fi_mask is not None and "dvidtd" in ds:
-                return remember(name, self.compute_volume_rate( ds["dvidtd"], aice, area, fi_mask,
-                                                                name      = "FIMVR",
-                                                                long_name = "Fast Ice Dynamic Volume Rate"),
-                                publish=publish)
-            elif name == "FITAR" and fi_mask is not None and "daidtt" in ds:
-                return remember(name, self.compute_area_rate(ds["daidtt"], area, fi_mask,
-                                                             name      = "FITAR",
-                                                             long_name = "Fast Ice Thermodynamic Area Rate"),
-                    publish=publish,
-                )
-            elif name == "FIMAR" and fi_mask is not None and "daidtd" in ds:
-                return remember(name, self.compute_area_rate(ds["daidtd"], area, fi_mask,
-                                                             name      = "FIMAR",
-                                                             long_name = "Fast Ice Dynamic Area Rate"),
-                                publish=publish)
 
-            elif name == "SIA":
-                return remember(name, self.compute_area_series(aice, area, None,
-                                                               name      = "SIA",
-                                                               long_name = "Sea Ice Area",
-                                                               scale     = self.metrics.area_scale),
-                                publish=publish)
-            elif name == "SIV":
-                return remember(name, self.compute_volume_series(aice, hi, area, None,
-                                                                 name      = "SIV",
-                                                                 long_name = "Sea Ice Volume",
-                                                                 scale     = self.metrics.volume_scale),
-                                publish=publish)
-            elif name == "SIT":
-                return remember(name, self.compute_thickness_series(aice, hi, area, None,
-                                                                    name      = "SIT",
-                                                                    long_name = "Sea Ice Thickness"),
-                                publish=publish)
-            elif name == "SIP":
-                return remember(name, self.compute_temporal_mean(aice,
-                                                                 name      = "SIP",
-                                                                 long_name = "Sea Ice Mean Concentration"),
-                                publish=publish)
-            elif name == "SIS" and "strength" in ds:
-                return remember(name, self.compute_strength_series(aice, hi, ds["strength"], area, si_mask,
-                                                                   name      = "SIS",
-                                                                   long_name = "Sea Ice Strength"),
-                                publish=publish)
-            elif name == "SITVR" and "dvidtt" in ds:
-                return remember(name, self.compute_volume_rate(ds["dvidtt"], aice, area, si_mask,
-                                                               name      = "SITVR",
-                                                               long_name = "Sea Ice Thermodynamic Volume Rate"),
-                                publish=publish)
-            elif name == "SIMVR" and "dvidtd" in ds:
-                return remember(name, self.compute_volume_rate(ds["dvidtd"], aice, area, si_mask,
-                                                               name      = "SIMVR",
-                                                               long_name = "Sea Ice Dynamic Volume Rate"),
-                                publish=publish)
-            elif name == "SITAR" and "daidtt" in ds:
-                return remember(name, self.compute_area_rate(ds["daidtt"], area, si_mask,
-                                                             name      = "SITAR",
-                                                             long_name = "Sea Ice Thermodynamic Area Rate"),
-                                publish=publish)
-            elif name == "SIMAR" and "daidtd" in ds:
-                return remember(name, self.compute_area_rate(ds["daidtd"], area, si_mask,
-                                                             name      = "SIMAR",
-                                                             long_name = "Sea Ice Dynamic Area Rate"),
-                                publish=publish)
-            elif name == "FIHI" and fi_mask is not None:
-                return remember(name, self.compute_temporal_mean(hi.where(fi_mask),
-                                                                 name      = "FIHI",
-                                                                 long_name = "Fast Ice Mean Thickness"),
-                                publish=publish)
-            elif name == "SIHI":
-                return remember(name, self.compute_temporal_mean(hi.where(si_mask),
-                                                                 name      = "SIHI",
-                                                                 long_name = "Sea Ice Mean Thickness"),
-                                publish=publish)
-            elif name == "FIST" and fi_mask is not None and "strength" in ds:
-                sfield = xr.where(fi_mask & (hi > 0), ds["strength"] / hi.where(hi > 0) / 1e6, np.nan).sum(dim="time").rename("FIST")
-                sfield.attrs.update({"long_name": "Fast Ice Temporal Sum Strength", "units": "MPa"})
-                return remember(name, sfield, publish=publish)
-            elif name == "SIST" and "strength" in ds:
-                sfield = xr.where(si_mask & (hi > 0), ds["strength"] / hi.where(hi > 0) / 1e6, np.nan).sum(dim="time").rename("SIST")
-                sfield.attrs.update({"long_name": "Sea Ice Temporal Sum Strength", "units": "MPa"})
-                return remember(name, sfield, publish=publish)
-            elif name == "FITVR_YR" and fi_mask is not None and "dvidtt" in ds:
-                return remember(name, self.compute_spatial_rate_year(ds["dvidtt"], fi_mask,
-                                                                     name      = "FITVR_YR",
-                                                                     long_name = "Fast Ice Thermodynamic Volume Rate Climatology"),
-                                publish=publish)
-            elif name == "FIMVR_YR" and fi_mask is not None and "dvidtd" in ds:
-                return remember(name, self.compute_spatial_rate_year(ds["dvidtd"], fi_mask,
-                                                                     name      = "FIMVR_YR",
-                                                                     long_name = "Fast Ice Dynamic Volume Rate Climatology"),
-                                publish=publish)
-            elif name == "FITAR_YR" and fi_mask is not None and "daidtt" in ds:
-                return remember(name, self.compute_spatial_rate_year(ds["daidtt"], fi_mask,
-                                                                     name      = "FITAR_YR",
-                                                                     long_name = "Fast Ice Thermodynamic Area Rate Climatology",
-                                                                     area      = area),
-                                publish=publish)
-            elif name == "FIMAR_YR" and fi_mask is not None and "daidtd" in ds:
-                return remember(name, self.compute_spatial_rate_year(ds["daidtd"], fi_mask,
-                                                                     name      = "FIMAR_YR",
-                                                                     long_name = "Fast Ice Dynamic Area Rate Climatology",
-                                                                     area      = area),
-                                publish=publish)
-            elif name == "SITVR_YR" and "dvidtt" in ds:
-                return remember(name, self.compute_spatial_rate_year(ds["dvidtt"], si_mask,
-                                                                     name      = "SITVR_YR",
-                                                                     long_name = "Sea Ice Thermodynamic Volume Rate Climatology"),
-                                publish=publish)
-            elif name == "SIMVR_YR" and "dvidtd" in ds:
-                return remember(name, self.compute_spatial_rate_year(ds["dvidtd"], si_mask,
-                                                                     name      = "SIMVR_YR",
-                                                                     long_name = "Sea Ice Dynamic Volume Rate Climatology"),
-                                publish=publish)
-            elif name == "SITAR_YR" and "daidtt" in ds:
-                return remember(name,self.compute_spatial_rate_year(ds["daidtt"], si_mask,
-                                                                    name      = "SITAR_YR",
-                                                                    long_name = "Sea Ice Thermodynamic Area Rate Climatology",
-                                                                    area      = area),
-                                publish=publish)
-            elif name == "SIMAR_YR" and "daidtd" in ds:
-                return remember(name, self.compute_spatial_rate_year(ds["daidtd"], si_mask,
-                                                                     name      = "SIMAR_YR",
-                                                                     long_name = "Sea Ice Dynamic Area Rate Climatology",
-                                                                     area      = area),
-                                publish=publish)
-            elif name in {"FIA_by_region", "FIT_by_region"} and fi_mask is not None:
-                fia_reg, fit_reg = self.compute_region_series(aice, hi, area, region_mask, fi_mask,
-                                                              area_name           = "FIA_by_region",
-                                                              thickness_name      = "FIT_by_region",
-                                                              area_long_name      = "Fast Ice Area by Antarctic sector",
-                                                              thickness_long_name = "Fast Ice Thickness by Antarctic sector")
-                remember("FIA_by_region", fia_reg, publish=("FIA_by_region" in requested or publish))
-                remember("FIT_by_region", fit_reg, publish=("FIT_by_region" in requested or publish))
-                return memo.get(name)
-            elif name in {"SIA_by_region", "SIT_by_region"}:
-                sia_reg, sit_reg = self.compute_region_series(aice, hi, area, region_mask, None,
-                                                              area_name           = "SIA_by_region",
-                                                              thickness_name      = "SIT_by_region",
-                                                              area_long_name      = "Sea Ice Area by Antarctic sector",
-                                                              thickness_long_name = "Sea Ice Thickness by Antarctic sector")
-                remember("SIA_by_region", sia_reg, publish=("SIA_by_region" in requested or publish))
-                remember("SIT_by_region", sit_reg, publish=("SIT_by_region" in requested or publish))
-                return memo.get(name)
-            return None
-        for primary in ["FIA", "FIV", "FIT", "FIP", "FIS", "FITVR", "FIMVR", "FITAR", "FIMAR",
-                        "SIA", "SIV", "SIT", "SIP", "SIS", "SITVR", "SIMVR", "SITAR", "SIMAR",
-                        "FIHI", "FIST", "FITVR_YR", "FIMVR_YR", "FITAR_YR", "FIMAR_YR",
-                        "SIHI", "SIST", "SITVR_YR", "SIMVR_YR", "SITAR_YR", "SIMAR_YR",
-                        "FIA_by_region", "FIT_by_region", "SIA_by_region", "SIT_by_region"]:
-            if primary in requested:
-                get_or_compute(primary, publish=True)
-        seasonal_requests = {"FIA": self.FIA_SEASONAL_NAMES,
-                             "FIT": self.FIT_SEASONAL_NAMES,
-                             "SIA": self.SIA_SEASONAL_NAMES,
-                             "SIT": self.SIT_SEASONAL_NAMES}
-        for base, names in seasonal_requests.items():
-            if requested & names:
-                base_da = get_or_compute(base, publish=(base in requested))
-                if base_da is not None:
-                    seasonal = self.compute_seasonal_summary(base_da, base)
-                    for nm, da in seasonal.items():
-                        if nm in requested:
-                            out[nm] = da
-        if requested & self.FIPSI_NAMES and fi_mask is not None:
-            fipsi = self.persistence_stability_index(fi_mask, area)
-            for nm, da in fipsi.items():
-                if nm in requested:
-                    out[nm] = da
-        if requested & (self.FIA_SKILL_NAMES | self.FIT_SKILL_NAMES):
-            base_ds = xr.Dataset()
-            if requested & self.FIA_SKILL_NAMES:
-                fia = get_or_compute("FIA", publish=("FIA" in requested))
-                if fia is not None:
-                    base_ds["FIA"] = fia
-            if requested & self.FIT_SKILL_NAMES:
-                fit = get_or_compute("FIT", publish=("FIT" in requested))
-                if fit is not None:
-                    base_ds["FIT"] = fit
-            if len(base_ds.data_vars) > 0:
-                skill = self._obs_skill_dataset(base_ds)
-                for nm in skill.data_vars:
-                    if nm in requested:
-                        out[nm] = skill[nm]
-        if requested & set(self.STRESS):
-            if fi_mask is not None:
-                maybe_stress("FI", fi_mask)
-            maybe_stress("SI", si_mask)
+        # ------------------------------------------------------------------
+        # Primary metrics
+        # ------------------------------------------------------------------
+        for name in PRIMARY_METRIC_NAMES:
+            if name in requested:
+                publish(name)
+
+        # ------------------------------------------------------------------
+        # Seasonal scalar summaries derived from primary 1-D series.
+        # ------------------------------------------------------------------
+        seasonal_requests = {
+            "FIA": self.FIA_SEASONAL_NAMES,
+            "FIT": self.FIT_SEASONAL_NAMES,
+            "SIA": self.SIA_SEASONAL_NAMES,
+            "SIT": self.SIT_SEASONAL_NAMES,
+        }
+
+        seasonal_ds = compute_seasonal_summary_dataset(
+            requested=requested,
+            dispatcher=dispatcher,
+            output=out,
+            seasonal_requests=seasonal_requests,
+            compute_seasonal_summary=self.compute_seasonal_summary,
+        )
+        out = xr.merge([out, seasonal_ds], compat="override")
+
+        # ------------------------------------------------------------------
+        # Persistence-stability diagnostics.
+        # ------------------------------------------------------------------
+        fipsi_ds = compute_fipsi_dataset(
+            requested=requested,
+            fipsi_names=self.FIPSI_NAMES,
+            fi_mask=fi_mask,
+            area=area,
+            persistence_stability_index=self.persistence_stability_index,
+        )
+        out = xr.merge([out, fipsi_ds], compat="override")
+
+        # ------------------------------------------------------------------
+        # Observation skill diagnostics.
+        # ------------------------------------------------------------------
+        skill_ds = compute_obs_skill_dataset(
+            requested=requested,
+            dispatcher=dispatcher,
+            output=out,
+            fia_skill_names=self.FIA_SKILL_NAMES,
+            fit_skill_names=self.FIT_SKILL_NAMES,
+            obs_skill_dataset=self._obs_skill_dataset,
+        )
+        out = xr.merge([out, skill_ds], compat="override")
+
+        # ------------------------------------------------------------------
+        # Stress diagnostics.
+        # ------------------------------------------------------------------
+        if stress_requested(requested, "FI") and fi_mask is not None:
+            stress_ds = compute_stress_dataset(
+                ds=ds,
+                area=area,
+                requested=requested,
+                prefix="FI",
+                mask=fi_mask,
+                calculator=self.compute_area_weighted_stress,
+            )
+            out = xr.merge([out, stress_ds], compat="override")
+
+        if stress_requested(requested, "SI"):
+            stress_ds = compute_stress_dataset(
+                ds=ds,
+                area=area,
+                requested=requested,
+                prefix="SI",
+                mask=si_mask,
+                calculator=self.compute_area_weighted_stress,
+            )
+            out = xr.merge([out, stress_ds], compat="override")        
+
+        # ------------------------------------------------------------------
+        # Common output metadata.
+        # ------------------------------------------------------------------
+        out = attach_common_metrics_attrs(
+            out,
+            sim_name=self.run.sim_name,
+            start_date=self.run.start_date,
+            end_date=self.run.end_date,
+            hemisphere=self.run.hemisphere,
+            ice_type=self.classify.ice_type,
+            grid_type=self.classify.grid_type,
+            method=method,
+        )
+
+        missing = sorted(name for name in requested if name not in out.data_vars)
+        if missing:
+            self.logger.info(
+                "Requested metrics not produced for %s/%s, likely because required inputs are absent: %s",
+                self.run.sim_name,
+                method,
+                missing,
+            )
+
         return out
 
     def _strip_aux_coords(self, da: xr.DataArray) -> xr.DataArray:
