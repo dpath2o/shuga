@@ -1,5 +1,4 @@
 """shuga: Antarctic fast-ice classification, metrics, plotting, and observations workflows for CICE Zarr output."""
-
 from .core.types           import (RunSpec,
                                    ClassificationSpec,
                                    MetricsSpec,
@@ -49,4 +48,4 @@ __all__     = [# configurations
                "load_metrics",
                "open_cice_history",
                "report_sim_status"]
-__version__ = "0.1.3"
+__version__ = "0.2.0"
