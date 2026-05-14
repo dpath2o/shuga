@@ -1,7 +1,6 @@
 from __future__            import annotations
 import shutil
 from pathlib               import Path
-from typing                import Iterable
 from datetime              import datetime
 import numpy               as np
 import pandas              as pd
@@ -13,6 +12,26 @@ from shuga.core.regions    import ANTARCTIC_8_REGIONS
 from shuga.core.types      import ClassificationSpec, MetricsSpec, RunSpec
 from shuga.io.zarr_loading import load_cice, load_classified
 from shuga.io.zarr_writing import sanitise_for_zarr_write
+from shuga.metrics.registry import (CORE_FI,
+                                    CORE_SI,
+                                    REGIONAL,
+                                    SPATIAL,
+                                    SUMMARY,
+                                    STRESS,
+                                    METRIC_GROUPS,
+                                    FIPSI_NAMES,
+                                    FIA_SKILL_NAMES,
+                                    FIT_SKILL_NAMES,
+                                    FIA_SEASONAL_NAMES,
+                                    FIT_SEASONAL_NAMES,
+                                    SIA_SEASONAL_NAMES,
+                                    SIT_SEASONAL_NAMES,
+                                    expand_metric_names)
+from shuga.metrics.skill import skill_stats
+from shuga.metrics.temporal import (month_window_bounds,
+                                    linear_rate_per_day,
+                                    seasonal_rate_record,
+                                    compute_extrema_table)
 
 """
 Incremental CICE metrics builder for fast-ice and sea-ice diagnostics.
@@ -21,13 +40,6 @@ The class computes time-series, spatial, regional, seasonal-summary,
 persistence, skill, and stress metrics from classified masks and CICE history
 fields, and writes them to method-specific metrics Zarr stores.
 """
-
-def _as_list(value: str | Iterable[str] | None) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [v.strip() for v in value.split(",") if v.strip()]
-    return [str(v).strip() for v in value if str(v).strip()]
 
 class CICEMetrics:
     """
@@ -102,54 +114,22 @@ class CICEMetrics:
     - Output stores are method-specific and typically written as
       ``mets.zarr`` products.
     """
-    # registry-style metric group aliases
-    CORE_FI            = ["FIA", "FIV", "FIT", "FIP", "FIS", "FITVR", "FIMVR", "FITAR", "FIMAR"]
-    CORE_SI            = ["SIA", "SIV", "SIT", "SIP", "SIS", "SITVR", "SIMVR", "SITAR", "SIMAR"]
-    REGIONAL           = ["FIA_by_region", "FIT_by_region", "SIA_by_region", "SIT_by_region"]
-    SPATIAL            = ["FIHI", "FIST", "FITVR_YR", "FIMVR_YR", "FITAR_YR", "FIMAR_YR",
-                          "SIHI", "SIST", "SITVR_YR", "SIMVR_YR", "SITAR_YR", "SIMAR_YR"]
-    SUMMARY            = ["FIA_max_mean", "FIA_max_std", "FIA_min_mean", "FIA_min_std",
-                          "FIA_doy_max_mean", "FIA_doy_max_std", "FIA_doy_min_mean", "FIA_doy_min_std",
-                          "FIT_max_mean", "FIT_max_std", "FIT_min_mean", "FIT_min_std",
-                          "FIT_doy_max_mean", "FIT_doy_max_std", "FIT_doy_min_mean", "FIT_doy_min_std",
-                          "SIA_max_mean", "SIA_max_std", "SIA_min_mean", "SIA_min_std",
-                          "SIA_doy_max_mean", "SIA_doy_max_std", "SIA_doy_min_mean", "SIA_doy_min_std",
-                          "SIT_max_mean", "SIT_max_std", "SIT_min_mean", "SIT_min_std",
-                          "SIT_doy_max_mean", "SIT_doy_max_std", "SIT_doy_min_mean", "SIT_doy_min_std",
-                          "FIPSI", "persistent_winter_area", "ever_winter_area",
-                          "FIA_Bias", "FIA_RMSE", "FIA_MAE", "FIA_Corr",
-                          "FIT_Bias", "FIT_RMSE", "FIT_MAE", "FIT_Corr"]
-    STRESS             = ["FIKuxE_mean", "FIKuxE_abs_mean", "FIKuxE_valid_area_m2",
-                          "FIKuyE_mean", "FIKuyE_abs_mean", "FIKuyE_valid_area_m2",
-                          "FIKuxN_mean", "FIKuxN_abs_mean", "FIKuxN_valid_area_m2",
-                          "FIKuyN_mean", "FIKuyN_abs_mean", "FIKuyN_valid_area_m2",
-                          "FIKuE_mag_mean", "FIKuE_mag_abs_mean", "FIKuE_mag_valid_area_m2",
-                          "FIKuN_mag_mean", "FIKuN_mag_abs_mean", "FIKuN_mag_valid_area_m2",
-                          "SIKuxE_mean", "SIKuxE_abs_mean", "SIKuxE_valid_area_m2",
-                          "SIKuyE_mean", "SIKuyE_abs_mean", "SIKuyE_valid_area_m2",
-                          "SIKuxN_mean", "SIKuxN_abs_mean", "SIKuxN_valid_area_m2",
-                          "SIKuyN_mean", "SIKuyN_abs_mean", "SIKuyN_valid_area_m2",
-                          "SIKuE_mag_mean", "SIKuE_mag_abs_mean", "SIKuE_mag_valid_area_m2",
-                          "SIKuN_mag_mean", "SIKuN_mag_abs_mean", "SIKuN_mag_valid_area_m2"]
-    METRIC_GROUPS      = {"fi_core"  : CORE_FI,
-                          "si_core"  : CORE_SI,
-                          "regional" : REGIONAL,
-                          "spatial"  : SPATIAL,
-                          "summary"  : SUMMARY,
-                          "stress"   : STRESS,
-                          "default"  : CORE_FI + CORE_SI + REGIONAL + SPATIAL + SUMMARY + STRESS,
-                          "all"      : CORE_FI + CORE_SI + REGIONAL + SPATIAL + SUMMARY + STRESS}
-    FIPSI_NAMES        = {"FIPSI", "persistent_winter_area", "ever_winter_area"}
-    FIA_SKILL_NAMES    = {"FIA_Bias", "FIA_RMSE", "FIA_MAE", "FIA_Corr"}
-    FIT_SKILL_NAMES    = {"FIT_Bias", "FIT_RMSE", "FIT_MAE", "FIT_Corr"}
-    FIA_SEASONAL_NAMES = {"FIA_max_mean", "FIA_max_std", "FIA_min_mean", "FIA_min_std",
-                          "FIA_doy_max_mean", "FIA_doy_max_std", "FIA_doy_min_mean", "FIA_doy_min_std"}
-    FIT_SEASONAL_NAMES = {"FIT_max_mean", "FIT_max_std", "FIT_min_mean", "FIT_min_std",
-                          "FIT_doy_max_mean", "FIT_doy_max_std", "FIT_doy_min_mean", "FIT_doy_min_std"}
-    SIA_SEASONAL_NAMES = {"SIA_max_mean", "SIA_max_std", "SIA_min_mean", "SIA_min_std",
-                          "SIA_doy_max_mean", "SIA_doy_max_std", "SIA_doy_min_mean", "SIA_doy_min_std"}
-    SIT_SEASONAL_NAMES = {"SIT_max_mean", "SIT_max_std", "SIT_min_mean", "SIT_min_std",
-                          "SIT_doy_max_mean", "SIT_doy_max_std", "SIT_doy_min_mean", "SIT_doy_min_std"}
+    # Backwards-compatible registry aliases. The canonical definitions live in
+    # shuga.metrics.registry.
+    CORE_FI            = CORE_FI
+    CORE_SI            = CORE_SI
+    REGIONAL           = REGIONAL
+    SPATIAL            = SPATIAL
+    SUMMARY            = SUMMARY
+    STRESS             = STRESS
+    METRIC_GROUPS      = METRIC_GROUPS
+    FIPSI_NAMES        = FIPSI_NAMES
+    FIA_SKILL_NAMES    = FIA_SKILL_NAMES
+    FIT_SKILL_NAMES    = FIT_SKILL_NAMES
+    FIA_SEASONAL_NAMES = FIA_SEASONAL_NAMES
+    FIT_SEASONAL_NAMES = FIT_SEASONAL_NAMES
+    SIA_SEASONAL_NAMES = SIA_SEASONAL_NAMES
+    SIT_SEASONAL_NAMES = SIT_SEASONAL_NAMES
 
     #----------------------------------------------------------------------------------
     # class initialisation
@@ -223,274 +203,13 @@ class CICEMetrics:
     def _lon_to_180(lon: xr.DataArray) -> xr.DataArray:
         return ((lon + 180.0) % 360.0) - 180.0
 
-    @staticmethod
-    def _skill_stats(mod_data: np.ndarray, obs_data: np.ndarray) -> dict[str, float]:
-        good = np.isfinite(mod_data) & np.isfinite(obs_data)
-        if good.sum() == 0:
-            return {"Bias": np.nan, "RMSE": np.nan, "MAE": np.nan, "Corr": np.nan}
-        m    = mod_data[good]
-        o    = obs_data[good]
-        corr = np.corrcoef(m, o)[0, 1] if good.sum() > 1 else np.nan
-        return {"Bias" : float(np.mean(m - o)),
-                "RMSE" : float(np.sqrt(np.mean((m - o) ** 2))),
-                "MAE"  : float(np.mean(np.abs(m - o))),
-                "Corr" : float(corr)}
-
-    @staticmethod
-    def _month_window_bounds(year_start: int, start_month: int, end_month: int) -> tuple[pd.Timestamp, pd.Timestamp]:
-        """
-        Return inclusive start/end dates for a month window.
-
-        If end_month < start_month, the window is treated as crossing into
-        year_start + 1. Example: Dec-Mar for year_start=1993 gives
-        1993-12-01 to 1994-03-31.
-        """
-        start    = pd.Timestamp(year=int(year_start), month=int(start_month), day=1)
-        end_year = int(year_start) if end_month >= start_month else int(year_start) + 1
-        end_day  = pd.Period(f"{end_year}-{int(end_month):02d}", freq="M").days_in_month
-        end      = pd.Timestamp(year=end_year, month=int(end_month), day=int(end_day))
-        return start, end
-
-    @staticmethod
-    def _linear_rate_per_day(series: pd.Series) -> float:
-        """
-        Least-squares linear slope in series units per day.
-        """
-        s = series.dropna()
-        if len(s) < 2:
-            return np.nan
-        x     = np.asarray((s.index - s.index[0]).days, dtype=float)
-        y     = np.asarray(s.values, dtype=float)
-        valid = np.isfinite(x) & np.isfinite(y)
-        x     = x[valid]
-        y     = y[valid]
-        if len(y) < 2 or np.unique(x).size < 2:
-            return np.nan
-        x0  = x - x.mean()
-        den = float(np.sum(x0 * x0))
-        if den == 0.0:
-            return np.nan
-        return float(np.sum(x0 * (y - y.mean())) / den)
-
-    @classmethod
-    def _seasonal_rate_record(cls, series : pd.Series, *,
-                              year_start         : int,
-                              start_month        : int,
-                              end_month          : int,
-                              prefix             : str,
-                              require_full_window: bool = True,
-                              min_points         : int = 20) -> dict:
-        """
-        Compute linear seasonal rate diagnostics for one month window.
-        """
-        window_start, window_end = cls._month_window_bounds(year_start  = year_start,
-                                                            start_month = start_month,
-                                                            end_month   = end_month)
-        out = {f"{prefix}_window_start": window_start.date().isoformat(),
-               f"{prefix}_window_end": window_end.date().isoformat(),
-               f"{prefix}_start_date": "",
-               f"{prefix}_end_date": "",
-               f"{prefix}_n_time": 0,
-               f"{prefix}_n_days": np.nan,
-               f"{prefix}_value_start": np.nan,
-               f"{prefix}_value_end": np.nan,
-               f"{prefix}_delta_value": np.nan,
-               f"{prefix}_rate_per_day": np.nan}
-        if series.empty:
-            return out
-        # This is what makes Dec-Mar retreat disappear for a Jan-Dec request.
-        if require_full_window:
-            if pd.Timestamp(series.index.min()) > window_start:
-                return out
-            if pd.Timestamp(series.index.max()) < window_end:
-                return out
-        s = series.loc[(series.index >= window_start) & (series.index <= window_end)].dropna()
-        if len(s) < min_points:
-            return out
-        n_days = int((s.index[-1] - s.index[0]).days)
-        if n_days <= 0:
-            return out
-        out.update({f"{prefix}_start_date": pd.Timestamp(s.index[0]).date().isoformat(),
-                    f"{prefix}_end_date": pd.Timestamp(s.index[-1]).date().isoformat(),
-                    f"{prefix}_n_time": int(len(s)),
-                    f"{prefix}_n_days": n_days,
-                    f"{prefix}_value_start": float(s.iloc[0]),
-                    f"{prefix}_value_end": float(s.iloc[-1]),
-                    f"{prefix}_delta_value": float(s.iloc[-1] - s.iloc[0]),
-                    f"{prefix}_rate_per_day": cls._linear_rate_per_day(s)})
-        return out
-
-    @staticmethod
-    def compute_extrema_table(da: xr.DataArray, *,
-                              variable                : str | None = None,
-                              sim_name                : str | None = None,
-                              year_mode               : str = "calendar",
-                              include_mean            : bool = True,
-                              include_overall         : bool = True,
-                              growth_window           : tuple[int, int] | None = (4, 7),
-                              retreat_window          : tuple[int, int] | None = (12, 3),
-                              require_full_rate_window: bool = True,
-                              rate_min_points         : int = 20,
-                              drop_partial_periods    : bool = False) -> pd.DataFrame:
-        """
-        Build a per-year extrema table for a 1D metric time series.
-
-        Also optionally reports seasonal linear growth and retreat rates.
-
-        growth_window defaults to Apr-Jul.
-        retreat_window defaults to Dec-Mar and is assigned to the December year.
-        """
-        if "time" not in da.dims:
-            raise ValueError("Input metric must have a 'time' dimension.")
-        non_time_dims = [d for d in da.dims if d != "time"]
-        if non_time_dims:
-            raise ValueError(f"Input metric must be 1D over time. Found extra dimensions: {non_time_dims}")
-        variable   = variable or da.name or "metric"
-        units      = da.attrs.get("units", "")
-        rate_units = f"{units} day^-1" if units else "metric units day^-1"
-        series     = da.load().to_series().dropna()
-        if series.empty:
-            raise ValueError(f"No finite data found for metric {variable!r}.")
-        series.index = pd.to_datetime(series.index)
-        idx  = pd.DatetimeIndex(series.index)
-        mode = year_mode.lower().strip()
-        if mode in {"calendar", "cal", "year"}:
-            year_start    = idx.year
-            period_labels = [str(y) for y in year_start]
-            year_mode_out = "calendar"
-            period_bounds = {int(y): CICEMetrics._month_window_bounds(int(y), 1, 12) for y in np.unique(year_start)}
-        elif mode in {"antarctic", "ant", "ant-year", "ant_year"}:
-            year_start    = np.where(idx.month >= 3, idx.year, idx.year - 1)
-            period_labels = [f"{int(y)}/{str(int(y) + 1)[-2:]}" for y in year_start]
-            year_mode_out = "antarctic"
-            period_bounds = {int(y): CICEMetrics._month_window_bounds(int(y), 3, 2) for y in np.unique(year_start) }
-        else:
-            raise ValueError("year_mode must be either 'calendar' or 'antarctic'. Got {year_mode!r}.")
-        grouped = series.groupby(period_labels)
-        label_to_year_start: dict[str, int] = {}
-        for lab, ys in zip(period_labels, year_start):
-            label_to_year_start.setdefault(lab, int(ys))
-        rows: list[dict] = []
-        for period, grp in grouped:
-            if grp.empty:
-                continue
-            ys = int(label_to_year_start[period])
-            if drop_partial_periods:
-                p0, p1 = period_bounds[ys]
-                if pd.Timestamp(series.index.min()) > p0:
-                    continue
-                if pd.Timestamp(series.index.max()) < p1:
-                    continue
-            t_min = pd.Timestamp(grp.idxmin())
-            t_max = pd.Timestamp(grp.idxmax())
-            row = {"sim_name"   : sim_name,
-                   "metric"     : variable,
-                   "units"      : units,
-                   "rate_units" : rate_units,
-                   "year_mode"  : year_mode_out,
-                   "period"     : period,
-                   "year_start" : ys,
-                   "n_time"     : int(grp.count()),
-                   "n_years"    : 1,
-                   "start_date" : pd.Timestamp(grp.index.min()).date().isoformat(),
-                   "end_date"   : pd.Timestamp(grp.index.max()).date().isoformat(),
-                   "date_min"   : t_min.date().isoformat(),
-                   "doy_min"    : int(t_min.dayofyear),
-                   "value_min"  : float(grp.min()),
-                   "date_max"   : t_max.date().isoformat(),
-                   "doy_max"    : int(t_max.dayofyear),
-                   "value_max"  : float(grp.max()),
-                   "mean_value" : float(grp.mean()),
-                   "std_value"  : float(grp.std(ddof=0))}
-            if growth_window is not None:
-                row.update(CICEMetrics._seasonal_rate_record(series,
-                                                             year_start          = ys,
-                                                             start_month         = int(growth_window[0]),
-                                                             end_month           = int(growth_window[1]),
-                                                             prefix              = "growth",
-                                                             require_full_window = require_full_rate_window,
-                                                             min_points          = rate_min_points))
-            if retreat_window is not None:
-                row.update(CICEMetrics._seasonal_rate_record(series,
-                                                             year_start          = ys,
-                                                             start_month         = int(retreat_window[0]),
-                                                             end_month           = int(retreat_window[1]),
-                                                             prefix              = "retreat",
-                                                             require_full_window = require_full_rate_window,
-                                                             min_points          = rate_min_points))
-            rows.append(row)
-        if not rows:
-            raise ValueError(f"No annual groups could be built for {variable!r}.")
-        df = pd.DataFrame(rows).sort_values(["year_start", "period"]).reset_index(drop=True)
-        def _mean_numeric(col: str) -> float:
-            if col not in df.columns:
-                return np.nan
-            return float(pd.to_numeric(df[col], errors="coerce").mean())
-        def _sum_numeric(col: str) -> int:
-            if col not in df.columns:
-                return 0
-            return int(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
-        aggregate_rows: list[dict] = []
-        if include_mean:
-            mean_row = {"sim_name"   : sim_name,
-                        "metric"     : variable,
-                        "units"      : units,
-                        "rate_units" : rate_units,
-                        "year_mode"  : year_mode_out,
-                        "period"     : "MEAN",
-                        "year_start" : np.nan,
-                        "n_time"     : int(series.count()),
-                        "n_years"    : int(len(df)),
-                        "start_date" : pd.Timestamp(series.index.min()).date().isoformat(),
-                        "end_date"   : pd.Timestamp(series.index.max()).date().isoformat(),
-                        "date_min"   : "",
-                        "doy_min"    : _mean_numeric("doy_min"),
-                        "value_min"  : _mean_numeric("value_min"),
-                        "date_max"   : "",
-                        "doy_max"    : _mean_numeric("doy_max"),
-                        "value_max"  : _mean_numeric("value_max"),
-                        "mean_value" : float(series.mean()),
-                        "std_value"  : float(series.std(ddof=0))}
-            for prefix in ("growth", "retreat"):
-                if f"{prefix}_rate_per_day" in df.columns:
-                    mean_row.update({f"{prefix}_window_start" : "",
-                                     f"{prefix}_window_end"   : "",
-                                     f"{prefix}_start_date"   : "",
-                                     f"{prefix}_end_date"     : "",
-                                     f"{prefix}_n_time"       : _sum_numeric(f"{prefix}_n_time"),
-                                     f"{prefix}_n_days"       : _mean_numeric(f"{prefix}_n_days"),
-                                     f"{prefix}_value_start"  : _mean_numeric(f"{prefix}_value_start"),
-                                     f"{prefix}_value_end"    : _mean_numeric(f"{prefix}_value_end"),
-                                     f"{prefix}_delta_value"  : _mean_numeric(f"{prefix}_delta_value"),
-                                     f"{prefix}_rate_per_day" : _mean_numeric(f"{prefix}_rate_per_day")})
-            aggregate_rows.append(mean_row)
-        if include_overall:
-            t_min = pd.Timestamp(series.idxmin())
-            t_max = pd.Timestamp(series.idxmax())
-            overall_row = {"sim_name"   : sim_name,
-                           "metric"     : variable,
-                           "units"      : units,
-                           "rate_units" : rate_units,
-                           "year_mode"  : year_mode_out,
-                           "period"     : "OVERALL",
-                           "year_start" : np.nan,
-                           "n_time"     : int(series.count()),
-                           "n_years"    : int(len(df)),
-                           "start_date" : pd.Timestamp(series.index.min()).date().isoformat(),
-                           "end_date"   : pd.Timestamp(series.index.max()).date().isoformat(),
-                           "date_min"   : t_min.date().isoformat(),
-                           "doy_min"    : int(t_min.dayofyear),
-                           "value_min"  : float(series.min()),
-                           "date_max"   : t_max.date().isoformat(),
-                           "doy_max"    : int(t_max.dayofyear),
-                           "value_max"  : float(series.max()),
-                           "mean_value" : float(series.mean()),
-                           "std_value"  : float(series.std(ddof=0))}
-            # Seasonal rates are annual diagnostics, so leave OVERALL blank.
-            aggregate_rows.append(overall_row)
-        if aggregate_rows:
-            df = pd.concat([df, pd.DataFrame(aggregate_rows)], ignore_index=True)
-        return df
+    # Backwards-compatible pure-helper aliases. The canonical implementations
+    # live in shuga.metrics.skill and shuga.metrics.temporal.
+    _skill_stats          = staticmethod(skill_stats)
+    _month_window_bounds  = staticmethod(month_window_bounds)
+    _linear_rate_per_day  = staticmethod(linear_rate_per_day)
+    _seasonal_rate_record = staticmethod(seasonal_rate_record)
+    compute_extrema_table = staticmethod(compute_extrema_table)
 
     #----------------------------------------------------------------------------------
     # helpers
@@ -569,22 +288,7 @@ class CICEMetrics:
         return xr.where(aice >= thresh, True, False)
 
     def _expand_metric_names(self, metric_names=None, metric_groups=None) -> list[str]:
-        explicit = _as_list(metric_names)
-        groups = _as_list(metric_groups)
-        # If neither explicit metric names nor metric groups are supplied,
-        # preserve the existing default behaviour.
-        if not explicit and not groups:
-            groups = ["default"]
-        out = set(explicit)
-        for group in groups:
-            key = group.strip().lower()
-            if key not in self.METRIC_GROUPS:
-                raise ValueError(
-                    f"Unknown metric group '{group}'. "
-                    f"Valid groups: {sorted(self.METRIC_GROUPS)}"
-                )
-            out.update(self.METRIC_GROUPS[key])
-        return sorted(out)
+        return expand_metric_names(metric_names=metric_names, metric_groups=metric_groups)
 
     def _open_existing_metrics(self, method: str) -> xr.Dataset | None:
         norm = normalize_method(method)
