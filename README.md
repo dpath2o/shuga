@@ -1,18 +1,18 @@
-# shugga
+# shuga
 
-`shugga` is a standalone CICE post-processing package for Antarctic fast-ice workflows. It replaces the older AFIM JSON-driven classification and metrics scripts with a shared, code-first package built around explicit runtime specifications, common path rules, and reusable loading logic.
+`shuga` is a standalone CICE post-processing package for Antarctic fast-ice workflows. It replaces the older AFIM JSON-driven classification and metrics scripts with a shared, code-first package built around explicit runtime specifications, common path rules, and reusable loading logic.
 
 The package has two primary peer workflows:
 
-- `shugga.classify.CICEClassifier`: compute raw, binary-days, and rolling-mean fast-ice masks.
-- `shugga.metrics.CICEMetrics`: compute fast-ice persistence, area, volume, thickness, and regional FIA/FIT from those masks.
+- `shuga.classify.CICEClassifier`: compute raw, binary-days, and rolling-mean fast-ice masks.
+- `shuga.metrics.CICEMetrics`: compute fast-ice persistence, area, volume, thickness, and regional FIA/FIT from those masks.
 
-The key design goal is to prevent path drift between modules. Classification and metrics both use the same `ShuggaPaths` object, so directory naming is defined once and reused everywhere.
+The key design goal is to prevent path drift between modules. Classification and metrics both use the same `ShugaPaths` object, so directory naming is defined once and reused everywhere.
 
 ## Package layout
 
 ```text
-shugga/
+shuga/
     core/
         logging.py
         naming.py
@@ -45,7 +45,7 @@ docs/
 
 ## Defaults and path conventions
 
-By default, `shugga` assumes the Gadi layout below:
+By default, `shuga` assumes the Gadi layout below:
 
 - project: `gv90`
 - user: `da1339`
@@ -80,7 +80,7 @@ while log filenames use the compact form:
 
 ## Fast-ice methods
 
-`shugga` currently supports three mask products:
+`shuga` currently supports three mask products:
 
 - `raw`: daily speed-threshold classification.
 - `binary-days`: centered rolling count over the raw mask.
@@ -132,9 +132,9 @@ Metrics:
 ## Python API example
 
 ```python
-from shugga import RunSpec, ClassificationSpec, MetricsSpec, ShuggaPaths
-from shugga.classify import CICEClassifier
-from shugga.metrics import CICEMetrics
+from shuga import RunSpec, ClassificationSpec, MetricsSpec, ShugaPaths
+from shuga.classify import CICEClassifier
+from shuga.metrics import CICEMetrics
 
 run = RunSpec(
     sim_name="LD-waves-exp01",
@@ -153,7 +153,7 @@ classify = ClassificationSpec(
     roll_window=15,
 )
 
-paths = ShuggaPaths(run=run, classify=classify)
+paths = ShugaPaths(run=run, classify=classify)
 
 classifier = CICEClassifier(run=run, classify=classify, paths=paths)
 classifier.run_methods(overwrite=False)

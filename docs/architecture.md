@@ -1,6 +1,6 @@
 # Architecture
 
-## Why `shugga` exists
+## Why `shuga` exists
 
 The immediate motivation was to stop path drift between classification and metrics. In the older AFIM workflow, the PBS wrappers, CLI scripts, and classes each carried pieces of the naming logic. That made it easy for one module to write:
 
@@ -14,7 +14,7 @@ while another tried to read:
 ispd_thresh5e-4 / BW11_BM9 / classification.zarr
 ```
 
-`shugga` fixes that by making `ShuggaPaths` the single source of truth.
+`shuga` fixes that by making `ShugaPaths` the single source of truth.
 
 ## Core objects
 
@@ -48,7 +48,7 @@ Defines optional metric extras:
 - coast-distance variable
 - area and volume scaling constants
 
-### `ShuggaPaths`
+### `ShugaPaths`
 
 Encodes all directory and filename rules:
 
@@ -60,7 +60,7 @@ Encodes all directory and filename rules:
 
 ## IO model
 
-The shared loader in `shugga.io.zarr_loading` supports:
+The shared loader in `shuga.io.zarr_loading` supports:
 
 1. grouped monthly stores:
    `iceh_daily.zarr/YYYY-MM`

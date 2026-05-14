@@ -1,6 +1,6 @@
 # Quickstart
 
-This page shows the shortest path from a CICE experiment to classified fast-ice masks, metrics, and plots using `shugga`.
+This page shows the shortest path from a CICE experiment to classified fast-ice masks, metrics, and plots using `shuga`.
 
 ## 1. Put the repo on `PYTHONPATH`
 
@@ -52,8 +52,8 @@ Expected metric stores:
 ## 4. Load the results in Python
 
 ```python
-from shugga import RunSpec, ClassificationSpec, ShuggaPaths
-from shugga.metrics import CICEMetrics
+from shuga import RunSpec, ClassificationSpec, ShugaPaths
+from shuga.metrics import CICEMetrics
 
 run = RunSpec(
     sim_name="LD-waves-exp01",
@@ -71,7 +71,7 @@ classify = ClassificationSpec(
     roll_window=15,
 )
 
-paths = ShuggaPaths(run=run, classify=classify)
+paths = ShugaPaths(run=run, classify=classify)
 metrics = CICEMetrics(run=run, classify=classify, paths=paths)
 
 raw = metrics.load_metrics("raw")
