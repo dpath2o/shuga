@@ -32,6 +32,23 @@ from shuga.metrics.temporal import (month_window_bounds,
                                     linear_rate_per_day,
                                     seasonal_rate_record,
                                     compute_extrema_table)
+from shuga.metrics.regional import (detect_lonlat,
+                                    ensure_2d_static,
+                                    lon_to_180,
+                                    region_mask,
+                                    spatial_dims)
+from shuga.metrics.calculations import (compute_area_series,
+                                        compute_volume_series,
+                                        compute_thickness_series,
+                                        compute_strength_series,
+                                        compute_persistence_mask,
+                                        compute_temporal_mean,
+                                        convert_thickness_tendency_to_m_per_day,
+                                        compute_volume_rate,
+                                        compute_area_rate,
+                                        compute_spatial_rate_year,
+                                        compute_region_series,
+                                        compute_area_weighted_stress)
 
 """
 Incremental CICE metrics builder for fast-ice and sea-ice diagnostics.
@@ -195,14 +212,6 @@ class CICEMetrics:
     def mask_var_name(self) -> str:
         return f"{self.classify.ice_type}_mask"
 
-    @staticmethod
-    def _ensure_2d_static(da: xr.DataArray) -> xr.DataArray:
-        return da.isel(time=0, drop=True) if "time" in da.dims else da
-
-    @staticmethod
-    def _lon_to_180(lon: xr.DataArray) -> xr.DataArray:
-        return ((lon + 180.0) % 360.0) - 180.0
-
     # Backwards-compatible pure-helper aliases. The canonical implementations
     # live in shuga.metrics.skill and shuga.metrics.temporal.
     _skill_stats          = staticmethod(skill_stats)
@@ -210,6 +219,17 @@ class CICEMetrics:
     _linear_rate_per_day  = staticmethod(linear_rate_per_day)
     _seasonal_rate_record = staticmethod(seasonal_rate_record)
     compute_extrema_table = staticmethod(compute_extrema_table)
+
+    # Backwards-compatible regional/spatial helper aliases.
+    _ensure_2d_static = staticmethod(ensure_2d_static)
+    _lon_to_180 = staticmethod(lon_to_180)
+    _detect_lonlat = staticmethod(detect_lonlat)
+    _spatial_dims = staticmethod(spatial_dims)
+    def _region_mask(self, template: xr.DataArray, lon: xr.DataArray, lat: xr.DataArray) -> xr.DataArray:
+        return region_mask(template    = template,
+                           lon         = lon,
+                           lat         = lat,
+                           region_defs = self.region_defs)
 
     #----------------------------------------------------------------------------------
     # helpers
@@ -245,16 +265,6 @@ class CICEMetrics:
     def plot_triptych(self, *args, **kwargs):
         return self._plotter().plot_triptych(*args, **kwargs)
 
-    def _detect_lonlat(self, ds: xr.Dataset) -> tuple[xr.DataArray, xr.DataArray]:
-        lon_name = next((n for n in ("TLON", "ULON", "lon", "longitude") if n in ds.variables or n in ds.coords), None)
-        lat_name = next((n for n in ("TLAT", "ULAT", "lat", "latitude") if n in ds.variables or n in ds.coords), None)
-        if lon_name is None or lat_name is None:
-            raise KeyError("Could not find longitude/latitude fields in the CICE dataset.")
-        return ds[lon_name], ds[lat_name]
-
-    def _spatial_dims(self, da: xr.DataArray) -> list[str]:
-        return [dim for dim in da.dims if dim not in {"time", "region"}]
-
     def _output_chunk_map(self, ds: xr.Dataset) -> dict[str, int]:
         chunk_map = {}
         if "time" in ds.dims:
@@ -266,22 +276,6 @@ class CICEMetrics:
         if "region" in ds.dims:
             chunk_map["region"] = ds.sizes["region"]
         return chunk_map
-
-    def _region_mask(self, template: xr.DataArray, lon: xr.DataArray, lat: xr.DataArray) -> xr.DataArray:
-        lon180 = self._lon_to_180(lon)
-        region_masks = []
-        names = []
-        for region_name, spec in self.region_defs.items():
-            lon_min, lon_max, lat_min, lat_max = spec["geo_region"]
-            if lon_min <= lon_max:
-                lon_mask = (lon180 >= lon_min) & (lon180 <= lon_max)
-            else:
-                lon_mask = (lon180 >= lon_min) | (lon180 <= lon_max)
-            lat_mask = (lat >= lat_min) & (lat <= lat_max)
-            region_masks.append((lon_mask & lat_mask).astype(bool))
-            names.append(region_name)
-        out = xr.concat(region_masks, dim=pd.Index(names, name="region"))
-        return out.transpose("region", *template.dims)
 
     def _si_mask(self, aice: xr.DataArray) -> xr.DataArray:
         thresh = float(getattr(self.classify, "aice_thresh", 0.15))
