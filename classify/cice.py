@@ -12,30 +12,6 @@ from shuga.io.zarr_loading import load_cice
 from shuga.regridding.cice import compute_tgrid_speed, parse_grid_selection
 from shuga.io.zarr_writing import sanitise_for_zarr_write, strip_to_time_coord
 
-# POSSIBLE MOVE THIS TO shuga/IO/zarr_writing.py **NEW FILE**
-# def _sanitize_for_zarr_write(ds: xr.Dataset) -> xr.Dataset:
-#     ds = ds.copy()
-#     # Drop inherited backend encoding that can poison writes.
-#     for name in ds.variables:
-#         ds[name].encoding = {}
-#     # Dataset-level encoding can also carry backend state.
-#     ds.encoding = {}
-#     return ds
-
-# # POSSIBLE MOVE THIS TO shuga/core/netcdf_helper.py **NEW FILE**
-# def _strip_to_classification_coords(da: xr.DataArray) -> xr.DataArray:
-#     """
-#     Keep only the minimal coordinates needed for classification output.
-#     Retain time coordinate if present; drop all spatial/static coords.
-#     """
-#     time_coord = da["time"] if "time" in da.coords else None
-#     clean      = xr.DataArray(da.data,
-#                               dims   = da.dims,
-#                               coords = {"time": time_coord} if time_coord is not None else None,
-#                               name   = da.name,
-#                               attrs  = da.attrs)
-#     return clean
-
 class CICEClassifier:
     """
     Standalone fast-ice classifier for CICE Zarr history output.
@@ -108,7 +84,6 @@ class CICEClassifier:
     - Output stores are written as Zarr version 2 with a canonical variable
       name of ``FI_mask``.
     """
-
     def __init__(self, run: RunSpec, classify: ClassificationSpec,
                  paths    : ShugaPaths | None                             = None, *,
                  chunks   : dict | None                                   = None,
@@ -223,7 +198,7 @@ class CICEClassifier:
         return chunk_map
 
     #----------------------------------------------------------------------------
-    # APIs
+    # public APIs
     #---------------------------------------------------------------------------
     def compute_speed(self, ds: xr.Dataset) -> xr.DataArray:
         """

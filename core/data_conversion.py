@@ -16,7 +16,8 @@ from shuga.grid.static import CICEStaticBuilder
 __all__         = ["NC2Zarr", "NC2ZarrResult"]
 _MONTH_RE       = re.compile(r"^\d{4}-\d{2}$")
 _DATE_RE        = re.compile(r"(\d{4}-\d{2}-\d{2})\.nc$")
-_HOURLY_FILE_RE = re.compile(r"^iceh(?:_inst)?\.(\d{4}-\d{2}-\d{2})-(\d{5})\.nc$")
+_HOURLY_FILE_RE = re.compile(r"^iceh(?:_inst|_\d{2}h)?\.(\d{4}-\d{2}-\d{2})-(\d{5})\.nc$")
+# _HOURLY_FILE_RE = re.compile(r"^iceh(?:_inst)?\.(\d{4}-\d{2}-\d{2})-(\d{5})\.nc$")
 _DAY_GROUP_RE   = re.compile(r"^\d{4}_\d{2}_\d{2}$")
 
 @dataclass(slots=True)
@@ -39,7 +40,6 @@ class NC2Zarr:
     mask, and geometry fields are written once to ``iceh_static.zarr`` and are
     intended to be merged back in at read time by ``shuga.io.zarr_loading``.
     """
-
     def __init__(self, paths: ShugaPaths, *,
                  logger       : logging.Logger | None = None,
                  chunks       : dict           | None = None,
@@ -328,7 +328,7 @@ class NC2Zarr:
         self.logger.info("[%s] wrote static store %s", context, static_store)
 
     # ------------------------------------------------------------------
-    # public API
+    # public APIs
     # ------------------------------------------------------------------
     def ensure_iceh_stores(self, *,
                            dt0_str         : str | None = None,
@@ -341,33 +341,27 @@ class NC2Zarr:
                            netcdf_engine   : str | None = None) -> NC2ZarrResult:
         freq = self._iceh_frequency()
         if freq == "hourly":
-            result = self.hourly_iceh_to_daily_zarr(
-                dt0_str          = dt0_str,
-                dtN_str          = dtN_str,
-                hourly_root      = hourly_root,
-                overwrite        = overwrite,
-                delete_original  = delete_original,
-                netcdf_engine    = netcdf_engine,
-                overwrite_static = overwrite_static,
-            )
+            result = self.hourly_iceh_to_daily_zarr(dt0_str          = dt0_str,
+                                                    dtN_str          = dtN_str,
+                                                    hourly_root      = hourly_root,
+                                                    overwrite        = overwrite,
+                                                    delete_original  = delete_original,
+                                                    netcdf_engine    = netcdf_engine,
+                                                    overwrite_static = overwrite_static)
         else:
-            result = self.daily_iceh_to_monthly_zarr(
-                dt0_str          = dt0_str,
-                dtN_str          = dtN_str,
-                daily_root       = daily_root,
-                overwrite        = overwrite,
-                delete_original  = delete_original,
-                netcdf_engine    = netcdf_engine,
-                overwrite_static = overwrite_static,
-            )
+            result = self.daily_iceh_to_monthly_zarr(dt0_str          = dt0_str,
+                                                     dtN_str          = dtN_str,
+                                                     daily_root       = daily_root,
+                                                     overwrite        = overwrite,
+                                                     delete_original  = delete_original,
+                                                     netcdf_engine    = netcdf_engine,
+                                                     overwrite_static = overwrite_static)
         if result.static_store is None or not result.static_store.exists():
-            static_store = self.ensure_iceh_static_store(
-                dt0_str     = dt0_str,
-                dtN_str     = dtN_str,
-                daily_root  = daily_root,
-                hourly_root = hourly_root,
-                overwrite   = overwrite_static,
-            )
+            static_store = self.ensure_iceh_static_store(dt0_str     = dt0_str,
+                                                         dtN_str     = dtN_str,
+                                                         daily_root  = daily_root,
+                                                         hourly_root = hourly_root,
+                                                         overwrite   = overwrite_static)
             result.static_store = static_store
         return result
 
@@ -557,14 +551,12 @@ class NC2Zarr:
             shutil.rmtree(static_store)
         cice_store = self.paths.resolve_cice_store_target()
         if cice_store.exists():
-            built = self.build_iceh_static_zarr_from_grouped_iceh(
-                cice_store           = cice_store,
-                static_store         = static_store,
-                frequency            = freq,
-                overwrite            = False,
-                verify_all_groups    = verify_all_groups,
-                allow_empty_fallback = True,
-            )
+            built = self.build_iceh_static_zarr_from_grouped_iceh(cice_store           = cice_store,
+                                                                  static_store         = static_store,
+                                                                  frequency            = freq,
+                                                                  overwrite            = False,
+                                                                  verify_all_groups    = verify_all_groups,
+                                                                  allow_empty_fallback = True)
             if built is not None and built.exists():
                 return built
         if freq == "hourly":
@@ -617,44 +609,30 @@ class NC2Zarr:
         freq = str(frequency or self._iceh_frequency()).lower()
         if freq not in {"daily", "hourly"}:
             raise ValueError(f"Unsupported frequency={freq!r}")
-
-        group_re = _DAY_GROUP_RE if freq == "hourly" else _MONTH_RE
-
-        cice_store = Path(cice_store).expanduser() if cice_store is not None else self.paths.resolve_cice_store_target()
+        group_re     = _DAY_GROUP_RE if freq == "hourly" else _MONTH_RE
+        cice_store   = Path(cice_store).expanduser() if cice_store is not None else self.paths.resolve_cice_store_target()
         static_store = Path(static_store).expanduser() if static_store is not None else self.paths.resolve_static_store_target()
-
         if not cice_store.exists():
             raise FileNotFoundError(f"Grouped CICE store not found: {cice_store}")
-
         groups = sorted(p.name for p in cice_store.iterdir() if p.is_dir() and group_re.fullmatch(p.name))
         if not groups:
             raise FileNotFoundError(f"No grouped {freq} iceh groups found under {cice_store}")
-
         if static_store.exists() and not overwrite:
             self.logger.info("Static store already exists, skipping: %s", static_store)
             return static_store
-
         if static_store.exists() and overwrite:
             self.logger.info("Overwriting existing static store: %s", static_store)
             shutil.rmtree(static_store)
-
         ref_group = groups[0]
         self.logger.info("Building static store from grouped %s group %s", freq, ref_group)
-
         ds_ref = xr.open_zarr(cice_store, group=ref_group, consolidated=False)
         try:
             ds_static = self._build_iceh_static_dataset(ds_ref, log_missing=True)
-
             if not ds_static.data_vars and not ds_static.coords:
                 if allow_empty_fallback:
-                    self.logger.info(
-                        "Grouped %s group %s contains no static content; falling back to NetCDF/grid assets",
-                        freq,
-                        ref_group,
-                    )
+                    self.logger.info("Grouped %s group %s contains no static content; falling back to NetCDF/grid assets", freq, ref_group)
                     return None
                 raise ValueError(f"No static content found in grouped {freq} group {ref_group}")
-
             if verify_all_groups and len(groups) > 1:
                 self.logger.info("Checking static consistency across %d grouped %s groups", len(groups), freq)
                 for g in groups[1:]:
@@ -662,23 +640,16 @@ class NC2Zarr:
                     try:
                         ds_g_static = self._build_iceh_static_dataset(ds_g, log_missing=False)
                         if ds_g_static.data_vars or ds_g_static.coords:
-                            self._warn_if_iceh_static_differs(
-                                ds_g_static,
-                                ds_static,
-                                context=f"group {g} vs {ref_group}",
-                            )
+                            self._warn_if_iceh_static_differs(ds_g_static, ds_static, context=f"group {g} vs {ref_group}")
                     finally:
                         ds_g.close()
-
             ds_static = self._prepare_iceh_static_for_write(ds_static)
             static_store.parent.mkdir(parents=True, exist_ok=True)
             ds_static.to_zarr(static_store, mode="w", consolidated=False)
             self.logger.info("Wrote static store: %s", static_store)
             return static_store
-
         finally:
             ds_ref.close()
-
 
     def build_iceh_static_zarr_from_grouped_daily(self, *,
                                                   cice_store: str | Path | None = None,
@@ -686,13 +657,11 @@ class NC2Zarr:
                                                   overwrite: bool = False,
                                                   verify_all_groups: bool = True,
                                                   allow_empty_fallback: bool = False) -> Path | None:
-        return self.build_iceh_static_zarr_from_grouped_iceh(
-            cice_store           = cice_store,
-            static_store         = static_store,
-            frequency            = "daily",
-            overwrite            = overwrite,
-            verify_all_groups    = verify_all_groups,
-            allow_empty_fallback = allow_empty_fallback,
-        )
+        return self.build_iceh_static_zarr_from_grouped_iceh(cice_store           = cice_store,
+                                                             static_store         = static_store,
+                                                             frequency            = "daily",
+                                                             overwrite            = overwrite,
+                                                             verify_all_groups    = verify_all_groups,
+                                                             allow_empty_fallback = allow_empty_fallback)
 
 

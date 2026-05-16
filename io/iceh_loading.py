@@ -14,14 +14,15 @@ LOGGER          = resolve_logger(None, name="shuga.io.iceh_loading")
 
 def normalize_iceh_frequency(value: str | None) -> str:
     token   = str(value or "daily").strip().lower().replace("_", "-")
-    aliases = {"d": "daily",
-               "day": "daily",
-               "daily": "daily",
-               "h": "hourly",
-               "hour": "hourly",
-               "hours": "hourly",
-               "hourly": "hourly",
-               "inst": "hourly",
+    aliases = {"d"            : "daily",
+               "day"          : "daily",
+               "days"         : "daily",
+               "daily"        : "daily",
+               "h"            : "hourly",
+               "hour"         : "hourly",
+               "hours"        : "hourly",
+               "hourly"       : "hourly",
+               "inst"         : "hourly",
                "instantaneous": "hourly"}
     if token not in aliases:
         raise ValueError(f"Unsupported iceh frequency {value!r}; use 'daily' or 'hourly'.")

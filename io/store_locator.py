@@ -48,14 +48,6 @@ class CICEStoreLocator:
     - The class does not require stores to be opened; it only resolves their
       filesystem locations unless higher-level code opens the returned path.
     """
-
-    # def __init__(self, run, classify, metrics=None, plotting=None, observations=None, logger=None):
-    #     self.run = run
-    #     self.classify = classify
-    #     self.metrics = metrics
-    #     self.plotting = plotting
-    #     self.observations = observations
-    #     self.logger = logger
     def __init__(self, run, classify, metrics=None, plotting=None, observations=None,
                  paths: ShugaPaths | None = None, logger=None):
         self.run          = run
@@ -67,15 +59,6 @@ class CICEStoreLocator:
         self.logger       = logger
 
     def _paths_for_sim(self, sim_name: str, project: str | None = None, user: str | None = None) -> ShugaPaths:
-        # run_other = replace(self.run,
-        #                     sim_name = sim_name,
-        #                     project  = project or self.run.project,
-        #                     user     = user or self.run.user)
-        # return ShugaPaths(run          = run_other,
-        #                   classify     = self.classify,
-        #                   metrics      = self.metrics,
-        #                   plotting     = self.plotting,
-        #                   observations = self.observations)
         base_paths = self.paths
         base_run   = base_paths.run if base_paths is not None else self.run
         run_other  = replace(base_run,
