@@ -8,6 +8,10 @@ from .calculations import (compute_area_series,
 from .dispatch import MetricDispatcher, MetricDispatchContext
 from .stress import compute_stress_dataset
 from .secondary import attach_common_metrics_attrs
+from .diagnostics import (DIAGNOSTIC_NAMES,
+                          DIAGNOSTIC_INPUT_VARS,
+                          compute_diagnostic_terms,
+                          diagnostics_requested)
 __all__ = ["CICEMetrics",
            "compute_extrema_table",
            "skill_stats",
@@ -18,4 +22,8 @@ __all__ = ["CICEMetrics",
            "MetricDispatcher",
            "MetricDispatchContext",
            "compute_stress_dataset",
-           "attach_common_metrics_attrs"]
+           "attach_common_metrics_attrs",
+           "DIAGNOSTIC_NAMES",
+           "DIAGNOSTIC_INPUT_VARS",
+           "compute_diagnostic_terms",
+           "diagnostics_requested"]

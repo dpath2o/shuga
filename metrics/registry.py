@@ -113,14 +113,29 @@ STRESS             = ["FIKuxE_mean",
                       "SIKuN_mag_mean",
                       "SIKuN_mag_abs_mean",
                       "SIKuN_mag_valid_area_m2"]
+DIAGS              = ["ice_speed",
+                      "rel_ice_ocean_speed",
+                      "strain_invariant",
+                      "tau_air",
+                      "tau_ocean",
+                      "tau_internal",
+                      "tau_coriolis",
+                      "tau_tilt",
+                      "ld_x_proxy",
+                      "ld_y_proxy",
+                      "ld_mag_proxy",
+                      "tau_ld_est",
+                      "R_ld_budget",
+                      "P_ld_est"]
 METRIC_GROUPS      = {"fi_core" : CORE_FI,
                       "si_core" : CORE_SI,
                       "regional": REGIONAL,
                       "spatial" : SPATIAL,
                       "summary" : SUMMARY,
                       "stress"  : STRESS,
-                      "default" : CORE_FI + CORE_SI + REGIONAL + SPATIAL + SUMMARY + STRESS,
-                      "all"     : CORE_FI + CORE_SI + REGIONAL + SPATIAL + SUMMARY + STRESS}
+                      "diags"   : DIAGS,
+                      "default" : CORE_FI + SPATIAL + STRESS,
+                      "all"     : CORE_FI + CORE_SI + REGIONAL + SPATIAL + SUMMARY + STRESS + DIAGS}
 FIPSI_NAMES        = {"FIPSI", "persistent_winter_area", "ever_winter_area"}
 FIA_SKILL_NAMES    = {"FIA_Bias", "FIA_RMSE", "FIA_MAE", "FIA_Corr"}
 FIT_SKILL_NAMES    = {"FIT_Bias", "FIT_RMSE", "FIT_MAE", "FIT_Corr"}

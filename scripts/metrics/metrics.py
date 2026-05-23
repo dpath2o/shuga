@@ -57,8 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--af2020-root", default=None)
     p.add_argument("--metric-groups",
                    default="default",
-                   help="Comma-separated metric groups to compute/update "
-                   "(default, all, fi_core, si_core, regional, spatial, stress, summary).",)
+                   help="Comma-separated metric groups to compute/update (default, all, fi_core, si_core, regional, spatial, stress, summary, diags).")
     p.add_argument("--metric-names",
                    default=None,
                    help="Comma-separated explicit metric names to compute/update in addition to metric-groups.")

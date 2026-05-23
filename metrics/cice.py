@@ -18,6 +18,7 @@ from shuga.metrics.registry import (CORE_FI,
                                     SPATIAL,
                                     SUMMARY,
                                     STRESS,
+                                    DIAGS,
                                     METRIC_GROUPS,
                                     FIPSI_NAMES,
                                     FIA_SKILL_NAMES,
@@ -63,6 +64,9 @@ from shuga.metrics.secondary import (attach_common_metrics_attrs,
                                      compute_fipsi_dataset,
                                      compute_obs_skill_dataset,
                                      compute_seasonal_summary_dataset)
+from shuga.metrics.diagnostics import (DIAGNOSTIC_INPUT_VARS,
+                                       compute_diagnostic_terms,
+                                       diagnostics_requested)
 
 """
 Incremental CICE metrics builder for fast-ice and sea-ice diagnostics.
@@ -71,18 +75,6 @@ The class computes time-series, spatial, regional, seasonal-summary,
 persistence, skill, and stress metrics from classified masks and CICE history
 fields, and writes them to method-specific metrics Zarr stores.
 """
-
-def _publish_matching(out: xr.Dataset, dsi: xr.Dataset, requested: set[str]) -> xr.Dataset:
-    for name in dsi.data_vars:
-        if name in requested:
-            out[name] = dsi[name]
-    return out
-
-def publish_da(name: str, dispatcher) -> xr.DataArray | None:
-    da = dispatcher.get(name)
-    if da is not None:
-        out[name] = da
-    return da
 
 class CICEMetrics:
     """
@@ -165,6 +157,7 @@ class CICEMetrics:
     SPATIAL            = SPATIAL
     SUMMARY            = SUMMARY
     STRESS             = STRESS
+    DIAGS              = DIAGS
     METRIC_GROUPS      = METRIC_GROUPS
     FIPSI_NAMES        = FIPSI_NAMES
     FIA_SKILL_NAMES    = FIA_SKILL_NAMES
@@ -329,6 +322,7 @@ class CICEMetrics:
             requested = ["aice", "hi", "strength", "dvidtt", "dvidtd", "daidtt", "daidtd",
                          "KuxE", "KuxN", "KuyE", "KuyN", "earea", "narea", "uarea",
                          "tarea", "TLON", "TLAT", "ULON", "ULAT"]
+            requested = list(dict.fromkeys(requested + DIAGNOSTIC_INPUT_VARS))
             self.logger.info("Resolved CICE store: %s", self.paths.resolve_cice_store())
             static_store = self.paths.resolve_static_store()
             if static_store is not None:
@@ -428,18 +422,17 @@ class CICEMetrics:
                                         volume_scale = self.metrics.volume_scale)
         dispatcher = MetricDispatcher(context=ctx, calculator=self)
         out        = xr.Dataset()
-        # def publish(name: str) -> xr.DataArray | None:
-        #     da = dispatcher.get(name)
-        #     if da is not None:
-        #         out[name] = da
-        #     return da
+        def publish(name: str) -> xr.DataArray | None:
+            da = dispatcher.get(name)
+            if da is not None:
+                out[name] = da
+            return da
         # ------------------------------------------------------------------
         # Primary metrics
         # ------------------------------------------------------------------
         for name in PRIMARY_METRIC_NAMES:
             if name in requested:
-                publish_da(name)
-                # publish(name)
+                publish(name)
         # ------------------------------------------------------------------
         # Seasonal scalar summaries derived from primary 1-D series.
         # ------------------------------------------------------------------
@@ -491,6 +484,12 @@ class CICEMetrics:
                                                mask       = si_mask,
                                                calculator = self.compute_area_weighted_stress)
             out = xr.merge([out, stress_ds], compat="override")
+        # ------------------------------------------------------------------
+        # Dynamic / lateral-drag diagnostic fields.
+        # ------------------------------------------------------------------
+        if diagnostics_requested(requested):
+            diag_ds = compute_diagnostic_terms(ds, requested=requested)
+            out     = xr.merge([out, diag_ds], compat="override")
         # ------------------------------------------------------------------
         # Common output metadata.
         # ------------------------------------------------------------------

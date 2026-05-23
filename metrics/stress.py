@@ -1,7 +1,6 @@
 from __future__ import annotations
 import numpy as np
 import xarray as xr
-from shuga.metrics.cice         import _publish_matching
 from shuga.metrics.regional     import ensure_2d_static
 from shuga.metrics.calculations import compute_area_weighted_stress
 
@@ -16,11 +15,11 @@ def stress_requested(requested: set[str], prefix: str) -> bool:
     """
     return any(name.startswith(f"{prefix}K") for name in requested)
 
-# def _publish_matching(out: xr.Dataset, dsi: xr.Dataset, requested: set[str]) -> xr.Dataset:
-#     for name in dsi.data_vars:
-#         if name in requested:
-#             out[name] = dsi[name]
-#     return out
+def _publish_matching(out: xr.Dataset, dsi: xr.Dataset, requested: set[str]) -> xr.Dataset:
+    for name in dsi.data_vars:
+        if name in requested:
+            out[name] = dsi[name]
+    return out
 
 def compute_stress_dataset(*, ds: xr.Dataset, area: xr.DataArray, requested: set[str], prefix: str, mask: xr.DataArray | None,
                            calculator = compute_area_weighted_stress) -> xr.Dataset:
