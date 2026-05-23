@@ -141,8 +141,7 @@ def main() -> None:
                                update_missing_only       = args.update_missing_only or not args.overwrite,
                                rebuild_on_index_mismatch = args.rebuild_on_index_mismatch)
         if args.plot_fip:
-            logger.info("Wrote FIP plot(s): %s", plotter.plot_fip(method,
-                                                                  region_name=args.fip_region if args.fip_region not in {None, "", "total"} else None))
+            logger.info("Wrote FIP plot(s): %s", plotter.plot_fip(method, region_name=args.fip_region if args.fip_region not in {None, "", "total"} else None))
         if args.plot_fia:
             logger.info("Wrote FIA plot: %s", plotter.plot_timeseries("FIA", method, region=args.plot_region))
         if args.plot_fit:

@@ -1,0 +1,123 @@
+#!/bin/bash
+#PBS -P jk72
+#PBS -q normalbw
+#PBS -l ncpus=28
+#PBS -l mem=180GB
+#PBS -l jobfs=50GB
+#PBS -l walltime=06:00:00
+#PBS -l storage=gdata/gv90+gdata/xp65+scratch/gv90
+#PBS -N hrly_dly_FI_SON
+#PBS -j oe
+
+set -euo pipefail
+
+echo "Job started: $(date)"
+echo "Running on: $(hostname)"
+echo "PBS_JOBID: ${PBS_JOBID:-unknown}"
+echo "PBS_O_WORKDIR: ${PBS_O_WORKDIR:-unknown}"
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.01
+
+export PYTHONNOUSERSITE=1
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+PROJECT="${PROJECT:-gv90}"
+RUN_USER="${RUN_USER:-da1339}"
+
+REPO_ROOT="${REPO_ROOT:-${HOME}/AFIM/src/mawsons-chest}"
+PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/shuga/scripts/tides_analysis/hourly_vs_daily_fast_ice_diagnostics.py}"
+
+export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+export DASK_TEMPORARY_DIRECTORY="/scratch/${PROJECT}/${RUN_USER}/dask_tmp/${PBS_JOBID}"
+export TMPDIR="/scratch/${PROJECT}/${RUN_USER}/tmp/${PBS_JOBID}"
+mkdir -p "${DASK_TEMPORARY_DIRECTORY}" "${TMPDIR}"
+
+# ---------------------------------------------------------------------
+# User-editable run controls
+# ---------------------------------------------------------------------
+SIM_NAME="${SIM_NAME:-LD-tides}"
+START_DATE="${START_DATE:-1993-09-01}"
+END_DATE="${END_DATE:-1993-11-30}"
+HEMISPHERE="${HEMISPHERE:-SH}"
+
+# This may be either:
+#   1. a shuga-style root:       ${ARCHIVE_ROOT}/history/hourly
+#   2. the directory directly containing iceh_01h.YYYY-MM-DD-SSSSS.nc
+HOURLY_ROOT="${HOURLY_ROOT:-/g/data/gv90/da1339/cice-dirs/runs/free-slip-tides/history}"
+
+# Keep the test stores explicit so this diagnostic does not depend on shuga's
+# default output-root inference.
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-${HOME}/AFIM_archive/${SIM_NAME}}"
+CICE_STORE="${CICE_STORE:-${ARCHIVE_ROOT}/zarr/iceh_hourly.zarr}"
+STATIC_STORE="${STATIC_STORE:-${ARCHIVE_ROOT}/zarr/iceh_static.zarr}"
+
+OUT_DIR="${OUT_DIR:-/g/data/gv90/da1339/cice-dirs/runs/free-slip-tides/diags/hrly_v_dly_LFI}"
+OUT_CSV="${OUT_CSV:-${OUT_DIR}/hourly_vs_daily_fast_ice_diagnostics_${START_DATE}_to_${END_DATE}.csv}"
+LOG_FILE="${LOG_FILE:-${OUT_DIR}/hourly_vs_daily_fast_ice_diagnostics_${START_DATE}_to_${END_DATE}.log}"
+
+THR="${THR:-5.0e-4}"
+NEAR_MULT="${NEAR_MULT:-4.0}"
+AICE_THRESH="${AICE_THRESH:-0.15}"
+HI_THRESH="${HI_THRESH:-0.05}"
+MIN_HOURLY_FILES="${MIN_HOURLY_FILES:-20}"
+CHUNKS_TIME="${CHUNKS_TIME:-24}"
+NETCDF_ENGINE="${NETCDF_ENGINE:-scipy}"
+
+SKIP_HISTORY_CONVERSION="${SKIP_HISTORY_CONVERSION:-false}"
+OVERWRITE_HISTORY="${OVERWRITE_HISTORY:-false}"
+OVERWRITE_STATIC="${OVERWRITE_STATIC:-false}"
+DELETE_ORIGINAL="${DELETE_ORIGINAL:-false}"
+
+# Optional static-store fallback assets, only needed if static fields cannot be
+# extracted from the hourly history files and the existing static store is absent.
+GRID_FILE="${GRID_FILE:-}"
+KMT_FILE="${KMT_FILE:-}"
+BATHYMETRY_FILE="${BATHYMETRY_FILE:-}"
+F2_FILE="${F2_FILE:-}"
+GRIDCPL_FILE="${GRIDCPL_FILE:-}"
+ICE_IN_FILE="${ICE_IN_FILE:-}"
+
+mkdir -p "${OUT_DIR}" "$(dirname "${CICE_STORE}")" "$(dirname "${STATIC_STORE}")"
+
+CMD=(python "${PY_SCRIPT}"
+     --sim-name "${SIM_NAME}"
+     --start-date "${START_DATE}"
+     --end-date "${END_DATE}"
+     --hemisphere "${HEMISPHERE}"
+     --project "${PROJECT}"
+     --user "${RUN_USER}"
+     --hourly-root "${HOURLY_ROOT}"
+     --cice-store "${CICE_STORE}"
+     --static-store "${STATIC_STORE}"
+     --out-csv "${OUT_CSV}"
+     --log-file "${LOG_FILE}"
+     --thr "${THR}"
+     --near-mult "${NEAR_MULT}"
+     --aice-thresh "${AICE_THRESH}"
+     --hi-thresh "${HI_THRESH}"
+     --min-hourly-files "${MIN_HOURLY_FILES}"
+     --chunks-time "${CHUNKS_TIME}"
+     --netcdf-engine "${NETCDF_ENGINE}")
+
+[[ -n "${ARCHIVE_ROOT}" ]] && CMD+=(--archive-root "${ARCHIVE_ROOT}")
+[[ -n "${GRID_FILE}" ]] && CMD+=(--grid-file "${GRID_FILE}")
+[[ -n "${KMT_FILE}" ]] && CMD+=(--kmt-file "${KMT_FILE}")
+[[ -n "${BATHYMETRY_FILE}" ]] && CMD+=(--bathymetry-file "${BATHYMETRY_FILE}")
+[[ -n "${F2_FILE}" ]] && CMD+=(--f2-file "${F2_FILE}")
+[[ -n "${GRIDCPL_FILE}" ]] && CMD+=(--gridcpl-file "${GRIDCPL_FILE}")
+[[ -n "${ICE_IN_FILE}" ]] && CMD+=(--ice-in-file "${ICE_IN_FILE}")
+
+[[ "${SKIP_HISTORY_CONVERSION}" == "true" ]] && CMD+=(--skip-history-conversion)
+[[ "${OVERWRITE_HISTORY}" == "true" ]] && CMD+=(--overwrite-history)
+[[ "${OVERWRITE_STATIC}" == "true" ]] && CMD+=(--overwrite-static)
+[[ "${DELETE_ORIGINAL}" == "true" ]] && CMD+=(--delete-original)
+
+echo "Running: ${CMD[*]}"
+"${CMD[@]}"
+
+echo "Job finished: $(date)"

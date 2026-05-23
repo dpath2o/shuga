@@ -516,7 +516,7 @@ class CICEPlotter:
             fig  = pygmt.Figure()
             proj = self.projection_from_region(reg, fig_size=fig_size or self.plotting.fip_fig_size)
             pygmt.makecpt(cmap=str(cmap or self._default_fip_cmap()), series=[0, 1, 0.05], continuous=True)
-            plot_title = name#title or f"{target_sim} {name} FIP ({norm})"
+            plot_title = title or f"{sim} {name} FIP ({norm})"
             self.pygmt_base_layer(fig, reg, proj, title=plot_title, shorelines=shorelines, land=land, water=water)
             fig.plot(x=data["lon"], y=data["lat"], style=grid_style or self.plotting.grid_style, fill=data["z"], cmap=True)
             frames = [f'xaf+l{colorbar_xlabel or self.plotting.colorbar_xlabel}']
@@ -543,15 +543,16 @@ class CICEPlotter:
                         sim_name    : str | None = None,
                         dt0_str     : str | None = None,
                         dtN_str     : str | None = None) -> str:
-        pygmt       = self._require_pygmt()
-        norm        = normalize_method(method)
-        var         = variable.upper()
-        target_sim  = sim_name or self.run.sim_name
-        target_dt0  = dt0_str  or self.run.start_date
-        target_dtN  = dtN_str  or self.run.end_date
-        target_hemi = self.run.hemisphere
+        pygmt = self._require_pygmt()
+        norm  = normalize_method(method)
+        var   = variable.upper()
+        sim   = sim_name or self.run.sim_name
+        dt0   = dt0_str  or self.run.start_date
+        dtN   = dtN_str  or self.run.end_date
+        hemi  = self.run.hemisphere
         # Use overridden run context when sim_name changes
-        run = replace(self.run, sim_name=target_sim)
+        run = replace(self.run, sim_name=sim)
+        self.logger.info(f"loading metrics for {sim} over period {dt0} -- {dtN} for hemisphere {hemi} ...")
         ds  = load_metrics(run            = run,
                            classify       = self.classify,
                            metrics        = self.metrics,
@@ -559,9 +560,9 @@ class CICEPlotter:
                            observations   = self.observations,
                            paths          = self.paths,
                            classification = norm,
-                           dt0_str        = target_dt0,
-                           dtN_str        = target_dtN,
-                           hemisphere     = target_hemi,
+                           dt0_str        = dt0,
+                           dtN_str        = dtN,
+                           hemisphere     = hemi,
                            chunks         = self.chunks)
         # ------------------------------------------------------------
         # Select requested series
@@ -582,8 +583,8 @@ class CICEPlotter:
         if model.empty:
             raise ValueError("No model time series available for plotting.")
         # Respect explicit override dates if supplied; otherwise use the actual model range
-        plot_dt0 = pd.Timestamp(target_dt0) if dt0_str is not None or sim_name is not None else model["time"].min()
-        plot_dtN = pd.Timestamp(target_dtN) if dtN_str is not None or sim_name is not None else model["time"].max()
+        plot_dt0 = pd.Timestamp(dt0) if dt0_str is not None or sim_name is not None else model["time"].min()
+        plot_dtN = pd.Timestamp(dtN) if dtN_str is not None or sim_name is not None else model["time"].max()
         # Crop model frame again defensively in case ds carried a wider range
         model = model[(model["time"] >= plot_dt0) & (model["time"] <= plot_dtN)].copy()
         if model.empty:
@@ -593,10 +594,11 @@ class CICEPlotter:
         # Keep add_f2020 name for backward compatibility, but use it as
         # 'add observation where available'
         # ------------------------------------------------------------
+        self.logger.info(f"constructing observational time-series")
         obs_df = self._build_obs_timeseries(var,
                                             plot_dt0   = plot_dt0,
                                             plot_dtN   = plot_dtN,
-                                            hemisphere = target_hemi,
+                                            hemisphere = hemi,
                                             add_obs    = add_f2020,
                                             f2020_mode = f2020_mode)
         # ------------------------------------------------------------
@@ -619,50 +621,47 @@ class CICEPlotter:
         # Prefer existing helper where possible; fall back to explicit path
         # if sim/date overrides are used and the helper is fixed to self.run.
         # ------------------------------------------------------------
-        if output_path:
-            path = Path(output_path).expanduser()
+        # if output_path:
+        #     path = Path(output_path).expanduser()
+        if not output_path:
+            P_png = self.paths.timeseries_plot_path(var, norm, region_key,
+                                                   sim_name   = sim,
+                                                   start_date = dt0,
+                                                   end_date   = dtN)
         else:
-            try:
-                path = self.paths.timeseries_plot_path(var, norm, region_key,
-                                                       sim_name   = target_sim,
-                                                       start_date = target_dt0,
-                                                       end_date   = target_dtN)
-            except TypeError:
-                if (target_sim == self.run.sim_name and target_dt0 == self.run.start_date and target_dtN == self.run.end_date):
-                    path = self.paths.timeseries_plot_path(var, norm, region_key)
-                else:
-                    if hasattr(self.paths, "graphics_root_path"):
-                        root = Path(self.paths.graphics_root_path).expanduser()
-                    elif hasattr(self.paths, "graphics_root"):
-                        root = Path(self.paths.graphics_root).expanduser()
-                    else:
-                        root = Path.cwd()
-                    path = (root / target_sim / "timeseries"
-                            / f"{target_dt0}_{target_dtN}_{target_sim}_{var}_{region_key}_{norm.replace('-', '_')}.png")
-        path = Path(path).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
+            P_png = output_path
         # ------------------------------------------------------------
         # Figure
         # ------------------------------------------------------------
+        self.logger.info(f"creating figure")
         fig       = pygmt.Figure()
-        title_str = title or (f"{target_sim} {var}" + (f" {region_key}" if region_key != "total" else "") + f" ({norm})")
+        title_str = title or (f"{sim} {var}" + (f" {region_key}" if region_key != "total" else "") + f" ({norm})")
         y_label   = var
-        if var == "FIA":
-            y_label = "FIA"
-        elif var == "SIA":
-            y_label = "SIA"
-        elif var == "FIT":
-            y_label = "FIT"
-        elif var == "SIT":
-            y_label = "SIT"
-        fig.basemap(region=[plot_dt0, plot_dtN, ymin, ymax], projection="X16c/6c", frame=["WSen+t" + title_str, "xaf", f'yaf+l"{y_label}"'])
+        # GMT/PyGMT is much safer with ISO strings than pandas.Timestamp
+        x0 = pd.Timestamp(plot_dt0).strftime("%Y-%m-%dT%H:%M:%S")
+        x1 = pd.Timestamp(plot_dtN).strftime("%Y-%m-%dT%H:%M:%S")
+        model_plot          = model.copy()
+        model_plot["time"]  = pd.to_datetime(model_plot["time"]).dt.strftime("%Y-%m-%dT%H:%M:%S")
+        model_plot["value"] = model_plot["value"].astype("float64")
         if obs_df is not None and not obs_df.empty:
-            fig.plot(x=obs_df["time"], y=obs_df["value"], pen=obs_pen)
-        fig.plot(x=model["time"], y=model["value"], pen=model_pen)
-        fig.savefig(path)
+            obs_plot          = obs_df.copy()
+            obs_plot["time"]  = pd.to_datetime(obs_plot["time"]).dt.strftime("%Y-%m-%dT%H:%M:%S")
+            obs_plot["value"] = obs_plot["value"].astype("float64")
+        else:
+            obs_plot = None
+        self.logger.info(f"     basemap")
+        fig.basemap(region=[x0, x1, ymin, ymax], projection="X16c/6c", frame=["WSen+t" + title_str, "xaf", f'yaf+l"{y_label}"'])
+        if obs_plot is not None and not obs_plot.empty:
+            self.logger.info(f"     observations")
+            self.logger.info(obs_plot.head())
+            fig.plot(x=obs_plot["time"].to_numpy(), y=obs_plot["value"].to_numpy(), pen=obs_pen)
+        self.logger.info(f"     model results")
+        fig.plot(x=model_plot["time"].to_numpy(), y=model_plot["value"].to_numpy(), pen=model_pen)
+        self.logger.info(f"     saving")
+        fig.savefig(P_png)
         if show:
             fig.show()
-        return str(path)
+        return str(P_png)
 
     def plot_timeseries_multi(self, variable: str, method: str, simulations,
                               region         : str                    = "total",
@@ -773,7 +772,7 @@ class CICEPlotter:
                                                          dt0_str     = plot_dt0.strftime("%Y-%m-%d"),
                                                          dtN_str     = plot_dtN.strftime("%Y-%m-%d"))
         else:
-            path = Path(output_path).expanduser()
+            path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         fig       = pygmt.Figure()
         title_str = title or (f"{var} {region_key} ({norm})" if region_key != "total" else f"{var} ({norm})")

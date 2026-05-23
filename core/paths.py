@@ -264,11 +264,6 @@ class ShugaPaths:
             path = path / part
         return path
 
-    # def fip_plot_path(self, method: str, region: str = "TOTAL") -> Path:
-    #     method_part = method_slug(method)
-    #     name = f"{self.run.start_date}_{self.run.end_date}_{self.run.sim_name}_FIP_{method_part}.png"
-    #     return self.figure_root(region=region) / "FIP" / name
-
     def timeseries_plot_path(self, variable: str, method: str, region: str = "total") -> Path:
         method_part = method_slug(method)
         name = f"{self.run.start_date}_{self.run.end_date}_{self.run.sim_name}_{variable}_{method_part}.png"

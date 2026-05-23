@@ -11,28 +11,17 @@ def _align_mask(mask: xr.DataArray | None, field: xr.DataArray) -> xr.DataArray 
     except Exception:
         return None
 
-
-def _masked_weighted_field(
-    field: xr.DataArray,
-    area: xr.DataArray,
-    mask: xr.DataArray | None = None,
-) -> xr.DataArray:
-    area2d = ensure_2d_static(area)
+def _masked_weighted_field(field: xr.DataArray, area: xr.DataArray,
+                           mask: xr.DataArray | None = None) -> xr.DataArray:
+    area2d   = ensure_2d_static(area)
     mask_eff = _align_mask(mask, field)
     if mask_eff is not None:
         field = field.where(mask_eff, 0.0)
     return field * area2d
 
-
-def compute_area_series(
-    sic: xr.DataArray,
-    area: xr.DataArray,
-    mask: xr.DataArray | None = None,
-    *,
-    name: str,
-    long_name: str,
-    scale: float | None = None,
-) -> xr.DataArray:
+def compute_area_series(sic: xr.DataArray, area: xr.DataArray,
+                        mask: xr.DataArray | None = None, *, name: str, long_name: str,
+                        scale: float | None = None) -> xr.DataArray:
     """
     Area time series from concentration and cell area.
 
@@ -41,89 +30,55 @@ def compute_area_series(
     concentration-weighted areas.
     """
     weighted = sic.where(mask, 0.0) if mask is not None else sic
-    da = (weighted * ensure_2d_static(area)).sum(dim=spatial_dims(sic))
-
+    da       = (weighted * ensure_2d_static(area)).sum(dim=spatial_dims(sic))
     if scale is not None:
         da = da / scale
         units = "10^3 km^2"
     else:
         units = "m^2"
-
     da = da.rename(name)
     da.attrs.update({"long_name": long_name, "units": units})
     return da
 
-
-def compute_volume_series(
-    sic: xr.DataArray,
-    hi: xr.DataArray,
-    area: xr.DataArray,
-    mask: xr.DataArray | None = None,
-    *,
-    name: str,
-    long_name: str,
-    scale: float | None = None,
-) -> xr.DataArray:
+def compute_volume_series(sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray,
+                          mask: xr.DataArray | None = None, *, name: str, long_name: str,
+                          scale: float | None = None) -> xr.DataArray:
     """
     Volume time series from concentration, thickness, and cell area.
     """
     field = sic * hi
     if mask is not None:
         field = field.where(mask, 0.0)
-
     da = (field * ensure_2d_static(area)).sum(dim=spatial_dims(field))
-
     if scale is not None:
         da = da / scale
         units = "10^3 km^3"
     else:
         units = "m^3"
-
     da = da.rename(name)
     da.attrs.update({"long_name": long_name, "units": units})
     return da
 
-
-def compute_thickness_series(
-    sic: xr.DataArray,
-    hi: xr.DataArray,
-    area: xr.DataArray,
-    mask: xr.DataArray | None = None,
-    *,
-    name: str,
-    long_name: str,
-) -> xr.DataArray:
+def compute_thickness_series(sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray,
+                             mask: xr.DataArray | None = None, *, name: str, long_name: str) -> xr.DataArray:
     """
     Concentration/area-weighted mean thickness time series.
     """
-    area2d = ensure_2d_static(area)
-
-    weighted_area = sic
+    area2d             = ensure_2d_static(area)
+    weighted_area      = sic
     weighted_thickness = sic * hi
-
     if mask is not None:
-        weighted_area = weighted_area.where(mask, 0.0)
+        weighted_area      = weighted_area.where(mask, 0.0)
         weighted_thickness = weighted_thickness.where(mask, 0.0)
-
-    dims = spatial_dims(weighted_thickness)
-    numerator = (weighted_thickness * area2d).sum(dim=dims)
+    dims        = spatial_dims(weighted_thickness)
+    numerator   = (weighted_thickness * area2d).sum(dim=dims)
     denominator = (weighted_area * area2d).sum(dim=dims)
-
-    da = (numerator / denominator.where(denominator > 0)).rename(name)
+    da          = (numerator / denominator.where(denominator > 0)).rename(name)
     da.attrs.update({"long_name": long_name, "units": "m"})
     return da
 
-
-def compute_strength_series(
-    sic: xr.DataArray,
-    hi: xr.DataArray,
-    strength: xr.DataArray,
-    area: xr.DataArray,
-    mask: xr.DataArray | None = None,
-    *,
-    name: str,
-    long_name: str,
-) -> xr.DataArray:
+def compute_strength_series(sic: xr.DataArray, hi: xr.DataArray, strength: xr.DataArray, area: xr.DataArray,
+                            mask: xr.DataArray | None = None, *, name: str, long_name: str) -> xr.DataArray:
     """
     Area-weighted mean compressive strength over sea-ice/fast-ice cells.
 
@@ -133,27 +88,18 @@ def compute_strength_series(
     valid = hi > 0
     if mask is not None:
         valid = valid & mask
-
-    field = xr.where(valid, strength / hi.where(hi > 0) / 1e6, np.nan)
-    area2d = ensure_2d_static(area)
-    weights = xr.where(np.isfinite(field), sic * area2d, 0.0)
-
-    dims = spatial_dims(field)
-    numerator = (field * weights).sum(dim=dims)
+    field       = xr.where(valid, strength / hi.where(hi > 0) / 1e6, np.nan)
+    area2d      = ensure_2d_static(area)
+    weights     = xr.where(np.isfinite(field), sic * area2d, 0.0)
+    dims        = spatial_dims(field)
+    numerator   = (field * weights).sum(dim=dims)
     denominator = weights.sum(dim=dims)
-
-    da = (numerator / denominator.where(denominator > 0)).rename(name)
+    da          = (numerator / denominator.where(denominator > 0)).rename(name)
     da.attrs.update({"long_name": long_name, "units": "MPa"})
     return da
 
-
-def compute_persistence_mask(
-    mask: xr.DataArray,
-    *,
-    name: str,
-    long_name: str,
-    percent: bool = True,
-) -> xr.DataArray:
+def compute_persistence_mask(mask: xr.DataArray, *, name: str, long_name: str,
+                             percent: bool = True) -> xr.DataArray:
     """
     Temporal fast-/sea-ice persistence.
 
@@ -162,34 +108,22 @@ def compute_persistence_mask(
     """
     da = mask.astype("float32").mean(dim="time", skipna=True)
     if percent:
-        da = da * 100.0
+        da    = da * 100.0
         units = "%"
     else:
         units = "1"
-
     da = da.rename(name)
     da.attrs.update({"long_name": long_name, "units": units})
     return da
 
-
-def compute_temporal_mean(
-    da: xr.DataArray,
-    *,
-    name: str,
-    long_name: str,
-) -> xr.DataArray:
+def compute_temporal_mean(da: xr.DataArray, *, name: str, long_name: str) -> xr.DataArray:
     """
     Temporal mean over the time axis.
     """
     out = da.mean(dim="time", skipna=True).rename(name)
-    out.attrs.update(
-        {
-            "long_name": long_name,
-            "units": da.attrs.get("units", "1"),
-        }
-    )
+    out.attrs.update({"long_name": long_name,
+                      "units"    : da.attrs.get("units", "1")})
     return out
-
 
 def convert_thickness_tendency_to_m_per_day(da: xr.DataArray) -> xr.DataArray:
     """
@@ -199,7 +133,6 @@ def convert_thickness_tendency_to_m_per_day(da: xr.DataArray) -> xr.DataArray:
     units are treated as cm day^-1 for backwards compatibility.
     """
     units = str(da.attrs.get("units", "")).lower().replace(" ", "")
-
     if units in {"cm/day", "cmday-1", "cmd-1"}:
         out = da / 100.0
     elif units in {"m/day", "mday-1", "md-1"}:
@@ -208,47 +141,29 @@ def convert_thickness_tendency_to_m_per_day(da: xr.DataArray) -> xr.DataArray:
         out = da * 86400.0
     else:
         out = da / 100.0
-
     out.attrs.update(da.attrs)
     out.attrs["units"] = "m day^-1"
     return out
 
-
-def compute_volume_rate(
-    tendency: xr.DataArray,
-    sic: xr.DataArray,
-    area: xr.DataArray,
-    mask: xr.DataArray | None = None,
-    *,
-    name: str,
-    long_name: str,
-) -> xr.DataArray:
+def compute_volume_rate(tendency: xr.DataArray, sic: xr.DataArray, area: xr.DataArray,
+                        mask: xr.DataArray | None = None, *, name: str, long_name: str) -> xr.DataArray:
     """
     Integrated volume tendency time series.
 
     The tendency is converted to m day^-1, multiplied by concentration and
     area, then summed spatially.
     """
-    rate = convert_thickness_tendency_to_m_per_day(tendency)
+    rate  = convert_thickness_tendency_to_m_per_day(tendency)
     field = rate * sic
-
     if mask is not None:
         field = field.where(mask, 0.0)
-
     da = (field * ensure_2d_static(area)).sum(dim=spatial_dims(field))
     da = da.rename(name)
     da.attrs.update({"long_name": long_name, "units": "m^3 day^-1"})
     return da
 
-
-def compute_area_rate(
-    tendency: xr.DataArray,
-    area: xr.DataArray,
-    mask: xr.DataArray | None = None,
-    *,
-    name: str,
-    long_name: str,
-) -> xr.DataArray:
+def compute_area_rate(tendency: xr.DataArray, area: xr.DataArray,
+                      mask: xr.DataArray | None = None, *, name: str, long_name: str) -> xr.DataArray:
     """
     Integrated area tendency time series.
 
@@ -258,21 +173,13 @@ def compute_area_rate(
     field = tendency
     if mask is not None:
         field = field.where(mask, 0.0)
-
     da = (field * ensure_2d_static(area)).sum(dim=spatial_dims(field))
     da = da.rename(name)
     da.attrs.update({"long_name": long_name, "units": "m^2 day^-1"})
     return da
 
-
-def compute_spatial_rate_year(
-    tendency: xr.DataArray,
-    mask: xr.DataArray,
-    *,
-    name: str,
-    long_name: str,
-    area: xr.DataArray | None = None,
-) -> xr.DataArray:
+def compute_spatial_rate_year(tendency: xr.DataArray, mask: xr.DataArray, *, name: str, long_name: str,
+                              area: xr.DataArray | None = None) -> xr.DataArray:
     """
     Spatial annual/climatological rate diagnostic.
 
@@ -281,70 +188,45 @@ def compute_spatial_rate_year(
     averaging over time.
     """
     field = convert_thickness_tendency_to_m_per_day(tendency)
-
     if mask is not None:
         field = field.where(mask)
-
     if area is not None:
         field = field * ensure_2d_static(area)
         units = "m^2 day^-1"
     else:
         units = "m day^-1"
-
     da = field.mean(dim="time", skipna=True).rename(name)
     da.attrs.update({"long_name": long_name, "units": units})
     return da
 
-
-def compute_region_series(
-    sic: xr.DataArray,
-    hi: xr.DataArray,
-    area: xr.DataArray,
-    region_mask: xr.DataArray,
-    mask: xr.DataArray | None = None,
-    *,
-    area_name: str,
-    thickness_name: str,
-    area_long_name: str,
-    thickness_long_name: str,
-) -> tuple[xr.DataArray, xr.DataArray]:
+def compute_region_series(sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray, region_mask: xr.DataArray,
+                          mask: xr.DataArray | None = None, *, area_name: str, thickness_name: str, area_long_name: str,
+                          thickness_long_name: str) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Regional area and concentration/area-weighted thickness time series.
     """
     area2d = ensure_2d_static(area)
-
     if mask is not None:
         sic_eff = sic.where(mask, 0.0)
-        hi_eff = hi.where(mask)
+        hi_eff  = hi.where(mask)
     else:
         sic_eff = sic
-        hi_eff = hi
-
-    sic_reg = sic_eff * region_mask
-    hi_reg = hi_eff * region_mask
-
-    dims = spatial_dims(sic_reg)
-
-    area_da = (sic_reg * area2d).sum(dim=dims) / 1e9
-    area_da = area_da.rename(area_name)
+        hi_eff  = hi
+    sic_reg     = sic_eff * region_mask
+    hi_reg      = hi_eff * region_mask
+    dims        = spatial_dims(sic_reg)
+    area_da     = (sic_reg * area2d).sum(dim=dims) / 1e9
+    area_da     = area_da.rename(area_name)
     area_da.attrs.update({"long_name": area_long_name, "units": "10^3 km^2"})
-
-    numerator = (sic_reg * hi_reg * area2d).sum(dim=dims)
+    numerator   = (sic_reg * hi_reg * area2d).sum(dim=dims)
     denominator = (sic_reg * area2d).sum(dim=dims)
-    thick_da = numerator / denominator.where(denominator > 0)
-    thick_da = thick_da.rename(thickness_name)
+    thick_da    = numerator / denominator.where(denominator > 0)
+    thick_da    = thick_da.rename(thickness_name)
     thick_da.attrs.update({"long_name": thickness_long_name, "units": "m"})
-
     return area_da, thick_da
 
-
-def compute_area_weighted_stress(
-    stress: xr.DataArray,
-    area: xr.DataArray,
-    mask: xr.DataArray | None = None,
-    *,
-    base_name: str,
-) -> xr.Dataset:
+def compute_area_weighted_stress(stress: xr.DataArray, area: xr.DataArray,
+                                 mask: xr.DataArray | None = None, *, base_name: str) -> xr.Dataset:
     """
     Area-weighted stress mean, absolute mean, and valid area.
 
@@ -353,48 +235,25 @@ def compute_area_weighted_stress(
     - {base_name}_abs_mean
     - {base_name}_valid_area_m2
     """
-    area2d = ensure_2d_static(area)
+    area2d   = ensure_2d_static(area)
     mask_eff = _align_mask(mask, stress)
-
-    valid = np.isfinite(stress)
+    valid    = np.isfinite(stress)
     if mask_eff is not None:
         valid = valid & mask_eff
-
-    weights = xr.where(valid, area2d, 0.0)
+    weights    = xr.where(valid, area2d, 0.0)
     total_area = weights.sum(dim=spatial_dims(stress))
-
-    mean = (stress.where(valid, 0.0) * weights).sum(dim=spatial_dims(stress))
-    mean = mean / total_area.where(total_area > 0)
-    mean = mean.rename(f"{base_name}_mean")
-    mean.attrs.update(
-        {
-            "long_name": f"{base_name} area-weighted mean",
-            "units": stress.attrs.get("units", "Pa"),
-        }
-    )
-
-    abs_mean = (abs(stress).where(valid, 0.0) * weights).sum(dim=spatial_dims(stress))
-    abs_mean = abs_mean / total_area.where(total_area > 0)
-    abs_mean = abs_mean.rename(f"{base_name}_abs_mean")
-    abs_mean.attrs.update(
-        {
-            "long_name": f"{base_name} area-weighted absolute mean",
-            "units": stress.attrs.get("units", "Pa"),
-        }
-    )
-
+    mean       = (stress.where(valid, 0.0) * weights).sum(dim=spatial_dims(stress))
+    mean       = mean / total_area.where(total_area > 0)
+    mean       = mean.rename(f"{base_name}_mean")
+    mean.attrs.update({"long_name": f"{base_name} area-weighted mean",
+                       "units"    : stress.attrs.get("units", "Pa")})
+    abs_mean   = (abs(stress).where(valid, 0.0) * weights).sum(dim=spatial_dims(stress))
+    abs_mean   = abs_mean / total_area.where(total_area > 0)
+    abs_mean   = abs_mean.rename(f"{base_name}_abs_mean")
+    abs_mean.attrs.update({"long_name": f"{base_name} area-weighted absolute mean",
+                           "units"    : stress.attrs.get("units", "Pa")})
     valid_area = total_area.rename(f"{base_name}_valid_area_m2")
-    valid_area.attrs.update(
-        {
-            "long_name": f"{base_name} valid area",
-            "units": "m^2",
-        }
-    )
+    valid_area.attrs.update({"long_name": f"{base_name} valid area",
+                             "units": "m^2"})
+    return xr.Dataset({mean.name: mean, abs_mean.name: abs_mean, valid_area.name: valid_area})
 
-    return xr.Dataset(
-        {
-            mean.name: mean,
-            abs_mean.name: abs_mean,
-            valid_area.name: valid_area,
-        }
-    )

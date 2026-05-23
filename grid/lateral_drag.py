@@ -21,7 +21,7 @@ class FormFactors:
                  paths            : ShugaPaths,
                  grid_spec        : CICEGridSpec | None = None,
                  lateral_drag_spec: LateralDragSpec | None = None,
-                 logger=None) -> None:
+                 logger = None) -> None:
         self.paths     = paths
         self.grid_spec = grid_spec or paths.cice_grid or CICEGridSpec()
         self.spec      = lateral_drag_spec or paths.lateral_drag or LateralDragSpec()
