@@ -199,6 +199,21 @@ class CICEStoreLocator:
         norm                = normalize_method(method)
         store_name          = "mets.zarr" if store_kind == "metrics" else "data.zarr"
         method_dir          = self._method_dir(norm)
+        if store_kind == "metrics":
+            exact = paths.metrics_store(norm)
+        else:
+            exact = paths.classification_store(norm)
+        if exact.exists():
+            resolved = ResolvedStore(sim_name=sim_name,
+                                     method=norm,
+                                     grid_type=str(paths.classify.grid_type),
+                                     store_kind=store_kind,
+                                     path=exact)
+            if self.logger is not None:
+                self.logger.info("Resolved %s store for %s [%s/%s] by exact path: %s", store_kind, sim_name, paths.classify.grid_type, norm, exact)
+            return resolved
+        if paths.ice_domain == "SI":
+            raise FileNotFoundError(f"Could not find {store_kind} store for sim={sim_name!r}, domain='SI': {exact}")
         requested_grid_type = selection.requested_grid_type(sim_name)
         if requested_grid_type is not None:
             candidate = self._classification_parent(paths) / requested_grid_type / method_dir / store_name
@@ -217,7 +232,6 @@ class CICEStoreLocator:
                                            method       = norm,
                                            store_name   = store_name,
                                            search_order = selection.search_order)
-
         if len(found) == 1:
             grid_type, candidate = found[0]
             resolved             = ResolvedStore(sim_name   = sim_name,

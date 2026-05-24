@@ -455,63 +455,155 @@ class CICEClassifier:
             return self.classify_binary_days(ds)
         return self.classify_rolling_mean(ds)
 
+    # def write_classification(self, method: str, data: xr.Dataset | xr.DataArray, *,
+    #                          overwrite: bool = False) -> str:
+    #     """
+    #     Write classified output to its method-specific Zarr store.
+
+    #     Accepts either:
+    #     - a legacy mask DataArray, or
+    #     - a Dataset containing FI_mask and optional FI/PI classified diagnostics.
+    #     """
+    #     store = self.paths.classification_store(method)
+    #     store.parent.mkdir(parents=True, exist_ok=True)
+    #     if store.exists():
+    #         if not overwrite:
+    #             self.logger.info("Classification store exists and overwrite=False, skipping: %s", store)
+    #             return str(store)
+    #         shutil.rmtree(store)
+    #     if isinstance(data, xr.DataArray):
+    #         mask  = strip_to_time_coord(data)
+    #         #mask  = _strip_to_classification_coords(data)
+    #         t_org = mask["time"] if "time" in mask.coords else None
+    #         mask  = xr.DataArray(mask.data,
+    #                              dims   = mask.dims,
+    #                              coords = {"time": t_org} if t_org is not None else None,
+    #                              name   = "FI_mask",
+    #                              attrs  = mask.attrs)
+    #         ds_out = xr.Dataset({"FI_mask": mask})
+    #     else:
+    #         if "FI_mask" not in data.data_vars:
+    #             if len(data.data_vars) == 1:
+    #                 only = next(iter(data.data_vars))
+    #                 data = data.rename({only: "FI_mask"})
+    #             else:
+    #                 raise KeyError(f"Classification dataset must contain FI_mask; got {list(data.data_vars)}")
+    #         cleaned = {}
+    #         for name in ("FI_mask", "FI_ispd", "FI_aice", "PI_mask", "PI_ispd", "PI_aice"):
+    #             if name in data.data_vars:
+    #                 da    = strip_to_time_coord(data[name])
+    #                 #da    = _strip_to_classification_coords(data[name])
+    #                 t_org = da["time"] if "time" in da.coords else None
+    #                 cleaned[name] = xr.DataArray(da.data,
+    #                                              dims   = da.dims,
+    #                                              coords = {"time": t_org} if t_org is not None else None,
+    #                                              name   = name,
+    #                                              attrs  = da.attrs)
+    #         ds_out = xr.Dataset(cleaned)
+    #     ds_out.attrs.update({"sim_name"  : self.run.sim_name,
+    #                          "start_date": self.run.start_date,
+    #                          "end_date"  : self.run.end_date,
+    #                          "hemisphere": self.run.hemisphere,
+    #                          "ice_type"  : self.classify.ice_type,
+    #                          "grid_type" : self.classify.grid_type,
+    #                          "method"    : normalize_method(method)})
+    #     chunk_map = self._output_chunk_map(ds_out)
+    #     if chunk_map:
+    #         self.logger.info("Rechunking classification output with chunks: %s", chunk_map)
+    #         ds_out = ds_out.chunk(chunk_map)
+    #     ds_out = sanitise_for_zarr_write(ds_out)
+    #     encoding = {}
+    #     for name, var in ds_out.data_vars.items():
+    #         if getattr(var.data, "chunks", None) is not None:
+    #             encoding[name] = {"chunks": tuple(int(c[0]) for c in var.chunks)}
+    #     for name, var in ds_out.coords.items():
+    #         if getattr(var.data, "chunks", None) is not None:
+    #             encoding[name] = {"chunks": tuple(int(c[0]) for c in var.chunks)}
+    #     self.logger.info("Writing %s classification to %s", normalize_method(method), store)
+    #     ds_out.to_zarr(store, mode="w", consolidated=False, encoding=encoding, zarr_format=2)
+    #     return str(store)
     def write_classification(self, method: str, data: xr.Dataset | xr.DataArray, *,
                              overwrite: bool = False) -> str:
         """
-        Write classified output to its method-specific Zarr store.
+        Write classified output to its domain-specific Zarr store.
 
-        Accepts either:
-        - a legacy mask DataArray, or
-        - a Dataset containing FI_mask and optional FI/PI classified diagnostics.
+        Domain is determined from self.paths.ice_domain:
+        - FI -> FI_mask, FI_ispd, FI_aice
+        - PI -> PI_mask, PI_ispd, PI_aice
+        - SI -> SI_mask, SI_aice
         """
+        domain = self.paths.ice_domain
         store = self.paths.classification_store(method)
         store.parent.mkdir(parents=True, exist_ok=True)
+
         if store.exists():
             if not overwrite:
                 self.logger.info("Classification store exists and overwrite=False, skipping: %s", store)
                 return str(store)
             shutil.rmtree(store)
+
+        allowed_vars = {
+            "FI": ("FI_mask", "FI_ispd", "FI_aice"),
+            "PI": ("PI_mask", "PI_ispd", "PI_aice"),
+            "SI": ("SI_mask", "SI_aice"),
+        }[domain]
+        required_mask = f"{domain}_mask"
+
         if isinstance(data, xr.DataArray):
-            mask  = strip_to_time_coord(data)
-            #mask  = _strip_to_classification_coords(data)
+            mask = strip_to_time_coord(data)
             t_org = mask["time"] if "time" in mask.coords else None
-            mask  = xr.DataArray(mask.data,
-                                 dims   = mask.dims,
-                                 coords = {"time": t_org} if t_org is not None else None,
-                                 name   = "FI_mask",
-                                 attrs  = mask.attrs)
-            ds_out = xr.Dataset({"FI_mask": mask})
+            mask = xr.DataArray(
+                mask.data,
+                dims=mask.dims,
+                coords={"time": t_org} if t_org is not None else None,
+                name=required_mask,
+                attrs=mask.attrs,
+            )
+            ds_out = xr.Dataset({required_mask: mask})
+
         else:
-            if "FI_mask" not in data.data_vars:
+            if required_mask not in data.data_vars:
                 if len(data.data_vars) == 1:
                     only = next(iter(data.data_vars))
-                    data = data.rename({only: "FI_mask"})
+                    data = data.rename({only: required_mask})
                 else:
-                    raise KeyError(f"Classification dataset must contain FI_mask; got {list(data.data_vars)}")
+                    raise KeyError(
+                        f"{domain} classification dataset must contain {required_mask}; "
+                        f"got {list(data.data_vars)}"
+                    )
+
             cleaned = {}
-            for name in ("FI_mask", "FI_ispd", "FI_aice", "PI_mask", "PI_ispd", "PI_aice"):
+            for name in allowed_vars:
                 if name in data.data_vars:
-                    da    = strip_to_time_coord(data[name])
-                    #da    = _strip_to_classification_coords(data[name])
+                    da = strip_to_time_coord(data[name])
                     t_org = da["time"] if "time" in da.coords else None
-                    cleaned[name] = xr.DataArray(da.data,
-                                                 dims   = da.dims,
-                                                 coords = {"time": t_org} if t_org is not None else None,
-                                                 name   = name,
-                                                 attrs  = da.attrs)
+                    cleaned[name] = xr.DataArray(
+                        da.data,
+                        dims=da.dims,
+                        coords={"time": t_org} if t_org is not None else None,
+                        name=name,
+                        attrs=da.attrs,
+                    )
+
             ds_out = xr.Dataset(cleaned)
-        ds_out.attrs.update({"sim_name"  : self.run.sim_name,
-                             "start_date": self.run.start_date,
-                             "end_date"  : self.run.end_date,
-                             "hemisphere": self.run.hemisphere,
-                             "ice_type"  : self.classify.ice_type,
-                             "grid_type" : self.classify.grid_type,
-                             "method"    : normalize_method(method)})
+
+        ds_out.attrs.update({
+            "sim_name"  : self.run.sim_name,
+            "start_date": self.run.start_date,
+            "end_date"  : self.run.end_date,
+            "hemisphere": self.run.hemisphere,
+            "ice_type"  : domain,
+            "grid_type" : self.classify.grid_type,
+            "method"    : normalize_method(method),
+        })
+
         chunk_map = self._output_chunk_map(ds_out)
         if chunk_map:
             self.logger.info("Rechunking classification output with chunks: %s", chunk_map)
             ds_out = ds_out.chunk(chunk_map)
+
         ds_out = sanitise_for_zarr_write(ds_out)
+
         encoding = {}
         for name, var in ds_out.data_vars.items():
             if getattr(var.data, "chunks", None) is not None:
@@ -519,7 +611,8 @@ class CICEClassifier:
         for name, var in ds_out.coords.items():
             if getattr(var.data, "chunks", None) is not None:
                 encoding[name] = {"chunks": tuple(int(c[0]) for c in var.chunks)}
-        self.logger.info("Writing %s classification to %s", normalize_method(method), store)
+
+        self.logger.info("Writing %s/%s classification to %s", domain, normalize_method(method), store)
         ds_out.to_zarr(store, mode="w", consolidated=False, encoding=encoding, zarr_format=2)
         return str(store)
 
@@ -604,7 +697,7 @@ class CICEClassifier:
         # ------------------------------------------------------------------
         # Pack ice (sea ice excluding fast ice)
         # ------------------------------------------------------------------
-        pi_mask = self._pack_ice_mask(mask, aice)
+        pi_mask = self._pack_ice_mask(mask, aice_crop)
         pi_mask.attrs.update({"classification_method" : norm,
                               "source_mask"           : "FI_mask",
                               "grid_type"             : " ".join(self.grid_selection)})
@@ -694,6 +787,21 @@ class CICEClassifier:
                     )
                 finally:
                     self.paths = old_paths
+        # ------------------------------------------------------------------
+        # Sea ice classification store: method-independent parent mask.
+        # ------------------------------------------------------------------
+        si_paths = self.paths.with_ice_type("SI")
+        old_paths = self.paths
+        try:
+            self.paths = si_paths
+            ds_si = self.build_si_classification_output(ds)
+            out["SI"] = self.write_classification(
+                "raw",
+                ds_si,
+                overwrite=overwrite,
+            )
+        finally:
+            self.paths = old_paths
         return out
 
     def split_classification_output(self, ds_out: xr.Dataset) -> dict[str, xr.Dataset]:

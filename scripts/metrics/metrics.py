@@ -57,7 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--af2020-root", default=None)
     p.add_argument("--metric-groups",
                    default="default",
-                   help="Comma-separated metric groups to compute/update (default, all, fi_core, pi_core, si_core, regional, spatial, stress, summary, fi_diags, pi_diags, si_diags, diags).")
+                   help=("Comma-separated metric groups to compute/update. "
+                         "Use domain-specific groups with the new split stores: "
+                         "fi_core, fi_regional, fi_spatial, fi_summary, fi_stress, fi_diags, fi_all; "
+                         "pi_core, pi_regional, pi_spatial, pi_summary, pi_stress, pi_diags, pi_all; "
+                         "si_core, si_regional, si_spatial, si_summary, si_stress, si_diags, si_all. "
+                         "Cross-domain groups regional, spatial, summary, stress, diags, all are for diagnostics only "
+                         "and should not be used with split-domain metrics writing."))
     p.add_argument("--metric-names",
                    default=None,
                    help="Comma-separated explicit metric names to compute/update in addition to metric-groups.")

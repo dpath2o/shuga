@@ -109,6 +109,18 @@ done
 
 JOB_NAME="${SIM_NAME}_${ICE_TYPE}_${GRID_TYPE}_metrics"
 
+if [[ "$METRIC_GROUPS" == "default" ]]; then
+    case "${ICE_TYPE^^}" in
+        FI) METRIC_GROUPS="fi_core" ;;
+        PI) METRIC_GROUPS="pi_core" ;;
+        SI) METRIC_GROUPS="si_core" ;;
+        *)
+            echo "Unsupported ICE_TYPE=$ICE_TYPE. Use FI, PI, or SI." >&2
+            exit 1
+            ;;
+    esac
+fi
+
 # PBS-safe encoding: commas inside a single variable value break qsub -v parsing.
 METHODS_SAFE="${METHODS//,/|}"
 METRIC_GROUPS_SAFE="${METRIC_GROUPS//,/|}"

@@ -301,7 +301,7 @@ def load_classified(run: RunSpec | None = None, classify: ClassificationSpec | N
     """
     Load classified CICE fast-ice output from data.zarr.
 
-    Store discovery is delegated to CICEStoreLocator.
+    Store discovery is delegated to CICES
     """
     run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run,
                                                                      sim_name=sim_name,
@@ -346,11 +346,25 @@ def load_classified(run: RunSpec | None = None, classify: ClassificationSpec | N
                                                      user=user)
     LOGGER.info("Opening classified store for %s [%s/%s]: %s", run_eff.sim_name, resolved.grid_type, resolved.method, resolved.path)
     ds = xr.open_zarr(resolved.path, consolidated=False, chunks=chunks)
-    if "FI_mask" not in ds.data_vars and len(ds.data_vars) == 1:
+    # if "FI_mask" not in ds.data_vars and len(ds.data_vars) == 1:
+    #     only = next(iter(ds.data_vars))
+    #     ds = ds.rename({only: "FI_mask"})
+    # if "FI_mask" not in ds.data_vars:
+    #     raise KeyError(f"Could not find FI_mask in {resolved.path}. Data variables: {list(ds.data_vars)}")
+    domain = str(classify_eff.ice_type).strip().upper()
+    expected_mask = f"{domain}_mask"
+    # Backward-compatible rename only when there is a single anonymous/legacy var.
+    if expected_mask not in ds.data_vars and len(ds.data_vars) == 1:
         only = next(iter(ds.data_vars))
-        ds = ds.rename({only: "FI_mask"})
-    if "FI_mask" not in ds.data_vars:
-        raise KeyError(f"Could not find FI_mask in {resolved.path}. Data variables: {list(ds.data_vars)}")
+        ds = ds.rename({only: expected_mask})
+    if variables_list is not None:
+        keep = [v for v in variables_list if v in ds.data_vars or v in ds.coords]
+        if not keep:
+            raise ValueError(f"None of the requested classified variables were found in {resolved.path}: {variables_list}")
+        ds = ds[keep]
+    else:
+        if expected_mask not in ds.data_vars:
+            raise KeyError(f"Could not find {expected_mask} in {resolved.path}. Data variables: {list(ds.data_vars)}")
     if variables_list is not None:
         keep = [v for v in variables_list if v in ds.data_vars or v in ds.coords]
         if not keep:

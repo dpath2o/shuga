@@ -140,6 +140,11 @@ case "$ICEH_FREQUENCY" in
         ;;
 esac
 
+if [[ "${ICE_TYPE^^}" != "FI" ]]; then
+    echo "Error: classification must be run with ICE_TYPE=FI. It writes both FI and PI stores." >&2
+    exit 1
+fi
+
 PBS_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/classify.pbs"
 
 # PBS-safe encoding: commas are separators in qsub -v, so do not pass METHODS with commas.

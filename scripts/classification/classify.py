@@ -76,6 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args         = build_parser().parse_args()
+    if str(args.ice_type).strip().upper() != "FI":
+        raise ValueError("The classification workflow must be run with --ice-type FI. "
+                         "It writes both FI and PI classification stores from the FI parent mask. "
+                         "Use --ice-type PI only in the metrics workflow.")
     methods      = [normalize_method(m) for m in _comma_split(args.methods)]
     run          = RunSpec(sim_name       = args.sim_name,
                            start_date     = args.start_date,
@@ -142,7 +146,7 @@ def main() -> None:
         conv = converter.ensure_iceh_stores(dt0_str          = args.start_date,
                                             dtN_str          = args.end_date,
                                             daily_root       = args.daily_root,
-                                            #hourly_root      = args.hourly_root,
+                                            hourly_root      = args.hourly_root,
                                             overwrite        = args.overwrite_history,
                                             overwrite_static = args.overwrite_static,
                                             delete_original  = args.delete_original)

@@ -447,19 +447,24 @@ class CICEMetrics:
         lon, lat      = self._detect_lonlat(ds)
         regional_mask = self._region_mask(area, lon, lat)
         domain        = str(self.classify.ice_type).strip().upper()
-        need_masks    = needs_classified_masks(requested, self.FIPSI_NAMES)
-        ds_mask       = self._get_classified(method) if need_masks else None
         fi_mask       = None
         pi_mask       = None
-        if domain in {"FI", "PI"}:
+        if domain == "FI":
             ds_mask = self._get_classified(method)
-            if domain == "FI":
-                fi_mask = ds_mask["FI_mask"].astype(bool)
-                aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
-            elif domain == "PI":
-                pi_mask = ds_mask["PI_mask"].astype(bool)
-                aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
+            fi_mask = ds_mask["FI_mask"].astype(bool)
+            aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
+        elif domain == "PI":
+            ds_mask = self._get_classified(method)
+            pi_mask = ds_mask["PI_mask"].astype(bool)
+            aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
+        elif domain == "SI":
+            pass
+        else:
+            raise ValueError(f"Unsupported ice_type={domain!r}")
         si_mask = self._si_mask(aice)
+        # domain        = str(self.classify.ice_type).strip().upper()
+        # need_masks    = needs_classified_masks(requested, self.FIPSI_NAMES)
+        # ds_mask       = self._get_classified(method) if need_masks else None
         # need_fi       = needs_fast_ice_mask(requested, self.FIPSI_NAMES)
         # ds_mask       = self._get_classified(method) if need_fi else None
         # fi_mask       = ds_mask["FI_mask"].astype(bool) if ds_mask is not None else None
