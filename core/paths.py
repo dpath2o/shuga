@@ -1,6 +1,6 @@
 from __future__  import annotations
 import re, json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib     import Path
 from .naming     import filename_token, method_dirname, method_slug, normalize_method, threshold_tag_compact, threshold_tag_dir
 from .types      import (ClassificationSpec,
@@ -29,6 +29,95 @@ class ShugaPaths:
     static_store: str | Path | None = None
     classification_root: str | Path | None = None
     archive_root: str | Path | None = None
+
+    @property
+    def analysis_zarr_root_path(self) -> Path:
+        """
+        Root for derived shuga products: classifications, metrics, diagnostics.
+
+        Prefer the AFIM archive tree when it already exists or when archive-driven
+        history is present. Otherwise fall back to the normal afim_output tree.
+        """
+        if self.afim_output_root is not None:
+            return self.zarr_root
+        archive_target = self.archive_zarr_root_path
+        archive_history = self.archive_root_path / "history"
+        if archive_target.exists() or archive_history.exists():
+            return archive_target
+        return self.zarr_root
+
+    @property
+    def ice_domain(self) -> str:
+        token = str(self.classify.ice_type).strip().upper()
+        if token not in {"FI", "PI", "SI"}:
+            raise ValueError(
+                f"Unsupported classify.ice_type={self.classify.ice_type!r}. "
+                "Use 'FI', 'PI', or 'SI'."
+            )
+        return token
+
+    def with_ice_type(self, ice_type: str) -> "ShugaPaths":
+        """
+        Return a copy of this path bundle with a different classification/metrics
+        ice-domain selector.
+        """
+        return replace(
+            self,
+            classify=replace(self.classify, ice_type=str(ice_type).strip().upper()),
+        )
+
+    @property
+    def classification_root_path(self) -> Path:
+        """
+        Root for classification/metrics products for the active ice domain.
+
+        SI is not speed-threshold or method dependent, so it lives directly under:
+            zarr/HEMISPHERE/SI
+
+        FI and PI are derived from speed-threshold methods and live under:
+            zarr/HEMISPHERE/ispd_thresh_*/FI|PI/grid_type
+        """
+        if self.classification_root is not None:
+            return Path(self.classification_root).expanduser()
+        base = self.analysis_zarr_root_path / self.hemisphere
+        domain = self.ice_domain
+        if domain == "SI":
+            return base / "SI"
+        return (
+            base
+            / f"ispd_thresh_{threshold_tag_dir(self.classify.ispd_thresh)}"
+            / domain
+            / str(self.classify.grid_type)
+        )
+
+    def classification_store(self, method: str) -> Path:
+        if self.ice_domain == "SI":
+            return self.classification_root_path / "data.zarr"
+        return (
+            self.classification_root_path
+            / method_dirname(
+                method,
+                bin_window=self.classify.bin_window,
+                bin_min_days=self.classify.bin_min_days,
+                roll_window=self.classify.roll_window,
+            )
+            / "data.zarr"
+        )
+
+    def metrics_store(self, method: str) -> Path:
+        if self.ice_domain == "SI":
+            return self.classification_root_path / "mets.zarr"
+
+        return (
+            self.classification_root_path
+            / method_dirname(
+                method,
+                bin_window=self.classify.bin_window,
+                bin_min_days=self.classify.bin_min_days,
+                roll_window=self.classify.roll_window,
+            )
+            / "mets.zarr"
+        )
 
     @staticmethod
     def canonical_hemisphere(value: str) -> str:
@@ -96,15 +185,15 @@ class ShugaPaths:
             return Path(self.archive_root).expanduser()
         return Path.home() / "AFIM_archive" / self.run.sim_name
 
-    @property
-    def classification_root_path(self) -> Path:
-        if self.classification_root is not None:
-            return Path(self.classification_root).expanduser()
-        return (self.zarr_root
-                / self.hemisphere
-                / f"ispd_thresh_{threshold_tag_dir(self.classify.ispd_thresh)}"
-                / self.classify.ice_type
-                / self.classify.grid_type)
+    # @property
+    # def classification_root_path(self) -> Path:
+    #     if self.classification_root is not None:
+    #         return Path(self.classification_root).expanduser()
+    #     return (self.zarr_root
+    #             / self.hemisphere
+    #             / f"ispd_thresh_{threshold_tag_dir(self.classify.ispd_thresh)}"
+    #             / self.classify.ice_type
+    #             / self.classify.grid_type)
 
     @property
     def graphics_root_path(self) -> Path:
@@ -224,17 +313,17 @@ class ShugaPaths:
                 return candidate
         return None
 
-    def classification_store(self, method: str) -> Path:
-        return self.classification_root_path / method_dirname(method,
-                                                              bin_window   = self.classify.bin_window,
-                                                              bin_min_days = self.classify.bin_min_days,
-                                                              roll_window  = self.classify.roll_window) / "data.zarr"
+    # def classification_store(self, method: str) -> Path:
+    #     return self.classification_root_path / method_dirname(method,
+    #                                                           bin_window   = self.classify.bin_window,
+    #                                                           bin_min_days = self.classify.bin_min_days,
+    #                                                           roll_window  = self.classify.roll_window) / "data.zarr"
 
-    def metrics_store(self, method: str) -> Path:
-        return self.classification_root_path / method_dirname(method,
-                                                              bin_window   = self.classify.bin_window,
-                                                              bin_min_days = self.classify.bin_min_days,
-                                                              roll_window  = self.classify.roll_window) / "mets.zarr"
+    # def metrics_store(self, method: str) -> Path:
+    #     return self.classification_root_path / method_dirname(method,
+    #                                                           bin_window   = self.classify.bin_window,
+    #                                                           bin_min_days = self.classify.bin_min_days,
+    #                                                           roll_window  = self.classify.roll_window) / "mets.zarr"
 
     # backward-compatible aliases for newer callers
     def resolve_class_store(self, method: str) -> Path:

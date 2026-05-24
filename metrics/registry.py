@@ -106,10 +106,11 @@ METRIC_GROUPS      = {"fi_core" : CORE_FI,
                       "regional": REGIONAL,
                       "spatial" : SPATIAL,
                       "summary" : SUMMARY,
+                      "fi_spec" : FI_SPECIFIC,
                       "stress"  : STRESS,
                       "diags"   : DIAGS,
                       "default" : CORE_FI,
-                      "all"     : CORE_FI + CORE_SI + REGIONAL + SPATIAL + SUMMARY + STRESS + DIAGS}
+                      "all"     : CORE_FI + CORE_PI + CORE_SI + REGIONAL + SPATIAL + SUMMARY + STRESS + DIAGS}
 FIPSI_NAMES        = {"FIPSI", "persistent_winter_area", "ever_winter_area"}
 FIA_SKILL_NAMES    = {"FIA_Bias", "FIA_RMSE", "FIA_MAE", "FIA_Corr"}
 FIT_SKILL_NAMES    = {"FIT_Bias", "FIT_RMSE", "FIT_MAE", "FIT_Corr"}
@@ -121,9 +122,9 @@ IA_SEASONAL_NAMES  = {"IA_max_mean",
                       "IA_doy_max_std",
                       "IA_doy_min_mean",
                       "IA_doy_min_std"}
-FIA_SEASONAL_NAMES = [f"F{name}" for name in IA_SEASONAL_NAMES]
-PIA_SEASONAL_NAMES = [f"P{name}" for name in IA_SEASONAL_NAMES]
-SIA_SEASONAL_NAMES = [f"S{name}" for name in IA_SEASONAL_NAMES]
+FIA_SEASONAL_NAMES = {f"F{name}" for name in IA_SEASONAL_NAMES}
+PIA_SEASONAL_NAMES = {f"P{name}" for name in IA_SEASONAL_NAMES}
+SIA_SEASONAL_NAMES = {f"S{name}" for name in IA_SEASONAL_NAMES}
 IT_SEASONAL_NAMES  = {"IT_max_mean",
                       "IT_max_std",
                       "IT_min_mean",
@@ -132,9 +133,9 @@ IT_SEASONAL_NAMES  = {"IT_max_mean",
                       "IT_doy_max_std",
                       "IT_doy_min_mean",
                       "IT_doy_min_std"}
-FIT_SEASONAL_NAMES = [f"F{name}" for name in IT_SEASONAL_NAMES]
-PIT_SEASONAL_NAMES = [f"P{name}" for name in IT_SEASONAL_NAMES]
-SIT_SEASONAL_NAMES = [f"S{name}" for name in IT_SEASONAL_NAMES]
+FIT_SEASONAL_NAMES = {f"F{name}" for name in IT_SEASONAL_NAMES}
+PIT_SEASONAL_NAMES = {f"P{name}" for name in IT_SEASONAL_NAMES}
+SIT_SEASONAL_NAMES = {f"S{name}" for name in IT_SEASONAL_NAMES}
 
 def as_list(value: str | Iterable[str] | None) -> list[str]:
     if value is None:

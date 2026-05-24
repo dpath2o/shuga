@@ -17,8 +17,8 @@ def compute_seasonal_summary_dataset(
     dispatcher must expose get(name).
     """
     out = xr.Dataset()
-
     for base, names in seasonal_requests.items():
+        names = set(names)
         if not (requested & names):
             continue
 

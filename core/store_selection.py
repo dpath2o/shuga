@@ -75,7 +75,6 @@ class StoreSelection:
             return self.grid_type_map[sim_name]
         return self.grid_type
 
-
 @dataclass(slots=True, frozen=True)
 class ResolvedStore:
     """

@@ -145,6 +145,7 @@ class CICEMetrics:
     # Backwards-compatible registry aliases. The canonical definitions live in
     # shuga.metrics.registry.
     CORE_FI            = CORE_FI
+    CORE_PI            = CORE_PI
     CORE_SI            = CORE_SI
     REGIONAL           = REGIONAL
     SPATIAL            = SPATIAL
@@ -331,20 +332,46 @@ class CICEMetrics:
                                          chunks     = self.chunks)
         return self._cice_cache
 
+    def _classified_variables_for_domain(self) -> list[str]:
+        domain = str(self.classify.ice_type).strip().upper()
+        if domain == "FI":
+            return ["FI_mask"]
+        if domain == "PI":
+            return ["PI_mask"]
+        if domain == "SI":
+            return ["SI_mask"]
+        raise ValueError(f"Unsupported ice_type={domain!r}")
+
     def _get_classified(self, method: str) -> xr.Dataset:
         norm = normalize_method(method)
         if norm not in self._classified_cache:
-            self._classified_cache[norm] = load_classified(run            = self.run,
-                                                           classify       = self.classify,
-                                                           metrics        = self.metrics,
-                                                           paths          = self.paths,
-                                                           classification = norm,
-                                                           dt0_str        = self.run.start_date,
-                                                           dtN_str        = self.run.end_date,
-                                                           variables      = ["FI_mask","PI_mask"],
-                                                           hemisphere     = self.run.hemisphere,
-                                                           chunks         = self.chunks)
+            self._classified_cache[norm] = load_classified(
+                run=self.run,
+                classify=self.classify,
+                metrics=self.metrics,
+                paths=self.paths,
+                classification=norm,
+                dt0_str=self.run.start_date,
+                dtN_str=self.run.end_date,
+                variables=self._classified_variables_for_domain(),
+                hemisphere=self.run.hemisphere,
+                chunks=self.chunks,
+            )
         return self._classified_cache[norm]
+    # def _get_classified(self, method: str) -> xr.Dataset:
+    #     norm = normalize_method(method)
+    #     if norm not in self._classified_cache:
+    #         self._classified_cache[norm] = load_classified(run            = self.run,
+    #                                                        classify       = self.classify,
+    #                                                        metrics        = self.metrics,
+    #                                                        paths          = self.paths,
+    #                                                        classification = norm,
+    #                                                        dt0_str        = self.run.start_date,
+    #                                                        dtN_str        = self.run.end_date,
+    #                                                        variables      = ["FI_mask","PI_mask"],
+    #                                                        hemisphere     = self.run.hemisphere,
+    #                                                        chunks         = self.chunks)
+    #     return self._classified_cache[norm]
 
     def _obs_skill_dataset(self, ds: xr.Dataset) -> xr.Dataset:
         if not self.metrics.obs_metrics_store:
@@ -375,6 +402,25 @@ class CICEMetrics:
         except Exception:
             return None
 
+    def _validate_metric_domain(self, requested: set[str]) -> None:
+        domain = str(self.classify.ice_type).strip().upper()
+        has_fi = any(name.startswith("FI") or name.startswith("FIA_") or name.startswith("FIT_")
+                     or name in self.FIPSI_NAMES for name in requested)
+        has_pi = any(name.startswith("PI") for name in requested)
+        has_si = any(name.startswith("SI") or name.startswith("SIA_") or name.startswith("SIT_")
+                     for name in requested)
+        requested_domains = {d for d, flag in {"FI": has_fi, "PI": has_pi, "SI": has_si}.items() if flag}
+        if len(requested_domains) > 1:
+            raise ValueError(
+                f"Requested metrics span multiple ice domains {sorted(requested_domains)}. "
+                "Run metrics separately for FI, PI, and SI so outputs go to separate trees."
+            )
+        if requested_domains and domain not in requested_domains:
+            raise ValueError(
+                f"classify.ice_type={domain!r} but requested metrics are for "
+                f"{sorted(requested_domains)}. Use --ice-type {next(iter(requested_domains))}."
+            )
+
     #----------------------------------------------------------------------------------
     # the following functions are the backbone of this module
     # essentially, _compute_requested_metrics does all the heavy lifting for batch
@@ -400,33 +446,43 @@ class CICEMetrics:
         area          = self._ensure_2d_static(ds["tarea"])
         lon, lat      = self._detect_lonlat(ds)
         regional_mask = self._region_mask(area, lon, lat)
+        domain        = str(self.classify.ice_type).strip().upper()
+        need_masks    = needs_classified_masks(requested, self.FIPSI_NAMES)
+        ds_mask       = self._get_classified(method) if need_masks else None
+        fi_mask       = None
+        pi_mask       = None
+        if domain in {"FI", "PI"}:
+            ds_mask = self._get_classified(method)
+            if domain == "FI":
+                fi_mask = ds_mask["FI_mask"].astype(bool)
+                aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
+            elif domain == "PI":
+                pi_mask = ds_mask["PI_mask"].astype(bool)
+                aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
+        si_mask = self._si_mask(aice)
         # need_fi       = needs_fast_ice_mask(requested, self.FIPSI_NAMES)
         # ds_mask       = self._get_classified(method) if need_fi else None
         # fi_mask       = ds_mask["FI_mask"].astype(bool) if ds_mask is not None else None
         # if fi_mask is not None:
         #     aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
         # si_mask = self._si_mask(aice)
-        need_masks = needs_classified_masks(requested, self.FIPSI_NAMES)
-        ds_mask    = self._get_classified(method) if need_masks else None
-        fi_mask    = None
-        pi_mask    = None
-        if ds_mask is not None and "FI_mask" in ds_mask:
-            fi_mask = ds_mask["FI_mask"].astype(bool)
-        if ds_mask is not None and "PI_mask" in ds_mask:
-            pi_mask = ds_mask["PI_mask"].astype(bool)
-        if fi_mask is not None:
-            aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
-        si_mask = self._si_mask(aice)
-        if pi_mask is not None:
-            aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
-        elif fi_mask is not None:
-            # Backward-compatible fallback for older classification stores that only
-            # contain FI_mask.
-            pi_mask      = (si_mask & (~fi_mask)).astype(bool)
-            pi_mask.name = "PI_mask"
-            pi_mask.attrs.update({"long_name" : "Derived pack-ice mask",
-                                  "definition": "PI_mask = SI_mask & ~FI_mask",
-                                  "fallback"  : "Derived in metrics because PI_mask was absent from classification store."})
+        # if ds_mask is not None and "FI_mask" in ds_mask:
+        #     fi_mask = ds_mask["FI_mask"].astype(bool)
+        # if ds_mask is not None and "PI_mask" in ds_mask:
+        #     pi_mask = ds_mask["PI_mask"].astype(bool)
+        # if fi_mask is not None:
+        #     aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
+        # si_mask = self._si_mask(aice)
+        # if pi_mask is not None:
+        #     aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
+        # elif fi_mask is not None:
+        #     # Backward-compatible fallback for older classification stores that only
+        #     # contain FI_mask.
+        #     pi_mask      = (si_mask & (~fi_mask)).astype(bool)
+        #     pi_mask.name = "PI_mask"
+        #     pi_mask.attrs.update({"long_name" : "Derived pack-ice mask",
+        #                           "definition": "PI_mask = SI_mask & ~FI_mask",
+        #                           "fallback"  : "Derived in metrics because PI_mask was absent from classification store."})
         ctx     = MetricDispatchContext(ds           = ds,
                                         aice         = aice,
                                         hi           = hi,
@@ -783,6 +839,7 @@ class CICEMetrics:
         """
         norm      = normalize_method(method)
         requested = set(self._expand_metric_names(metric_names=metric_names, metric_groups=metric_groups))
+        self._validate_metric_domain(requested)
         self.logger.info("Resolved class store for %s: %s", norm, self.paths.classification_store(norm))
         self.logger.info("Resolved metrics store for %s: %s", norm, self.paths.metrics_store(norm))
         if not requested:

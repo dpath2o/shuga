@@ -672,9 +672,47 @@ class CICEClassifier:
         self.logger.info("Classification speed reconstruction mode(s): %s", ", ".join(self.grid_selection))
         ds                  = self.load_cice(methods=methods)
         out: dict[str, str] = {}
+        # for method in methods:
+        #     self.logger.info("Classifying method: %s", method)
+        #     ds_method   = self.build_classification_output(method, ds)
+        #     out[method] = self.write_classification(method, ds_method, overwrite=overwrite)
         for method in methods:
             self.logger.info("Classifying method: %s", method)
-            ds_method   = self.build_classification_output(method, ds)
-            out[method] = self.write_classification(method, ds_method, overwrite=overwrite)
+            ds_method = self.build_classification_output(method, ds)
+
+            for domain, ds_domain in self.split_classification_output(ds_method).items():
+                domain_paths = self.paths.with_ice_type(domain)
+                self.logger.info("Writing %s/%s classification", domain, method)
+
+                old_paths = self.paths
+                try:
+                    self.paths = domain_paths
+                    out[f"{domain}:{method}"] = self.write_classification(
+                        method,
+                        ds_domain,
+                        overwrite=overwrite,
+                    )
+                finally:
+                    self.paths = old_paths
         return out
 
+    def split_classification_output(self, ds_out: xr.Dataset) -> dict[str, xr.Dataset]:
+        return {"FI": ds_out[[v for v in ("FI_mask", "FI_ispd", "FI_aice") if v in ds_out]],
+                "PI": ds_out[[v for v in ("PI_mask", "PI_ispd", "PI_aice") if v in ds_out]]}
+
+    def build_si_classification_output(self, ds: xr.Dataset) -> xr.Dataset:
+        aice = self._crop_requested_window(ds[self.classify.aice_var])
+        si_mask = (aice >= float(self.classify.aice_thresh)).astype("bool")
+        si_mask.name = "SI_mask"
+        si_mask.attrs.update({
+            "long_name": "Sea-ice mask",
+            "definition": "SI_mask = aice >= aice_thresh",
+            "aice_thresh": float(self.classify.aice_thresh),
+        })
+        si_aice = aice.where(si_mask).astype(np.float32)
+        si_aice.name = "SI_aice"
+        si_aice.attrs.update({
+            "long_name": "Sea-ice concentration over SI_mask",
+            "units": aice.attrs.get("units", "1"),
+        })
+        return xr.Dataset({"SI_mask": si_mask, "SI_aice": si_aice})
