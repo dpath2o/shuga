@@ -1,69 +1,36 @@
 # shuga/metrics/dispatch.py
-from __future__ import annotations
-
-from dataclasses import dataclass, field
+from __future__      import annotations
+from dataclasses     import dataclass, field
 from collections.abc import Iterable
+import numpy         as np
+import xarray        as xr
 
-import numpy as np
-import xarray as xr
-
-
-PRIMARY_METRIC_NAMES = [
-    "FIA",
-    "FIV",
-    "FIT",
-    "FIP",
-    "FIS",
-    "FITVR",
-    "FIMVR",
-    "FITAR",
-    "FIMAR",
-    "SIA",
-    "SIV",
-    "SIT",
-    "SIP",
-    "SIS",
-    "SITVR",
-    "SIMVR",
-    "SITAR",
-    "SIMAR",
-    "FIHI",
-    "FIST",
-    "FITVR_YR",
-    "FIMVR_YR",
-    "FITAR_YR",
-    "FIMAR_YR",
-    "SIHI",
-    "SIST",
-    "SITVR_YR",
-    "SIMVR_YR",
-    "SITAR_YR",
-    "SIMAR_YR",
-    "FIA_by_region",
-    "FIT_by_region",
-    "SIA_by_region",
-    "SIT_by_region",
-]
-
-PRIMARY_METRIC_SET = set(PRIMARY_METRIC_NAMES)
-
+PRIMARY_METRIC_NAMES = ["FIA", "FIV", "FIT", "FIP", "FIS", "FITVR", "FIMVR", "FITAR", "FIMAR",
+                        "PIA", "PIV", "PIT", "PIP", "PIS", "PITVR", "PIMVR", "PITAR", "PIMAR",
+                        "SIA", "SIV", "SIT", "SIP", "SIS", "SITVR", "SIMVR", "SITAR", "SIMAR",
+                        "FIHI", "FIST", "FITVR_YR", "FIMVR_YR", "FITAR_YR", "FIMAR_YR",
+                        "PIHI", "PIST", "PITVR_YR", "PIMVR_YR", "PITAR_YR", "PIMAR_YR",
+                        "SIHI", "SIST", "SITVR_YR", "SIMVR_YR", "SITAR_YR", "SIMAR_YR",
+                        "FIA_by_region", "FIT_by_region",
+                        "PIA_by_region", "PIT_by_region",
+                        "SIA_by_region", "SIT_by_region"]
+PRIMARY_METRIC_SET   = set(PRIMARY_METRIC_NAMES)
 
 @dataclass(slots=True)
 class MetricDispatchContext:
     """
     Shared metric-dispatch inputs for one simulation/method context.
     """
-
-    ds: xr.Dataset
-    aice: xr.DataArray
-    hi: xr.DataArray
-    area: xr.DataArray
-    region_mask: xr.DataArray
-    fi_mask: xr.DataArray | None
-    si_mask: xr.DataArray
-    area_scale: float
+    ds          : xr.Dataset
+    aice        : xr.DataArray
+    hi          : xr.DataArray
+    area        : xr.DataArray
+    region_mask : xr.DataArray
+    fi_mask     : xr.DataArray | None
+    pi_mask     : xr.DataArray | None
+    si_mask     : xr.DataArray
+    area_scale  : float
     volume_scale: float
-
 
 @dataclass
 class MetricDispatcher:
@@ -73,7 +40,6 @@ class MetricDispatcher:
     This replaces the large if/elif block previously embedded inside
     CICEMetrics._compute_requested_metrics().
     """
-
     context: MetricDispatchContext
     calculator: object
     memo: dict[str, xr.DataArray] = field(default_factory=dict)
@@ -81,21 +47,17 @@ class MetricDispatcher:
     def get(self, name: str) -> xr.DataArray | None:
         if name in self.memo:
             return self.memo[name]
-
         da = self._compute_one(name)
         if da is not None:
             self.memo[name] = da
-
         return da
 
     def dataset_for(self, names: Iterable[str]) -> xr.Dataset:
         out = xr.Dataset()
-
         for name in names:
             da = self.get(name)
             if da is not None:
                 out[name] = da
-
         return out
 
     def _remember_many(self, values: dict[str, xr.DataArray]) -> None:
@@ -103,113 +65,148 @@ class MetricDispatcher:
             self.memo[name] = da
 
     def _compute_one(self, name: str) -> xr.DataArray | None:
-        ctx = self.context
-        calc = self.calculator
-        ds = ctx.ds
-        aice = ctx.aice
-        hi = ctx.hi
-        area = ctx.area
-        fi_mask = ctx.fi_mask
-        si_mask = ctx.si_mask
+        ctx         = self.context
+        calc        = self.calculator
+        ds          = ctx.ds
+        aice        = ctx.aice
+        hi          = ctx.hi
+        area        = ctx.area
+        fi_mask     = ctx.fi_mask
+        pi_mask     = ctx.pi_mask
+        si_mask     = ctx.si_mask
         region_mask = ctx.region_mask
-
+        #-----------------------------------------------------------------------------------
+        # fast ice (primaries)
+        #----------------------------------------------------------------------------------
         if name == "FIA" and fi_mask is not None:
+            return calc.compute_area_series(aice, area, fi_mask,
+                                            name      = "FIA",
+                                            long_name = "Fast Ice Area",
+                                            scale     = ctx.area_scale)
+
+        if name == "FIV" and fi_mask is not None:
+            return calc.compute_volume_series(aice, hi, area, fi_mask,
+                                              name      = "FIV",
+                                              long_name = "Fast Ice Volume",
+                                              scale     = ctx.volume_scale)
+        if name == "FIT" and fi_mask is not None:
+            return calc.compute_thickness_series(aice, hi, area, fi_mask,
+                                                 name      = "FIT",
+                                                 long_name = "Fast Ice Thickness")
+        if name == "FIP" and fi_mask is not None:
+            return calc.compute_persistence_mask(fi_mask,
+                                                 name      = "FIP",
+                                                 long_name = "Fast Ice Persistence")
+        if name == "FIS" and fi_mask is not None and "strength" in ds:
+            return calc.compute_strength_series(aice, hi, ds["strength"], area, fi_mask,
+                                                name      = "FIS",
+                                                long_name = "Fast Ice Strength")
+        if name == "FITVR" and fi_mask is not None and "dvidtt" in ds:
+            return calc.compute_volume_rate(ds["dvidtt"], aice, area, fi_mask,
+                                            name      = "FITVR",
+                                            long_name = "Fast Ice Thermodynamic Volume Rate")
+        if name == "FIMVR" and fi_mask is not None and "dvidtd" in ds:
+            return calc.compute_volume_rate(ds["dvidtd"], aice, area, fi_mask,
+                                            name      = "FIMVR",
+                                            long_name = "Fast Ice Dynamic Volume Rate")
+
+        if name == "FITAR" and fi_mask is not None and "daidtt" in ds:
+            return calc.compute_area_rate(ds["daidtt"], area, fi_mask,
+                                          name      = "FITAR",
+                                          long_name = "Fast Ice Thermodynamic Area Rate")
+        if name == "FIMAR" and fi_mask is not None and "daidtd" in ds:
+            return calc.compute_area_rate(ds["daidtd"], area, fi_mask,
+                                          name      = "FIMAR",
+                                          long_name = "Fast Ice Dynamic Area Rate")
+        #-----------------------------------------------------------------------------------
+        # pack ice (primaries)
+        #----------------------------------------------------------------------------------
+        if name == "PIA" and pi_mask is not None:
             return calc.compute_area_series(
                 aice,
                 area,
-                fi_mask,
-                name="FIA",
-                long_name="Fast Ice Area",
+                pi_mask,
+                name="PIA",
+                long_name="Pack Ice Area",
                 scale=ctx.area_scale,
             )
-
-        if name == "FIV" and fi_mask is not None:
+        if name == "PIV" and pi_mask is not None:
             return calc.compute_volume_series(
                 aice,
                 hi,
                 area,
-                fi_mask,
-                name="FIV",
-                long_name="Fast Ice Volume",
+                pi_mask,
+                name="PIV",
+                long_name="Pack Ice Volume",
                 scale=ctx.volume_scale,
             )
-
-        if name == "FIT" and fi_mask is not None:
+        if name == "PIT" and pi_mask is not None:
             return calc.compute_thickness_series(
                 aice,
                 hi,
                 area,
-                fi_mask,
-                name="FIT",
-                long_name="Fast Ice Thickness",
+                pi_mask,
+                name="PIT",
+                long_name="Pack Ice Thickness",
             )
-
-        if name == "FIP" and fi_mask is not None:
+        if name == "PIP" and pi_mask is not None:
             return calc.compute_persistence_mask(
-                fi_mask,
-                name="FIP",
-                long_name="Fast Ice Persistence",
+                pi_mask,
+                name="PIP",
+                long_name="Pack Ice Persistence",
             )
-
-        if name == "FIS" and fi_mask is not None and "strength" in ds:
+        if name == "PIS" and pi_mask is not None and "strength" in ds:
             return calc.compute_strength_series(
                 aice,
                 hi,
                 ds["strength"],
                 area,
-                fi_mask,
-                name="FIS",
-                long_name="Fast Ice Strength",
+                pi_mask,
+                name="PIS",
+                long_name="Pack Ice Strength",
             )
-
-        if name == "FITVR" and fi_mask is not None and "dvidtt" in ds:
+        if name == "PITVR" and pi_mask is not None and "dvidtt" in ds:
             return calc.compute_volume_rate(
                 ds["dvidtt"],
                 aice,
                 area,
-                fi_mask,
-                name="FITVR",
-                long_name="Fast Ice Thermodynamic Volume Rate",
+                pi_mask,
+                name="PITVR",
+                long_name="Pack Ice Thermodynamic Volume Rate",
             )
-
-        if name == "FIMVR" and fi_mask is not None and "dvidtd" in ds:
+        if name == "PIMVR" and pi_mask is not None and "dvidtd" in ds:
             return calc.compute_volume_rate(
                 ds["dvidtd"],
                 aice,
                 area,
-                fi_mask,
-                name="FIMVR",
-                long_name="Fast Ice Dynamic Volume Rate",
+                pi_mask,
+                name="PIMVR",
+                long_name="Pack Ice Dynamic Volume Rate",
             )
-
-        if name == "FITAR" and fi_mask is not None and "daidtt" in ds:
+        if name == "PITAR" and pi_mask is not None and "daidtt" in ds:
             return calc.compute_area_rate(
                 ds["daidtt"],
                 area,
-                fi_mask,
-                name="FITAR",
-                long_name="Fast Ice Thermodynamic Area Rate",
+                pi_mask,
+                name="PITAR",
+                long_name="Pack Ice Thermodynamic Area Rate",
             )
-
-        if name == "FIMAR" and fi_mask is not None and "daidtd" in ds:
+        if name == "PIMAR" and pi_mask is not None and "daidtd" in ds:
             return calc.compute_area_rate(
                 ds["daidtd"],
                 area,
-                fi_mask,
-                name="FIMAR",
-                long_name="Fast Ice Dynamic Area Rate",
+                pi_mask,
+                name="PIMAR",
+                long_name="Pack Ice Dynamic Area Rate",
             )
-
+        #-----------------------------------------------------------------------------------
+        # all sea ice (primaries)
+        #----------------------------------------------------------------------------------
         if name == "SIA":
-            return calc.compute_area_series(
-                aice,
-                area,
-                None,
-                name="SIA",
-                long_name="Sea Ice Area",
-                scale=ctx.area_scale,
-            )
-
+            return calc.compute_area_series(aice, area, None,
+                                            name="SIA",
+                                            long_name="Sea Ice Area",
+                                            scale=ctx.area_scale)
         if name == "SIV":
             return calc.compute_volume_series(
                 aice,
@@ -220,7 +217,6 @@ class MetricDispatcher:
                 long_name="Sea Ice Volume",
                 scale=ctx.volume_scale,
             )
-
         if name == "SIT":
             return calc.compute_thickness_series(
                 aice,
@@ -230,14 +226,12 @@ class MetricDispatcher:
                 name="SIT",
                 long_name="Sea Ice Thickness",
             )
-
         if name == "SIP":
             return calc.compute_temporal_mean(
                 aice,
                 name="SIP",
                 long_name="Sea Ice Mean Concentration",
             )
-
         if name == "SIS" and "strength" in ds:
             return calc.compute_strength_series(
                 aice,
@@ -248,7 +242,6 @@ class MetricDispatcher:
                 name="SIS",
                 long_name="Sea Ice Strength",
             )
-
         if name == "SITVR" and "dvidtt" in ds:
             return calc.compute_volume_rate(
                 ds["dvidtt"],
@@ -258,7 +251,6 @@ class MetricDispatcher:
                 name="SITVR",
                 long_name="Sea Ice Thermodynamic Volume Rate",
             )
-
         if name == "SIMVR" and "dvidtd" in ds:
             return calc.compute_volume_rate(
                 ds["dvidtd"],
@@ -268,7 +260,6 @@ class MetricDispatcher:
                 name="SIMVR",
                 long_name="Sea Ice Dynamic Volume Rate",
             )
-
         if name == "SITAR" and "daidtt" in ds:
             return calc.compute_area_rate(
                 ds["daidtt"],
@@ -277,7 +268,6 @@ class MetricDispatcher:
                 name="SITAR",
                 long_name="Sea Ice Thermodynamic Area Rate",
             )
-
         if name == "SIMAR" and "daidtd" in ds:
             return calc.compute_area_rate(
                 ds["daidtd"],
@@ -286,21 +276,15 @@ class MetricDispatcher:
                 name="SIMAR",
                 long_name="Sea Ice Dynamic Area Rate",
             )
-
+        #-----------------------------------------------------------------------------------
+        # fast ice (spatials -- 2D)
+        #----------------------------------------------------------------------------------
         if name == "FIHI" and fi_mask is not None:
             return calc.compute_temporal_mean(
                 hi.where(fi_mask),
                 name="FIHI",
                 long_name="Fast Ice Mean Thickness",
             )
-
-        if name == "SIHI":
-            return calc.compute_temporal_mean(
-                hi.where(si_mask),
-                name="SIHI",
-                long_name="Sea Ice Mean Thickness",
-            )
-
         if name == "FIST" and fi_mask is not None and "strength" in ds:
             sfield = xr.where(
                 fi_mask & (hi > 0),
@@ -314,21 +298,6 @@ class MetricDispatcher:
                 }
             )
             return sfield
-
-        if name == "SIST" and "strength" in ds:
-            sfield = xr.where(
-                si_mask & (hi > 0),
-                ds["strength"] / hi.where(hi > 0) / 1e6,
-                np.nan,
-            ).sum(dim="time").rename("SIST")
-            sfield.attrs.update(
-                {
-                    "long_name": "Sea Ice Temporal Sum Strength",
-                    "units": "MPa",
-                }
-            )
-            return sfield
-
         if name == "FITVR_YR" and fi_mask is not None and "dvidtt" in ds:
             return calc.compute_spatial_rate_year(
                 ds["dvidtt"],
@@ -362,7 +331,78 @@ class MetricDispatcher:
                 long_name="Fast Ice Dynamic Area Rate Climatology",
                 area=area,
             )
-
+        #-----------------------------------------------------------------------------------
+        # pack ice (spatials -- 2D)
+        #----------------------------------------------------------------------------------
+        if name == "PIHI" and pi_mask is not None:
+            return calc.compute_temporal_mean(
+                hi.where(pi_mask),
+                name="PIHI",
+                long_name="Pack Ice Mean Thickness",
+            )
+        if name == "PIST" and pi_mask is not None and "strength" in ds:
+            sfield = xr.where(
+                pi_mask & (hi > 0),
+                ds["strength"] / hi.where(hi > 0) / 1e6,
+                np.nan,
+            ).sum(dim="time").rename("PIST")
+            sfield.attrs.update({
+                "long_name": "Pack Ice Temporal Sum Strength",
+                "units": "MPa",
+            })
+            return sfield
+        if name == "PITVR_YR" and pi_mask is not None and "dvidtt" in ds:
+            return calc.compute_spatial_rate_year(
+                ds["dvidtt"],
+                pi_mask,
+                name="PITVR_YR",
+                long_name="Pack Ice Thermodynamic Volume Rate Climatology",
+            )
+        if name == "PIMVR_YR" and pi_mask is not None and "dvidtd" in ds:
+            return calc.compute_spatial_rate_year(
+                ds["dvidtd"],
+                pi_mask,
+                name="PIMVR_YR",
+                long_name="Pack Ice Dynamic Volume Rate Climatology",
+            )
+        if name == "PITAR_YR" and pi_mask is not None and "daidtt" in ds:
+            return calc.compute_spatial_rate_year(
+                ds["daidtt"],
+                pi_mask,
+                name="PITAR_YR",
+                long_name="Pack Ice Thermodynamic Area Rate Climatology",
+                area=area,
+            )
+        if name == "PIMAR_YR" and pi_mask is not None and "daidtd" in ds:
+            return calc.compute_spatial_rate_year(
+                ds["daidtd"],
+                pi_mask,
+                name="PIMAR_YR",
+                long_name="Pack Ice Dynamic Area Rate Climatology",
+                area=area,
+            )
+        #-----------------------------------------------------------------------------------
+        # all sea ice (spatials -- 2D)
+        #----------------------------------------------------------------------------------
+        if name == "SIHI":
+            return calc.compute_temporal_mean(
+                hi.where(si_mask),
+                name="SIHI",
+                long_name="Sea Ice Mean Thickness",
+            )
+        if name == "SIST" and "strength" in ds:
+            sfield = xr.where(
+                si_mask & (hi > 0),
+                ds["strength"] / hi.where(hi > 0) / 1e6,
+                np.nan,
+            ).sum(dim="time").rename("SIST")
+            sfield.attrs.update(
+                {
+                    "long_name": "Sea Ice Temporal Sum Strength",
+                    "units": "MPa",
+                }
+            )
+            return sfield
         if name == "SITVR_YR" and "dvidtt" in ds:
             return calc.compute_spatial_rate_year(
                 ds["dvidtt"],
@@ -370,7 +410,6 @@ class MetricDispatcher:
                 name="SITVR_YR",
                 long_name="Sea Ice Thermodynamic Volume Rate Climatology",
             )
-
         if name == "SIMVR_YR" and "dvidtd" in ds:
             return calc.compute_spatial_rate_year(
                 ds["dvidtd"],
@@ -378,16 +417,13 @@ class MetricDispatcher:
                 name="SIMVR_YR",
                 long_name="Sea Ice Dynamic Volume Rate Climatology",
             )
-
         if name == "SITAR_YR" and "daidtt" in ds:
             return calc.compute_spatial_rate_year(
                 ds["daidtt"],
                 si_mask,
                 name="SITAR_YR",
                 long_name="Sea Ice Thermodynamic Area Rate Climatology",
-                area=area,
-            )
-
+                area=area)
         if name == "SIMAR_YR" and "daidtd" in ds:
             return calc.compute_spatial_rate_year(
                 ds["daidtd"],
@@ -396,7 +432,9 @@ class MetricDispatcher:
                 long_name="Sea Ice Dynamic Area Rate Climatology",
                 area=area,
             )
-
+        #-----------------------------------------------------------------------------------
+        # IA/IT by region for FI/PI/SI
+        #----------------------------------------------------------------------------------
         if name in {"FIA_by_region", "FIT_by_region"} and fi_mask is not None:
             fia_reg, fit_reg = calc.compute_region_series(
                 aice,
@@ -416,7 +454,23 @@ class MetricDispatcher:
                 }
             )
             return self.memo.get(name)
-
+        if name in {"PIA_by_region", "PIT_by_region"} and pi_mask is not None:
+            pia_reg, pit_reg = calc.compute_region_series(
+                aice,
+                hi,
+                area,
+                region_mask,
+                pi_mask,
+                area_name="PIA_by_region",
+                thickness_name="PIT_by_region",
+                area_long_name="Pack Ice Area by Antarctic sector",
+                thickness_long_name="Pack Ice Thickness by Antarctic sector",
+            )
+            self._remember_many({
+                "PIA_by_region": pia_reg,
+                "PIT_by_region": pit_reg,
+            })
+            return self.memo.get(name)
         if name in {"SIA_by_region", "SIT_by_region"}:
             sia_reg, sit_reg = calc.compute_region_series(
                 aice,
@@ -436,18 +490,19 @@ class MetricDispatcher:
                 }
             )
             return self.memo.get(name)
-
         return None
 
 
+def needs_classified_masks(requested: Iterable[str], fipsi_names: set[str]) -> bool:
+    """
+    Return True when requested metrics require classified FI/PI masks.
+    """
+    return any(name.startswith("FI") or name.startswith("PI")
+               or name.startswith("FIA_") or name.startswith("FIT_")
+               or name in fipsi_names for name in requested)
+
 def needs_fast_ice_mask(requested: Iterable[str], fipsi_names: set[str]) -> bool:
     """
-    Return True when the requested metric set needs FI_mask loaded.
+    Return True when the requested metric set needs mask is loaded 
     """
-    return any(
-        name.startswith("FI")
-        or name.startswith("FIA_")
-        or name.startswith("FIT_")
-        or name in fipsi_names
-        for name in requested
-    )
+    return needs_classified_masks(requested, fipsi_names)

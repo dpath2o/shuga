@@ -1,119 +1,77 @@
 from __future__ import annotations
 from collections.abc import Iterable
-CORE_FI            = ["FIA",
-                      "FIV",
-                      "FIT",
-                      "FIP",
-                      "FIS",
-                      "FITVR",
-                      "FIMVR",
-                      "FITAR",
-                      "FIMAR"]
-CORE_SI            = ["SIA",
-                      "SIV",
-                      "SIT",
-                      "SIP",
-                      "SIS",
-                      "SITVR",
-                      "SIMVR",
-                      "SITAR",
-                      "SIMAR"]
+CORE_BASE_NAMES    = ["IA",      #Ice Area
+                      "IV",      #Ice Volume
+                      "IT",      #Ice Thickness
+                      "IP",      #Ice Persistence
+                      "IS",      #Ice Strength
+                      "ITVR",    #Ice Thermodynamic Volume Rate
+                      "IMVR",    #Ice Dynamic/Mechanical Volume Rate
+                      "ITAR",    #Ice Thermodynamic Area Rate
+                      "IMAR"]    #Ice Dynamic/Mechanical Area Rate]
+CORE_FI            = [f"F{name}" for name in CORE_BASE_NAMES]
+CORE_PI            = [f"P{name}" for name in CORE_BASE_NAMES]
+CORE_SI            = [f"S{name}" for name in CORE_BASE_NAMES]
+CORES              = CORE_FI + CORE_PI + CORE_SI
 REGIONAL           = ["FIA_by_region",
                       "FIT_by_region",
+                      "PIA_by_region",
+                      "PIT_by_region",
                       "SIA_by_region",
                       "SIT_by_region"]
-SPATIAL            = ["FIHI",
-                      "FIST",
-                      "FITVR_YR",
-                      "FIMVR_YR",
-                      "FITAR_YR",
-                      "FIMAR_YR",
-                      "SIHI",
-                      "SIST",
-                      "SITVR_YR",
-                      "SIMVR_YR",
-                      "SITAR_YR",
-                      "SIMAR_YR"]
-SUMMARY            = ["FIA_max_mean",
-                      "FIA_max_std",
-                      "FIA_min_mean",
-                      "FIA_min_std",
-                      "FIA_doy_max_mean",
-                      "FIA_doy_max_std",
-                      "FIA_doy_min_mean",
-                      "FIA_doy_min_std",
-                      "FIT_max_mean",
-                      "FIT_max_std",
-                      "FIT_min_mean",
-                      "FIT_min_std",
-                      "FIT_doy_max_mean",
-                      "FIT_doy_max_std",
-                      "FIT_doy_min_mean",
-                      "FIT_doy_min_std",
-                      "SIA_max_mean",
-                      "SIA_max_std",
-                      "SIA_min_mean",
-                      "SIA_min_std",
-                      "SIA_doy_max_mean",
-                      "SIA_doy_max_std",
-                      "SIA_doy_min_mean",
-                      "SIA_doy_min_std",
-                      "SIT_max_mean",
-                      "SIT_max_std",
-                      "SIT_min_mean",
-                      "SIT_min_std",
-                      "SIT_doy_max_mean",
-                      "SIT_doy_max_std",
-                      "SIT_doy_min_mean",
-                      "SIT_doy_min_std",
-                      "FIPSI",
-                      "persistent_winter_area",
-                      "ever_winter_area",
-                      "FIA_Bias",
-                      "FIA_RMSE",
-                      "FIA_MAE",
-                      "FIA_Corr",
-                      "FIT_Bias",
-                      "FIT_RMSE",
-                      "FIT_MAE",
-                      "FIT_Corr"]
-STRESS             = ["FIKuxE_mean",
-                      "FIKuxE_abs_mean",
-                      "FIKuxE_valid_area_m2",
-                      "FIKuyE_mean",
-                      "FIKuyE_abs_mean",
-                      "FIKuyE_valid_area_m2",
-                      "FIKuxN_mean",
-                      "FIKuxN_abs_mean",
-                      "FIKuxN_valid_area_m2",
-                      "FIKuyN_mean",
-                      "FIKuyN_abs_mean",
-                      "FIKuyN_valid_area_m2",
-                      "FIKuE_mag_mean",
-                      "FIKuE_mag_abs_mean",
-                      "FIKuE_mag_valid_area_m2",
-                      "FIKuN_mag_mean",
-                      "FIKuN_mag_abs_mean",
-                      "FIKuN_mag_valid_area_m2",
-                      "SIKuxE_mean",
-                      "SIKuxE_abs_mean",
-                      "SIKuxE_valid_area_m2",
-                      "SIKuyE_mean",
-                      "SIKuyE_abs_mean",
-                      "SIKuyE_valid_area_m2",
-                      "SIKuxN_mean",
-                      "SIKuxN_abs_mean",
-                      "SIKuxN_valid_area_m2",
-                      "SIKuyN_mean",
-                      "SIKuyN_abs_mean",
-                      "SIKuyN_valid_area_m2",
-                      "SIKuE_mag_mean",
-                      "SIKuE_mag_abs_mean",
-                      "SIKuE_mag_valid_area_m2",
-                      "SIKuN_mag_mean",
-                      "SIKuN_mag_abs_mean",
-                      "SIKuN_mag_valid_area_m2"]
-DIAGS              = ["ice_speed",
+SPATIAL_BASE_NAMES = ["IHI",
+                      "IST",
+                      "ITVR_YR",
+                      "IMVR_YR",
+                      "ITAR_YR",
+                      "IMAR_YR"]
+SPATIAL_FI         = [f"F{name}" for name in SPATIAL_BASE_NAMES]
+SPATIAL_PI         = [f"P{name}" for name in SPATIAL_BASE_NAMES]
+SPATIAL_SI         = [f"S{name}" for name in SPATIAL_BASE_NAMES]
+SPATIAL            = SPATIAL_FI + SPATIAL_PI + SPATIAL_SI
+SUMMARY_BASE_NAMES = ["IA_max_mean",
+                      "IA_max_std",
+                      "IA_min_mean",
+                      "IA_min_std",
+                      "IA_doy_max_mean",
+                      "IA_doy_max_std",
+                      "IA_doy_min_mean",
+                      "IA_doy_min_std",
+                      "IT_max_mean",
+                      "IT_max_std",
+                      "IT_min_mean",
+                      "IT_min_std",
+                      "IT_doy_max_mean",
+                      "IT_doy_max_std",
+                      "IT_doy_min_mean",
+                      "IT_doy_min_std"]
+SUMMARY_FI         = [f"F{name}" for name in SUMMARY_BASE_NAMES]
+SUMMARY_PI         = [f"P{name}" for name in SUMMARY_BASE_NAMES]
+SUMMARY_SI         = [f"S{name}" for name in SUMMARY_BASE_NAMES]
+SUMMARY            = SUMMARY_FI + SUMMARY_PI + SUMMARY_SI
+STRESS_BASE_NAMES  = ["IKuxE_mean",
+                      "IKuxE_abs_mean",
+                      "IKuxE_valid_area_m2",
+                      "IKuyE_mean",
+                      "IKuyE_abs_mean",
+                      "IKuyE_valid_area_m2",
+                      "IKuxN_mean",
+                      "IKuxN_abs_mean",
+                      "IKuxN_valid_area_m2",
+                      "IKuyN_mean",
+                      "IKuyN_abs_mean",
+                      "IKuyN_valid_area_m2",
+                      "IKuE_mag_mean",
+                      "IKuE_mag_abs_mean",
+                      "IKuE_mag_valid_area_m2",
+                      "IKuN_mag_mean",
+                      "IKuN_mag_abs_mean",
+                      "IKuN_mag_valid_area_m2"]
+STRESS_FI          = [f"F{name}" for name in STRESS_BASE_NAMES]
+STRESS_PI          = [f"P{name}" for name in STRESS_BASE_NAMES]
+STRESS_SI          = [f"S{name}" for name in STRESS_BASE_NAMES]
+STRESS             = STRESS_FI + STRESS_PI + STRESS_SI
+DIAG_BASE_NAMES    = ["ice_speed",
                       "rel_ice_ocean_speed",
                       "strain_invariant",
                       "tau_air",
@@ -127,50 +85,56 @@ DIAGS              = ["ice_speed",
                       "tau_ld_est",
                       "R_ld_budget",
                       "P_ld_est"]
+FI_DIAGS           = [f"FI_{name}_mean" for name in DIAG_BASE_NAMES]
+PI_DIAGS           = [f"PI_{name}_mean" for name in DIAG_BASE_NAMES]
+SI_DIAGS           = [f"SI_{name}_mean" for name in DIAG_BASE_NAMES]
+DIAGS              = FI_DIAGS + PI_DIAGS + SI_DIAGS
+FI_SPECIFIC        = ["FIPSI",
+                      "persistent_winter_area",
+                      "ever_winter_area",
+                      "FIA_Bias",
+                      "FIA_RMSE",
+                      "FIA_MAE",
+                      "FIA_Corr",
+                      "FIT_Bias",
+                      "FIT_RMSE",
+                      "FIT_MAE",
+                      "FIT_Corr"]
 METRIC_GROUPS      = {"fi_core" : CORE_FI,
+                      "pi_core" : CORE_PI,
                       "si_core" : CORE_SI,
                       "regional": REGIONAL,
                       "spatial" : SPATIAL,
                       "summary" : SUMMARY,
                       "stress"  : STRESS,
                       "diags"   : DIAGS,
-                      "default" : CORE_FI + SPATIAL + STRESS,
+                      "default" : CORE_FI,
                       "all"     : CORE_FI + CORE_SI + REGIONAL + SPATIAL + SUMMARY + STRESS + DIAGS}
 FIPSI_NAMES        = {"FIPSI", "persistent_winter_area", "ever_winter_area"}
 FIA_SKILL_NAMES    = {"FIA_Bias", "FIA_RMSE", "FIA_MAE", "FIA_Corr"}
 FIT_SKILL_NAMES    = {"FIT_Bias", "FIT_RMSE", "FIT_MAE", "FIT_Corr"}
-FIA_SEASONAL_NAMES = {"FIA_max_mean",
-                      "FIA_max_std",
-                      "FIA_min_mean",
-                      "FIA_min_std",
-                      "FIA_doy_max_mean",
-                      "FIA_doy_max_std",
-                      "FIA_doy_min_mean",
-                      "FIA_doy_min_std"}
-FIT_SEASONAL_NAMES = {"FIT_max_mean",
-                      "FIT_max_std",
-                      "FIT_min_mean",
-                      "FIT_min_std",
-                      "FIT_doy_max_mean",
-                      "FIT_doy_max_std",
-                      "FIT_doy_min_mean",
-                      "FIT_doy_min_std"}
-SIA_SEASONAL_NAMES = {"SIA_max_mean",
-                      "SIA_max_std",
-                      "SIA_min_mean",
-                      "SIA_min_std",
-                      "SIA_doy_max_mean",
-                      "SIA_doy_max_std",
-                      "SIA_doy_min_mean",
-                      "SIA_doy_min_std"}
-SIT_SEASONAL_NAMES = {"SIT_max_mean",
-                      "SIT_max_std",
-                      "SIT_min_mean",
-                      "SIT_min_std",
-                      "SIT_doy_max_mean",
-                      "SIT_doy_max_std",
-                      "SIT_doy_min_mean",
-                      "SIT_doy_min_std"}
+IA_SEASONAL_NAMES  = {"IA_max_mean",
+                      "IA_max_std",
+                      "IA_min_mean",
+                      "IA_min_std",
+                      "IA_doy_max_mean",
+                      "IA_doy_max_std",
+                      "IA_doy_min_mean",
+                      "IA_doy_min_std"}
+FIA_SEASONAL_NAMES = [f"F{name}" for name in IA_SEASONAL_NAMES]
+PIA_SEASONAL_NAMES = [f"P{name}" for name in IA_SEASONAL_NAMES]
+SIA_SEASONAL_NAMES = [f"S{name}" for name in IA_SEASONAL_NAMES]
+IT_SEASONAL_NAMES  = {"IT_max_mean",
+                      "IT_max_std",
+                      "IT_min_mean",
+                      "IT_min_std",
+                      "IT_doy_max_mean",
+                      "IT_doy_max_std",
+                      "IT_doy_min_mean",
+                      "IT_doy_min_std"}
+FIT_SEASONAL_NAMES = [f"F{name}" for name in IT_SEASONAL_NAMES]
+PIT_SEASONAL_NAMES = [f"P{name}" for name in IT_SEASONAL_NAMES]
+SIT_SEASONAL_NAMES = [f"S{name}" for name in IT_SEASONAL_NAMES]
 
 def as_list(value: str | Iterable[str] | None) -> list[str]:
     if value is None:

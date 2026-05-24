@@ -167,6 +167,27 @@ class CICEClassifier:
     def _crop_requested_window(self, da: xr.DataArray) -> xr.DataArray:
         return da.sel(time=slice(self.run.start_date, self.run.end_date))
 
+    def _sea_ice_mask(self, aice: xr.DataArray) -> xr.DataArray:
+        """
+        Sea-ice presence mask used as the parent domain for FI/PI classification.
+        """
+        return (aice > float(self.classify.aice_thresh)).astype("bool")
+
+    def _pack_ice_mask(self, fi_mask: xr.DataArray, aice: xr.DataArray) -> xr.DataArray:
+        """
+        Pack ice is defined as sea ice that is not fast ice.
+
+        This deliberately avoids using a pure ~FI_mask complement, because that
+        would classify open ocean and invalid cells as pack ice.
+        """
+        sea_ice      = self._sea_ice_mask(aice)
+        pi_mask      = sea_ice & (~fi_mask.astype(bool))
+        pi_mask.name = "PI_mask"
+        pi_mask.attrs.update({"long_name"  : "Pack-ice mask derived as sea ice excluding fast ice",
+                              "definition" : "PI_mask = (aice > aice_thresh) & ~FI_mask",
+                              "aice_thresh": float(self.classify.aice_thresh)})
+        return pi_mask.astype("bool")
+
     def load_cice(self, methods: list[str] | tuple[str, ...] | None = None) -> xr.Dataset:
         methods     = list(methods or self.classify.methods)
         extend_days = self._required_padding_days(methods)
@@ -441,7 +462,7 @@ class CICEClassifier:
 
         Accepts either:
         - a legacy mask DataArray, or
-        - a Dataset containing FI_mask and optional classified diagnostics.
+        - a Dataset containing FI_mask and optional FI/PI classified diagnostics.
         """
         store = self.paths.classification_store(method)
         store.parent.mkdir(parents=True, exist_ok=True)
@@ -468,7 +489,7 @@ class CICEClassifier:
                 else:
                     raise KeyError(f"Classification dataset must contain FI_mask; got {list(data.data_vars)}")
             cleaned = {}
-            for name in ("FI_mask", "FI_ispd", "FI_aice"):
+            for name in ("FI_mask", "FI_ispd", "FI_aice", "PI_mask", "PI_ispd", "PI_aice"):
                 if name in data.data_vars:
                     da    = strip_to_time_coord(data[name])
                     #da    = _strip_to_classification_coords(data[name])
@@ -510,6 +531,9 @@ class CICEClassifier:
         - FI_mask : final classified fast-ice mask
         - FI_ispd : speed field actually used by the classifier, masked by FI_mask
         - FI_aice : sea-ice concentration masked by FI_mask
+        - PI_mask : pack-ice mask, defined as sea ice that is not fast ice
+        - PI_ispd : speed field used by the classifier, masked by PI_mask
+        - PI_aice : sea-ice concentration masked by PI_mask
         """
         norm = normalize_method(method)
         ds   = ds if ds is not None else self.load_cice(methods=(norm,))
@@ -533,9 +557,9 @@ class CICEClassifier:
                           & np.isfinite(speed_used)
                           & (speed_used > 0)
                           & (speed_used <= float(self.classify.ispd_thresh)))
-            mask       = (raw.astype("int16").rolling(time=self.classify.bin_window,
-                                                      center=True,
-                                                      min_periods=self.classify.bin_min_days).sum() >= self.classify.bin_min_days)
+            mask       = (raw.astype("int16").rolling(time        = self.classify.bin_window,
+                                                      center      = True,
+                                                      min_periods = self.classify.bin_min_days).sum() >= self.classify.bin_min_days)
             mask       = self._crop_requested_window(mask.astype("bool"))
             mask.attrs.update({"long_name"              : f"{self.classify.ice_type} binary-days mask",
                                "classification_method"  : "binary-days",
@@ -556,25 +580,60 @@ class CICEClassifier:
                                "roll_window"           : int(self.classify.roll_window),
                                "grid_type"             : " ".join(self.grid_selection)})
             speed_source = "rolling_mean_tgrid_speed"
+        # ------------------------------------------------------------------
+        # Fast ice
+        # ------------------------------------------------------------------
         mask.name      = "FI_mask"
-        speed_out      = self._crop_requested_window(speed_used).where(mask).astype(np.float32)
-        speed_out.name = "FI_ispd"
-        speed_out.attrs.update({"long_name"             : f"{self.classify.ice_type} speed used for classification",
-                                "units"                 : "m s-1",
-                                "classification_method" : norm,
-                                "speed_source"          : speed_source,
-                                "grid_type"             : " ".join(self.grid_selection)})
-        if norm == "rolling-mean":
-            speed_out.attrs["roll_window"] = int(self.classify.roll_window)
-        aice_out      = self._crop_requested_window(aice).where(mask).astype(np.float32)
-        aice_out.name = "FI_aice"
-        aice_out.attrs.update({"long_name"             : f"{self.classify.ice_type} sea-ice concentration",
-                               "units"                 : aice.attrs.get("units", "1"),
+        speed_crop     = self._crop_requested_window(speed_used)
+        aice_crop      = self._crop_requested_window(aice)
+        fi_speed       = speed_crop.where(mask).astype(np.float32)
+        fi_speed.name  = "FI_ispd"
+        fi_speed.attrs.update({"long_name"             : "Fast-ice speed used for classification",
+                               "units"                 : "m s-1",
                                "classification_method" : norm,
+                               "speed_source"          : speed_source,
                                "grid_type"             : " ".join(self.grid_selection)})
+        if norm == "rolling-mean":
+            fi_speed.attrs["roll_window"] = int(self.classify.roll_window)
+        fi_aice = aice_crop.where(mask).astype(np.float32)
+        fi_aice.name = "FI_aice"
+        fi_aice.attrs.update({"long_name"             : "Fast-ice sea-ice concentration",
+                              "units"                 : aice.attrs.get("units", "1"),
+                              "classification_method" : norm,
+                              "grid_type"             : " ".join(self.grid_selection)})
+        # ------------------------------------------------------------------
+        # Pack ice (sea ice excluding fast ice)
+        # ------------------------------------------------------------------
+        pi_mask = self._pack_ice_mask(mask, aice)
+        pi_mask.attrs.update({"classification_method" : norm,
+                              "source_mask"           : "FI_mask",
+                              "grid_type"             : " ".join(self.grid_selection)})
+        pi_speed = speed_crop.where(pi_mask).astype(np.float32)
+        pi_speed.name = "PI_ispd"
+        pi_speed.attrs.update({"long_name"             : "Pack-ice speed used for classification",
+                               "units"                 : "m s-1",
+                               "classification_method" : norm,
+                               "speed_source"          : speed_source,
+                               "definition"            : "PI_ispd = speed_used.where(PI_mask)",
+                               "grid_type"             : " ".join(self.grid_selection)})
+        if norm == "rolling-mean":
+            pi_speed.attrs["roll_window"] = int(self.classify.roll_window)
+        pi_aice = aice_crop.where(pi_mask).astype(np.float32)
+        pi_aice.name = "PI_aice"
+        pi_aice.attrs.update({"long_name"             : "Pack-ice sea-ice concentration",
+                              "units"                 : aice.attrs.get("units", "1"),
+                              "classification_method" : norm,
+                              "definition"            : "PI_aice = aice.where(PI_mask)",
+                              "grid_type"             : " ".join(self.grid_selection)})
+        #--------------------------------------------------------------------------
+        # let's go!!
+        #-------------------------------------------------------------------------
         return xr.Dataset({"FI_mask": mask,
-                           "FI_ispd": speed_out,
-                           "FI_aice": aice_out})
+                           "FI_ispd": fi_speed,
+                           "FI_aice": fi_aice,
+                           "PI_mask": pi_mask,
+                           "PI_ispd": pi_speed,
+                           "PI_aice": pi_aice})
 
     def run_methods(self, methods: list[str] | tuple[str, ...] | None = None, *,
                     overwrite: bool = False) -> dict[str, str]:

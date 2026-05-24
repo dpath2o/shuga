@@ -1,10 +1,24 @@
 # shuga/metrics/diagnostics.py
 from __future__ import annotations
-import numpy as np
+import numpy  as np
 import xarray as xr
+from shuga.metrics.calculations import compute_area_weighted_stress
 
 RHO_ICE_DEFAULT       = 917.0
 EPS_DEFAULT           = 1.0e-12
+DIAG_BASE_NAMES       = ["ice_speed",
+                         "rel_ice_ocean_speed",
+                         "strain_invariant",
+                         "tau_air",
+                         "tau_ocean",
+                         "tau_internal",
+                         "tau_coriolis",
+                         "tau_tilt",
+                         "ld_mag_proxy",
+                         "tau_ld_est",
+                         "R_ld_budget",
+                         "P_ld_est"]
+DIAG_PREFIXES         = ("FI", "PI", "SI")
 DIAGNOSTIC_NAMES      = ["ice_speed",
                          "rel_ice_ocean_speed",
                          "strain_invariant",
@@ -31,6 +45,44 @@ DIAGNOSTIC_INPUT_VARS = ["uvel", "vvel", "uocn", "vocn", "aice", "hi",
                          # lateral-drag edge/proxy terms
                          "KuxE", "KuxN",
                          "KuyE", "KuyN"]
+
+def prefixed_diag_names(prefix: str) -> list[str]:
+    return [f"{prefix}_{name}_mean" for name in DIAG_BASE_NAMES]
+
+def prefixed_diags_requested(requested: set[str], prefix: str | None = None) -> bool:
+    if prefix is not None:
+        return bool(set(prefixed_diag_names(prefix)) & set(requested))
+    return any(bool(set(prefixed_diag_names(pfx)) & set(requested)) for pfx in DIAG_PREFIXES)
+
+def compute_prefixed_diagnostic_dataset(*, ds: xr.Dataset, area: xr.DataArray, requested: set[str],
+                                        prefix: str,
+                                        mask: xr.DataArray | None,
+                                        rho_ice: float = RHO_ICE_DEFAULT,
+                                        eps: float = EPS_DEFAULT) -> xr.Dataset:
+    """
+    Compute area-weighted diagnostic time series for one ice-type mask.
+
+    Output names follow:
+    - FI_<base>_mean
+    - PI_<base>_mean
+    - SI_<base>_mean
+    """
+    wanted = {base: f"{prefix}_{base}_mean" for base in DIAG_BASE_NAMES if f"{prefix}_{base}_mean" in requested}
+    if not wanted:
+        return xr.Dataset()
+    base_ds = compute_diagnostic_terms(ds, requested = set(wanted), rho_ice = rho_ice, eps = eps)
+    out     = xr.Dataset()
+    for base_name, out_name in wanted.items():
+        if base_name not in base_ds:
+            continue
+        dsi       = compute_area_weighted_stress(base_ds[base_name], area, mask, base_name = f"{prefix}_{base_name}")
+        mean_name = f"{prefix}_{base_name}_mean"
+        if mean_name in dsi:
+            out[out_name] = dsi[mean_name]
+            out[out_name].attrs.update({"long_name"        : f"{prefix} area-weighted mean {base_name}",
+                                        "source_diagnostic": base_name,
+                                        "ice_mask_prefix"  : prefix})
+    return out
 
 def diagnostics_requested(requested: set[str]) -> bool:
     return bool(set(DIAGNOSTIC_NAMES) & set(requested))

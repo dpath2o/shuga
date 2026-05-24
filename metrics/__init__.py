@@ -11,7 +11,9 @@ from .secondary import attach_common_metrics_attrs
 from .diagnostics import (DIAGNOSTIC_NAMES,
                           DIAGNOSTIC_INPUT_VARS,
                           compute_diagnostic_terms,
-                          diagnostics_requested)
+                          compute_prefixed_diagnostic_dataset,
+                          prefixed_diags_requested,
+                          prefixed_diag_names,)
 __all__ = ["CICEMetrics",
            "compute_extrema_table",
            "skill_stats",
@@ -26,4 +28,6 @@ __all__ = ["CICEMetrics",
            "DIAGNOSTIC_NAMES",
            "DIAGNOSTIC_INPUT_VARS",
            "compute_diagnostic_terms",
-           "diagnostics_requested"]
+           "compute_prefixed_diagnostic_dataset",
+           "prefixed_diags_requested",
+           "prefixed_diag_names"]

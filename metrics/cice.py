@@ -12,21 +12,14 @@ from shuga.core.regions    import ANTARCTIC_8_REGIONS
 from shuga.core.types      import ClassificationSpec, MetricsSpec, RunSpec
 from shuga.io.zarr_loading import load_cice, load_classified
 from shuga.io.zarr_writing import sanitise_for_zarr_write
-from shuga.metrics.registry import (CORE_FI,
-                                    CORE_SI,
-                                    REGIONAL,
-                                    SPATIAL,
-                                    SUMMARY,
-                                    STRESS,
-                                    DIAGS,
+from shuga.metrics.registry import (CORE_FI, CORE_SI, CORE_PI,
+                                    REGIONAL, SPATIAL, SUMMARY, STRESS, DIAGS,
                                     METRIC_GROUPS,
                                     FIPSI_NAMES,
-                                    FIA_SKILL_NAMES,
-                                    FIT_SKILL_NAMES,
-                                    FIA_SEASONAL_NAMES,
-                                    FIT_SEASONAL_NAMES,
-                                    SIA_SEASONAL_NAMES,
-                                    SIT_SEASONAL_NAMES,
+                                    FIA_SKILL_NAMES, FIT_SKILL_NAMES,
+                                    FIA_SEASONAL_NAMES, FIT_SEASONAL_NAMES,
+                                    PIA_SEASONAL_NAMES, PIT_SEASONAL_NAMES,
+                                    SIA_SEASONAL_NAMES, SIT_SEASONAL_NAMES,
                                     expand_metric_names)
 from shuga.metrics.skill import skill_stats
 from shuga.metrics.temporal import (month_window_bounds,
@@ -57,7 +50,7 @@ from shuga.metrics.dispatch import (MetricDispatchContext,
                                     MetricDispatcher,
                                     PRIMARY_METRIC_NAMES,
                                     PRIMARY_METRIC_SET,
-                                    needs_fast_ice_mask)
+                                    needs_classified_masks)
 from shuga.metrics.stress import (compute_stress_dataset,
                                   stress_requested)
 from shuga.metrics.secondary import (attach_common_metrics_attrs,
@@ -65,8 +58,8 @@ from shuga.metrics.secondary import (attach_common_metrics_attrs,
                                      compute_obs_skill_dataset,
                                      compute_seasonal_summary_dataset)
 from shuga.metrics.diagnostics import (DIAGNOSTIC_INPUT_VARS,
-                                       compute_diagnostic_terms,
-                                       diagnostics_requested)
+                                       compute_prefixed_diagnostic_dataset,
+                                       prefixed_diags_requested)
 
 """
 Incremental CICE metrics builder for fast-ice and sea-ice diagnostics.
@@ -164,6 +157,8 @@ class CICEMetrics:
     FIT_SKILL_NAMES    = FIT_SKILL_NAMES
     FIA_SEASONAL_NAMES = FIA_SEASONAL_NAMES
     FIT_SEASONAL_NAMES = FIT_SEASONAL_NAMES
+    PIA_SEASONAL_NAMES = PIA_SEASONAL_NAMES
+    PIT_SEASONAL_NAMES = PIT_SEASONAL_NAMES
     SIA_SEASONAL_NAMES = SIA_SEASONAL_NAMES
     SIT_SEASONAL_NAMES = SIT_SEASONAL_NAMES
 
@@ -346,7 +341,7 @@ class CICEMetrics:
                                                            classification = norm,
                                                            dt0_str        = self.run.start_date,
                                                            dtN_str        = self.run.end_date,
-                                                           variables      = "FI_mask",
+                                                           variables      = ["FI_mask","PI_mask"],
                                                            hemisphere     = self.run.hemisphere,
                                                            chunks         = self.chunks)
         return self._classified_cache[norm]
@@ -405,18 +400,40 @@ class CICEMetrics:
         area          = self._ensure_2d_static(ds["tarea"])
         lon, lat      = self._detect_lonlat(ds)
         regional_mask = self._region_mask(area, lon, lat)
-        need_fi       = needs_fast_ice_mask(requested, self.FIPSI_NAMES)
-        ds_mask       = self._get_classified(method) if need_fi else None
-        fi_mask       = ds_mask["FI_mask"].astype(bool) if ds_mask is not None else None
+        # need_fi       = needs_fast_ice_mask(requested, self.FIPSI_NAMES)
+        # ds_mask       = self._get_classified(method) if need_fi else None
+        # fi_mask       = ds_mask["FI_mask"].astype(bool) if ds_mask is not None else None
+        # if fi_mask is not None:
+        #     aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
+        # si_mask = self._si_mask(aice)
+        need_masks = needs_classified_masks(requested, self.FIPSI_NAMES)
+        ds_mask    = self._get_classified(method) if need_masks else None
+        fi_mask    = None
+        pi_mask    = None
+        if ds_mask is not None and "FI_mask" in ds_mask:
+            fi_mask = ds_mask["FI_mask"].astype(bool)
+        if ds_mask is not None and "PI_mask" in ds_mask:
+            pi_mask = ds_mask["PI_mask"].astype(bool)
         if fi_mask is not None:
             aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
         si_mask = self._si_mask(aice)
+        if pi_mask is not None:
+            aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
+        elif fi_mask is not None:
+            # Backward-compatible fallback for older classification stores that only
+            # contain FI_mask.
+            pi_mask      = (si_mask & (~fi_mask)).astype(bool)
+            pi_mask.name = "PI_mask"
+            pi_mask.attrs.update({"long_name" : "Derived pack-ice mask",
+                                  "definition": "PI_mask = SI_mask & ~FI_mask",
+                                  "fallback"  : "Derived in metrics because PI_mask was absent from classification store."})
         ctx     = MetricDispatchContext(ds           = ds,
                                         aice         = aice,
                                         hi           = hi,
                                         area         = area,
                                         region_mask  = regional_mask,
                                         fi_mask      = fi_mask,
+                                        pi_mask      = pi_mask,
                                         si_mask      = si_mask,
                                         area_scale   = self.metrics.area_scale,
                                         volume_scale = self.metrics.volume_scale)
@@ -437,15 +454,17 @@ class CICEMetrics:
         # Seasonal scalar summaries derived from primary 1-D series.
         # ------------------------------------------------------------------
         seasonal_requests = {"FIA": self.FIA_SEASONAL_NAMES,
-                             "FIT": self.FIT_SEASONAL_NAMES,
-                             "SIA": self.SIA_SEASONAL_NAMES,
-                             "SIT": self.SIT_SEASONAL_NAMES}
-        seasonal_ds = compute_seasonal_summary_dataset(requested                = requested,
-                                                       dispatcher               = dispatcher,
-                                                       output                   = out,
-                                                       seasonal_requests        = seasonal_requests,
-                                                       compute_seasonal_summary = self.compute_seasonal_summary)
-        out = xr.merge([out, seasonal_ds], compat="override")
+                            "FIT": self.FIT_SEASONAL_NAMES,
+                            "PIA": self.PIA_SEASONAL_NAMES,
+                            "PIT": self.PIT_SEASONAL_NAMES,
+                            "SIA": self.SIA_SEASONAL_NAMES,
+                            "SIT": self.SIT_SEASONAL_NAMES}
+        seasonal_ds       = compute_seasonal_summary_dataset(requested                = requested,
+                                                             dispatcher               = dispatcher,
+                                                             output                   = out,
+                                                             seasonal_requests        = seasonal_requests,
+                                                             compute_seasonal_summary = self.compute_seasonal_summary)
+        out               = xr.merge([out, seasonal_ds], compat="override")
         # ------------------------------------------------------------------
         # Persistence-stability diagnostics.
         # ------------------------------------------------------------------
@@ -454,7 +473,7 @@ class CICEMetrics:
                                          fi_mask=fi_mask,
                                          area=area,
                                          persistence_stability_index=self.persistence_stability_index)
-        out = xr.merge([out, fipsi_ds], compat="override")
+        out      = xr.merge([out, fipsi_ds], compat="override")
         # ------------------------------------------------------------------
         # Observation skill diagnostics.
         # ------------------------------------------------------------------
@@ -464,7 +483,7 @@ class CICEMetrics:
                                              fia_skill_names   = self.FIA_SKILL_NAMES,
                                              fit_skill_names   = self.FIT_SKILL_NAMES,
                                              obs_skill_dataset = self._obs_skill_dataset)
-        out = xr.merge([out, skill_ds], compat="override")
+        out      = xr.merge([out, skill_ds], compat="override")
         # ------------------------------------------------------------------
         # Stress diagnostics.
         # ------------------------------------------------------------------
@@ -475,7 +494,15 @@ class CICEMetrics:
                                                prefix     = "FI",
                                                mask       = fi_mask,
                                                calculator = self.compute_area_weighted_stress)
-            out = xr.merge([out, stress_ds], compat="override")
+            out       = xr.merge([out, stress_ds], compat="override")
+        if stress_requested(requested, "PI") and pi_mask is not None:
+            stress_ds = compute_stress_dataset(ds         = ds,
+                                               area       = area,
+                                               requested  = requested,
+                                               prefix     = "PI",
+                                               mask       = pi_mask,
+                                               calculator = self.compute_area_weighted_stress)
+            out       = xr.merge([out, stress_ds], compat="override")
         if stress_requested(requested, "SI"):
             stress_ds = compute_stress_dataset(ds         =ds,
                                                area       = area,
@@ -483,13 +510,31 @@ class CICEMetrics:
                                                prefix     = "SI",
                                                mask       = si_mask,
                                                calculator = self.compute_area_weighted_stress)
-            out = xr.merge([out, stress_ds], compat="override")
+            out       = xr.merge([out, stress_ds], compat="override")
         # ------------------------------------------------------------------
         # Dynamic / lateral-drag diagnostic fields.
         # ------------------------------------------------------------------
-        if diagnostics_requested(requested):
-            diag_ds = compute_diagnostic_terms(ds, requested=requested)
+        if prefixed_diags_requested(requested, "FI") and fi_mask is not None:
+            diag_ds = compute_prefixed_diagnostic_dataset(ds        = ds,
+                                                          area      = area,
+                                                          requested = requested,
+                                                          prefix    = "FI",
+                                                          mask      = fi_mask)
             out     = xr.merge([out, diag_ds], compat="override")
+        if prefixed_diags_requested(requested, "PI") and pi_mask is not None:
+            diag_ds = compute_prefixed_diagnostic_dataset(ds        = ds,
+                                                          area      = area,
+                                                          requested = requested,
+                                                          prefix    = "PI",
+                                                          mask      = pi_mask)
+            out     = xr.merge([out, diag_ds], compat="override")
+        if prefixed_diags_requested(requested, "SI"):
+            diag_ds = compute_prefixed_diagnostic_dataset(ds        = ds,
+                                                          area      = area,
+                                                          requested = requested,
+                                                          prefix    = "SI",
+                                                          mask      = si_mask)
+            out = xr.merge([out, diag_ds], compat="override")
         # ------------------------------------------------------------------
         # Common output metadata.
         # ------------------------------------------------------------------
