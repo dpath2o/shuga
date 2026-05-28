@@ -14,21 +14,21 @@ from .types      import (ClassificationSpec,
 
 @dataclass(slots=True)
 class ShugaPaths:
-    run: RunSpec
-    classify: ClassificationSpec
-    metrics: MetricsSpec | None = None
-    plotting: PlottingSpec | None = None
-    observations: ObservationSpec | None = None
-    wave_forcing: WaveForcingSpec | None = None
-    cice_grid: CICEGridSpec | None = None
-    lateral_drag: LateralDragSpec | None = None
-    afim_output_root: str | Path | None = None
-    graphics_root: str | Path | None = None
-    logs_root: str | Path | None = None
-    cice_store: str | Path | None = None
-    static_store: str | Path | None = None
+    run                : RunSpec
+    classify           : ClassificationSpec
+    metrics            : MetricsSpec | None = None
+    plotting           : PlottingSpec | None = None
+    observations       : ObservationSpec | None = None
+    wave_forcing       : WaveForcingSpec | None = None
+    cice_grid          : CICEGridSpec | None = None
+    lateral_drag       : LateralDragSpec | None = None
+    afim_output_root   : str | Path | None = None
+    graphics_root      : str | Path | None = None
+    logs_root          : str | Path | None = None
+    cice_store         : str | Path | None = None
+    static_store       : str | Path | None = None
     classification_root: str | Path | None = None
-    archive_root: str | Path | None = None
+    archive_root       : str | Path | None = None
 
     @property
     def analysis_zarr_root_path(self) -> Path:
@@ -134,33 +134,6 @@ class ShugaPaths:
             raise ValueError(f"Unsupported hemisphere={value!r}. Use SH/NH or south/north.")
         return mapping[token]
 
-    def fip_plot_path(self, classification: str, *,
-                      region    : str = "total",
-                      sim_name  : str | None = None,
-                      start_date: str | None = None,
-                      end_date  : str | None = None) -> Path:
-        """
-        Return output path for a fast-ice persistence (FIP) plot.
-
-        Parameters
-        ----------
-        classification : str
-            Classification / method name, e.g. 'binary-days' or 'rolling-mean'.
-        region : str, default 'total'
-            Region key used in the graphical output tree.
-        sim_name : str, optional
-            Simulation name override. Defaults to self.run.sim_name.
-        start_date : str, optional
-            Plot start date override. Defaults to self.run.start_date.
-        end_date : str, optional
-            Plot end date override. Defaults to self.run.end_date.
-        """
-        norm   = normalize_method(classification)
-        sim    = sim_name or self.run.sim_name
-        dt0    = start_date or self.run.start_date
-        dtN    = end_date or self.run.end_date
-        return (Path(self.graphical_root) / sim / region / "FIP" / f"{dt0}_{dtN}_{sim}_FIP_{norm.replace('-', '_')}.png")
-
     @property
     def hemisphere(self) -> str:
         return self.canonical_hemisphere(self.run.hemisphere)
@@ -185,21 +158,11 @@ class ShugaPaths:
             return Path(self.archive_root).expanduser()
         return Path.home() / "AFIM_archive" / self.run.sim_name
 
-    # @property
-    # def classification_root_path(self) -> Path:
-    #     if self.classification_root is not None:
-    #         return Path(self.classification_root).expanduser()
-    #     return (self.zarr_root
-    #             / self.hemisphere
-    #             / f"ispd_thresh_{threshold_tag_dir(self.classify.ispd_thresh)}"
-    #             / self.classify.ice_type
-    #             / self.classify.grid_type)
-
     @property
     def graphics_root_path(self) -> Path:
         if self.graphics_root is not None:
             return Path(self.graphics_root).expanduser()
-        return Path(f"/g/data/{self.run.project}/{self.run.user}/GRAPHICAL/AFIM")
+        return Path(f"/g/data/{self.run.project}/{self.run.user}/GRAPHICAL")
 
     @property
     def logs_root_path(self) -> Path:
@@ -313,18 +276,6 @@ class ShugaPaths:
                 return candidate
         return None
 
-    # def classification_store(self, method: str) -> Path:
-    #     return self.classification_root_path / method_dirname(method,
-    #                                                           bin_window   = self.classify.bin_window,
-    #                                                           bin_min_days = self.classify.bin_min_days,
-    #                                                           roll_window  = self.classify.roll_window) / "data.zarr"
-
-    # def metrics_store(self, method: str) -> Path:
-    #     return self.classification_root_path / method_dirname(method,
-    #                                                           bin_window   = self.classify.bin_window,
-    #                                                           bin_min_days = self.classify.bin_min_days,
-    #                                                           roll_window  = self.classify.roll_window) / "mets.zarr"
-
     # backward-compatible aliases for newer callers
     def resolve_class_store(self, method: str) -> Path:
         return self.classification_store(method)
@@ -352,6 +303,37 @@ class ShugaPaths:
         for part in parts[1:]:
             path = path / part
         return path
+
+    def fip_plot_path(self, classification: str, *,
+                      region    : str = "total",
+                      sim_name  : str | None = None,
+                      start_date: str | None = None,
+                      end_date  : str | None = None) -> Path:
+        """
+        Return output path for a fast-ice persistence (FIP) plot.
+
+        Parameters
+        ----------
+        classification : str
+            Classification / method name, e.g. 'binary-days' or 'rolling-mean'.
+        region : str, default 'total'
+            Region key used in the graphical output tree.
+        sim_name : str, optional
+            Simulation name override. Defaults to self.run.sim_name.
+        start_date : str, optional
+            Plot start date override. Defaults to self.run.start_date.
+        end_date : str, optional
+            Plot end date override. Defaults to self.run.end_date.
+        """
+        norm   = normalize_method(classification)
+        sim    = sim_name or self.run.sim_name
+        dt0    = start_date or self.run.start_date
+        dtN    = end_date or self.run.end_date
+        return (Path(self.graphical_root) / sim / region / "FIP" / f"{dt0}_{dtN}_{sim}_FIP_{norm.replace('-', '_')}.png")
+
+    def fip_cmap(self) -> str:
+        D_graph = self.graphics_root_path()
+        return (D_graph / "CPTs" / "AF2020_YlGnBu.cpt")
 
     def timeseries_plot_path(self, variable: str, method: str, region: str = "total") -> Path:
         method_part = method_slug(method)

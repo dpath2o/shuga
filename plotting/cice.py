@@ -679,6 +679,8 @@ class CICEPlotter:
                                                                          "1.2p,cyan4",
                                                                          "1.2p,magenta"),
                               legend_position : str                   = "JTR+jTR+o0.2c",
+                              legend_placement: str                   = "BR", # TL, BL, TC, etc.
+                              legend_width    : str                   = "5cm", # if none then one column
                               show            : bool                  = False, *,
                               dt0_str         : str | None            = None,
                               dtN_str         : str | None            = None,
@@ -773,6 +775,7 @@ class CICEPlotter:
                                                          dtN_str     = plot_dtN.strftime("%Y-%m-%d"))
         else:
             path = Path(output_path)
+        self.logger.info(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         fig       = pygmt.Figure()
         title_str = title or (f"{var} {region_key} ({norm})" if region_key != "total" else f"{var} ({norm})")
@@ -781,7 +784,7 @@ class CICEPlotter:
             fig.plot(x=obs_df["time"], y=obs_df["value"], pen=obs_pen, label="F2020")
         for srec in series_list:
             fig.plot(x=srec["df"]["time"], y=srec["df"]["value"], pen=srec["pen"], label=srec["label"])
-        fig.legend(position=legend_position, box="+gwhite+p0.5p")
+        fig.legend(position=legend_position, box="+gwhite+p0.5p") #legend_position old: "JTR+jTR+o0.2c"
         fig.savefig(path)
         if show:
             fig.show()
