@@ -1,0 +1,90 @@
+#!/bin/bash
+#PBS -N regrid-ERA5-xesmf
+#PBS -P jk72
+#PBS -q normal
+#PBS -l ncpus=28
+#PBS -l mem=190GB
+#PBS -l jobfs=10GB
+#PBS -l walltime=02:00:00
+#PBS -l storage=gdata/gv90+gdata/rt52+scratch/gv90+gdata/xp65
+#PBS -j oe
+#PBS -M daniel.atwater@utas.edu.au
+#PBS -m abe
+
+set -euo pipefail
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+cd /home/581/da1339/AFIM/src/mawsons-chest/shuga/scripts/forcing
+
+YEAR="${YEAR:?YEAR not set}"
+MONTH="${MONTH:?MONTH not set}"
+INCLUDE_BL="${INCLUDE_BL:-0}"
+OVERWRITE="${OVERWRITE:-0}"
+REGRID_METHOD="${REGRID_METHOD:-bilinear}"
+EXTRAP_METHOD="${EXTRAP_METHOD:-nearest_s2d}"
+REBUILD_WEIGHTS="${REBUILD_WEIGHTS:-0}"
+CICE_GRID_FILE="${CICE_GRID_FILE:-}"
+WEIGHT_FILE="${WEIGHT_FILE:-}"
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+# Keep temporary/spill files off /home and preferably on node-local jobfs.
+export TMPDIR="${PBS_JOBFS:-/tmp}"
+export DASK_TEMPORARY_DIRECTORY="${PBS_JOBFS:-/tmp}"
+
+echo "============================================================"
+echo "ERA5 -> CICE monthly forcing regrid"
+echo "Host        : $(hostname)"
+echo "Date        : $(date)"
+echo "PBS job id  : ${PBS_JOBID:-unknown}"
+echo "Project     : ${PROJECT:-jk72}"
+echo "Queue       : hugemembw"
+echo "NCPUS       : ${PBS_NCPUS:-28}"
+echo "MEM         : 1020GB"
+echo "JOBFS       : ${PBS_JOBFS:-unset}"
+echo "YEAR        : ${YEAR}"
+echo "MONTH       : ${MONTH}"
+echo "INCLUDE_BL  : ${INCLUDE_BL}"
+echo "OVERWRITE   : ${OVERWRITE}"
+echo "ReG_METHOD  : ${REGRID_METHOD}"
+echo "Ext_METHOD  : ${EXTRAP_METHOD}"
+echo "GRD_FILE    : ${CICE_GRID_FILE:-shuga.core.paths default}"
+echo "WEIGHT_FILE : ${WEIGHT_FILE:-auto-derived}"
+echo "TMPDIR      : ${TMPDIR}"
+echo "============================================================"
+
+args=(--year "${YEAR}"
+      --month "${MONTH}"
+      --log-level INFO
+      --regrid-method "${REGRID_METHOD}"
+      --extrap-method "${EXTRAP_METHOD}")
+
+if [[ "${INCLUDE_BL}" == "1" ]]; then
+  args+=(--include-boundary-layer)
+fi
+
+if [[ "${OVERWRITE}" == "1" ]]; then
+  args+=(--overwrite)
+fi
+
+if [[ -n "${CICE_GRID_FILE}" ]]; then
+    args+=(--cice-grid-file "${CICE_GRID_FILE}")
+fi
+
+if [[ -n "${WEIGHT_FILE}" ]]; then
+    args+=(--weight-file "${WEIGHT_FILE}")
+fi
+
+if [[ "${REBUILD_WEIGHTS}" == "1" ]]; then
+    args+=(--rebuild-weights)
+fi
+
+python ./build_era5_cice_month.py "${args[@]}"
+
+echo "Finished at $(date)"

@@ -290,10 +290,10 @@ class MetricDispatcher:
                 fi_mask & (hi > 0),
                 ds["strength"] / hi.where(hi > 0) / 1e6,
                 np.nan,
-            ).sum(dim="time").rename("FIST")
+            ).mean(dim="time", skipna=True).rename("FIST")
             sfield.attrs.update(
                 {
-                    "long_name": "Fast Ice Temporal Sum Strength",
+                    "long_name": "Fast Ice Mean Strength",
                     "units": "MPa",
                 }
             )

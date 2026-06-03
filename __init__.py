@@ -1,4 +1,5 @@
 """shuga: Antarctic fast-ice classification, metrics, plotting, and observations workflows for CICE Zarr output."""
+from .                     import configs, loaders, regions
 from .core.types           import (RunSpec,
                                    ClassificationSpec,
                                    MetricsSpec,
@@ -19,7 +20,10 @@ from .plotting             import CICEPlotter
 from .observations         import SeaIceObservations
 from .core.reporting       import report_sim_status
 from .io                   import IceHistoryLoader, load_ice_history, load_cice, load_classified, load_metrics, open_cice_history
-__all__     = [# configurations
+__all__     = ["configs",
+               "loaders",
+               "regions",
+               # configurations
                "RunSpec",
                "ClassificationSpec",
                "MetricsSpec",

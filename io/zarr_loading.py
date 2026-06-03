@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import xarray as xr
+from shuga.core.context import get_current_context
 from shuga.core.logging import resolve_logger
 from shuga.core.naming import normalize_method
 from shuga.core.paths import ShugaPaths
@@ -28,6 +29,24 @@ Implementation ownership:
 
 _CANONICAL_METHODS = ("raw", "binary-days", "rolling-mean")
 LOGGER             = resolve_logger(None, name="shuga.io.zarr_loading")
+
+def _with_current_context(run, classify, metrics, plotting, observations, paths, chunks):
+    """
+    Fill missing loader arguments from the active shuga context.
+
+    Explicit arguments passed to the loader always win over the context.
+    """
+    ctx = get_current_context()
+    return (
+        run if run is not None else ctx.run,
+        classify if classify is not None else ctx.classify,
+        metrics if metrics is not None else ctx.metrics,
+        plotting if plotting is not None else ctx.plotting,
+        observations if observations is not None else ctx.observations,
+        paths if paths is not None else ctx.paths,
+        chunks if chunks is not None else ctx.chunks,
+    )
+
 
 def _maybe_listify_variables(variables) -> list[str] | None:
     if variables is None:
@@ -134,7 +153,10 @@ def _resolve_classify_context(classify: ClassificationSpec | None = None, *,
                               roll_window: int | None = None) -> ClassificationSpec:
     LOGGER.info("Resolving classification context.")
     classify_eff = classify or ClassificationSpec()
-    methods      = tuple(classify_eff.methods)
+    if isinstance(classify_eff.methods, str):
+        methods = (classify_eff.methods,)
+    else:
+        methods = tuple(classify_eff.methods)
     if classification is not None:
         methods = (normalize_method(classification),)
     return replace(classify_eff,
@@ -181,7 +203,10 @@ def _build_paths(*, run: RunSpec,
 def _method_candidates(classify: ClassificationSpec, explicit_classification: str | None) -> list[str]:
     if explicit_classification is not None:
         return [normalize_method(explicit_classification)]
-    methods = tuple(classify.methods or ())
+    if isinstance(classify.methods, str):
+        methods = (classify.methods,)
+    else:
+        methods = tuple(classify.methods or ())
     if len(methods) == 1:
         return [normalize_method(methods[0])]
     if len(methods) > 1:
@@ -247,6 +272,15 @@ def load_cice(run: RunSpec | None = None, classify: ClassificationSpec | None = 
     loading, static/dynamic variable splitting, static-store merging, and final
     CICE-history variable subsetting are owned by IceHistoryLoader.
     """
+    run, classify, metrics, plotting, observations, paths, chunks = _with_current_context(
+        run,
+        classify,
+        metrics,
+        plotting,
+        observations,
+        paths,
+        chunks,
+    )
     variables_list = _maybe_listify_variables(variables)
     if variables_list is None:
         LOGGER.warning("load_cice() called with variables=None; this can be expensive for long periods.")

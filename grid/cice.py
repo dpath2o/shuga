@@ -9,16 +9,16 @@ from shuga.core.types import CICEGridSpec
 
 @dataclass(slots=True)
 class CICEGridBundle:
-    tgrid: xr.Dataset
-    ugrid: xr.Dataset | None = None
-    egrid: xr.Dataset | None = None
-    ngrid: xr.Dataset | None = None
-    mask: xr.DataArray | None = None
-    mask_mod: xr.DataArray | None = None
-    bathymetry: xr.DataArray | None = None
-    grid_kind: str = "cice"
+    tgrid      : xr.Dataset
+    ugrid      : xr.Dataset | None = None
+    egrid      : xr.Dataset | None = None
+    ngrid      : xr.Dataset | None = None
+    mask       : xr.DataArray | None = None
+    mask_mod   : xr.DataArray | None = None
+    bathymetry : xr.DataArray | None = None
+    grid_kind  : str = "cice"
     source_path: str | None = None
-    metadata: dict[str, Any] | None = None
+    metadata   : dict[str, Any] | None = None
 
 class CICEGridwork:
     """

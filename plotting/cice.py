@@ -20,6 +20,28 @@ from shuga.plotting.cawcr import plot_regridded_hs_sic_panel
 def _any_not_none(*vals) -> bool:
     return any(v is not None for v in vals)
 
+def _method_tuple(method: str | Sequence[str] | None = None,
+                  methods: str | Sequence[str] | None = None) -> tuple[str, ...] | None:
+    """
+    Normalize method/methods input.
+
+    Accepts:
+        method="binary-days"
+        methods="binary-days"
+        methods=("binary-days", "rolling-mean")
+        methods=["binary-days", "rolling-mean"]
+
+    Returns
+    -------
+    tuple[str, ...] | None
+    """
+    value = methods if methods is not None else method
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return (value,)
+    return tuple(str(v) for v in value)
+
 def compute_fip(fi_mask: xr.DataArray, *,
                 time_dim   : str  = "time",
                 name       : str  = "FIP",
@@ -93,25 +115,128 @@ def compute_fip(fi_mask: xr.DataArray, *,
 class CICEPlotter:
     """PyGMT plotting helpers for shuga classification, metrics, and observations."""
 
-    def __init__(self, run: RunSpec, classify: ClassificationSpec,
-                 metrics      : MetricsSpec | None     = None,
-                 plotting     : PlottingSpec | None    = None,
-                 observations : ObservationSpec | None = None,
-                 paths        : ShugaPaths | None      = None, *,
-                 chunks       : dict | None            = None,
-                 logger                                = None) -> None:
+    def __init__(self,
+                 run           : RunSpec            | None = None,
+                 classify      : ClassificationSpec | None = None,
+                 metrics       : MetricsSpec        | None = None,
+                 plotting      : PlottingSpec       | None = None,
+                 observations  : ObservationSpec    | None = None,
+                 paths         : ShugaPaths         | None = None, *,
+                 sim_name      : str | None = None,
+                 start_date    : str | None = None,
+                 end_date      : str | None = None,
+                 method        : str | Sequence[str] | None = None,
+                 methods       : str | Sequence[str] | None = None,
+                 ice_type      : str = "FI",
+                 hemisphere    : str = "SH",
+                 project       : str = "gv90",
+                 user          : str = "da1339",
+                 iceh_frequency: str = "daily",
+                 chunks        : dict | None = None,
+                 logger=None) -> None:
+        """
+        Construct a CICEPlotter from either full config objects or lightweight
+        scalar arguments.
+
+        Supported patterns
+        ------------------
+        Full configuration mode:
+
+            CICEPlotter(run          = RunSpec(...),
+                        classify     = ClassificationSpec(...),
+                        metrics      = MetricsSpec(...),
+                        plotting     = PlottingSpec(...),
+                        observations = ObservationSpec(...))
+
+        Lightweight mode:
+
+            CICEPlotter(sim_name   = "LD-blend-base",
+                        start_date = "2000-01-01",
+                        end_date   = "2003-12-31",
+                        ice_type   = "FI",
+                        method     = "binary-days")
+        """
+        method_tuple = _method_tuple(method=method, methods=methods)
+        if run is None:
+            missing = [name for name, value in {"sim_name": sim_name,
+                                                "start_date": start_date,
+                                                "end_date": end_date}.items() if value is None]
+            if missing:
+                raise ValueError("CICEPlotter requires either run=RunSpec(...) or the scalar "
+                                 f"arguments sim_name=..., start_date=..., end_date=.... "
+                                 f"Missing: {', '.join(missing)}")
+            run = RunSpec(sim_name       = sim_name,
+                          start_date     = start_date,
+                          end_date       = end_date,
+                          hemisphere     = hemisphere,
+                          project        = project,
+                          user           = user,
+                          iceh_frequency = iceh_frequency)
+        else:
+            # Optional scalar overrides when a RunSpec is supplied.
+            updates = {}
+            if sim_name is not None:
+                updates["sim_name"] = sim_name
+            if start_date is not None:
+                updates["start_date"] = start_date
+            if end_date is not None:
+                updates["end_date"] = end_date
+            if hemisphere is not None:
+                updates["hemisphere"] = hemisphere
+            if project is not None:
+                updates["project"] = project
+            if user is not None:
+                updates["user"] = user
+            if iceh_frequency is not None:
+                updates["iceh_frequency"] = iceh_frequency
+            if updates:
+                run = replace(run, **updates)
+        if classify is None:
+            classify_kwargs = {"ice_type": ice_type}
+            if method_tuple is not None:
+                classify_kwargs["methods"] = method_tuple
+            classify = ClassificationSpec(**classify_kwargs)
+        else:
+            updates = {}
+            if ice_type is not None:
+                updates["ice_type"] = ice_type
+            if method_tuple is not None:
+                updates["methods"] = method_tuple
+            if updates:
+                classify = replace(classify, **updates)
+        if metrics is None:
+            if method_tuple is not None:
+                metrics = MetricsSpec(methods=method_tuple)
+            else:
+                metrics = MetricsSpec()
+        elif method_tuple is not None:
+            metrics = replace(metrics, methods=method_tuple)
         self.run            = run
         self.classify       = classify
-        self.metrics        = metrics      or MetricsSpec()
-        self.plotting       = plotting     or PlottingSpec()
+        self.metrics        = metrics
+        self.plotting       = plotting or PlottingSpec()
         self.observations   = observations or ObservationSpec()
-        self.paths          = paths        or ShugaPaths(run=run, classify=classify, observations=self.observations)
-        self.chunks         = chunks       or {"time": 31}
-        self.logger         = logger       or build_file_logger("shuga.plotting", self.paths.logs_root_path / "plotting" / f"plotting_{run.sim_name}.log")
-        self.metrics_runner = CICEMetrics(run=run, classify=classify, metrics=self.metrics, paths=self.paths, chunks=self.chunks, logger=self.logger)
-        self.classifier     = CICEClassifier(run=run, classify=classify, paths=self.paths, chunks=self.chunks, logger=self.logger)
-        self.obs            = SeaIceObservations(run=run, observations=self.observations, paths=self.paths, chunks=self.chunks, logger=self.logger)
+        self.paths          = paths or ShugaPaths(run = run, classify = classify, observations = self.observations)
+        self.chunks         = chunks or {"time": 31}
+        self.logger         = logger or build_file_logger("shuga.plotting", self.paths.logs_root_path / "plotting" / f"plotting_{run.sim_name}.log")
+        self.metrics_runner = CICEMetrics(run      = run,
+                                          classify = classify,
+                                          metrics  = self.metrics,
+                                          paths    = self.paths,
+                                          chunks   = self.chunks,
+                                          logger   = self.logger)
+        self.classifier     = CICEClassifier(run      = run,
+                                             classify = classify,
+                                             paths    = self.paths,
+                                             chunks   = self.chunks,
+                                             logger   = self.logger)
+        self.obs            = SeaIceObservations(run          = run,
+                                                 observations = self.observations,
+                                                 paths        = self.paths,
+                                                 chunks       = self.chunks,
+                                                 logger       = self.logger)
 
+    # ------------------------------------------------------------
     def _require_pygmt(self):
         try:
             import pygmt

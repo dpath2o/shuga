@@ -35,7 +35,7 @@ class ClassificationSpec:
     ice_type     : str = "FI"
     grid_type    : str | Sequence[str] = "Tc"
     ispd_thresh  : float = 5e-4
-    methods      : tuple[str, ...] = ("raw", "binary-days", "rolling-mean")
+    methods      : str | Sequence[str] = ("raw", "binary-days", "rolling-mean")
     bin_window   : int = 11
     bin_min_days : int = 9
     roll_window  : int = 15
@@ -49,16 +49,22 @@ class ClassificationSpec:
     aice_thresh  : float = 0.15
     wrap_x       : bool = True
     cgrid_combine: str = "mean"
+    def __post_init__(self) -> None:
+        if isinstance(self.methods, str):
+            self.methods = (self.methods,)
+        else:
+            self.methods = tuple(self.methods)
+
     @classmethod
     def from_methods(cls, methods: Iterable[str] | None = None, **kwargs) -> "ClassificationSpec":
         obj = cls(**kwargs)
         if methods is not None:
-            obj.methods = tuple(methods)
+            obj.methods = (methods,) if isinstance(methods, str) else tuple(methods)
         return obj
 
 @dataclass(slots=True)
 class MetricsSpec:
-    methods           : tuple[str, ...] = ("binary-days", "rolling-mean")
+    methods           : str | Sequence[str] = ("binary-days", "rolling-mean")
     obs_metrics_store : str | None = None
     obs_fia_var       : str = "FIA"
     obs_fit_var       : str = "FIT"
@@ -159,4 +165,4 @@ class LateralDragSpec:
     high_res_coast_file               : str | Path | None = None
     coast_form_factors_file           : str | Path | None = None
     grounded_iceberg_form_factors_file: str | Path | None = None
-    combined_form_factors_file        : str | Path | None = None
+    combined_form_factors_file        : str | Path | None = "/g/data/gv90/da1339/coastal_drag/form_factors/ADD_high-res_cstln_v7p9_GI_CICE_free-slip.nc"
