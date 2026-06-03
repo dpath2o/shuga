@@ -1,11 +1,12 @@
 #!/bin/bash
 #PBS -N ERA5-CICE-plotting
 #PBS -P jk72
-#PBS -q normal
-#PBS -l ncpus=16
-#PBS -l mem=190GB
+#PBS -q normal          
+#PBS -l ncpus=4         
+#PBS -l mem=16GB        
 #PBS -l jobfs=1GB
 #PBS -l walltime=08:00:00
+#PBS -l storage=gdata/gv90+scratch/gv90+gdata/xp65
 #PBS -l storage=gdata/gv90+scratch/gv90+gdata/xp65
 #PBS -j oe
 #PBS -M daniel.atwater@utas.edu.au
