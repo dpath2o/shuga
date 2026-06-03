@@ -2,10 +2,10 @@
 #PBS -N regrid-ERA5-xesmf
 #PBS -P jk72
 #PBS -q normal
-#PBS -l ncpus=28
-#PBS -l mem=190GB
-#PBS -l jobfs=10GB
-#PBS -l walltime=02:00:00
+#PBS -l ncpus=16
+#PBS -l mem=130GB
+#PBS -l jobfs=1GB
+#PBS -l walltime=00:30:00
 #PBS -l storage=gdata/gv90+gdata/rt52+scratch/gv90+gdata/xp65
 #PBS -j oe
 #PBS -M daniel.atwater@utas.edu.au
@@ -21,13 +21,18 @@ cd /home/581/da1339/AFIM/src/mawsons-chest/shuga/scripts/forcing
 
 YEAR="${YEAR:?YEAR not set}"
 MONTH="${MONTH:?MONTH not set}"
-INCLUDE_BL="${INCLUDE_BL:-0}"
+INCLUDE_BL="${INCLUDE_BL:-1}"
 OVERWRITE="${OVERWRITE:-0}"
 REGRID_METHOD="${REGRID_METHOD:-bilinear}"
 EXTRAP_METHOD="${EXTRAP_METHOD:-nearest_s2d}"
 REBUILD_WEIGHTS="${REBUILD_WEIGHTS:-0}"
 CICE_GRID_FILE="${CICE_GRID_FILE:-}"
 WEIGHT_FILE="${WEIGHT_FILE:-}"
+LOG_DIR="${LOG_DIR:-/home/581/da1339/logs/forcing}"
+LOG_FILE="${LOG_FILE:-${LOG_DIR}/build_era5_cice_month_${YEAR}_${MONTH}.${PBS_JOBID:-nojobid}.log}"
+mkdir -p "${LOG_DIR}"
+PBS_STDOUT_LOG="${LOG_DIR}/pbs_regrid_era5_${YEAR}_${MONTH}.${PBS_JOBID:-nojobid}.log"
+exec > >(tee -a "${PBS_STDOUT_LOG}") 2>&1
 
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -52,6 +57,7 @@ echo "YEAR        : ${YEAR}"
 echo "MONTH       : ${MONTH}"
 echo "INCLUDE_BL  : ${INCLUDE_BL}"
 echo "OVERWRITE   : ${OVERWRITE}"
+echo "LOG_FILE    : ${LOG_FILE}"
 echo "ReG_METHOD  : ${REGRID_METHOD}"
 echo "Ext_METHOD  : ${EXTRAP_METHOD}"
 echo "GRD_FILE    : ${CICE_GRID_FILE:-shuga.core.paths default}"
@@ -62,6 +68,7 @@ echo "============================================================"
 args=(--year "${YEAR}"
       --month "${MONTH}"
       --log-level INFO
+      --log-file "${LOG_FILE}"
       --regrid-method "${REGRID_METHOD}"
       --extrap-method "${EXTRAP_METHOD}")
 
@@ -87,4 +94,72 @@ fi
 
 python ./build_era5_cice_month.py "${args[@]}"
 
+FILE=$(python ./build_era5_cice_month.py "${args[@]}")
+echo "completed python regrid and monthly building of forcing file: $(date)"
+echo "Output file : ${FILE}"
+
+FILE=$(python ./build_era5_cice_month.py "${args[@]}")
+echo "completed python regrid and monthly building of forcing file: $(date)"
+echo "Output file : ${FILE}"
+
+[[ -n "${FILE}" ]] || { echo "ERROR: python script returned no output path" >&2; exit 1; }
+
+###########################################################
+# compress file
+###########################################################
+echo "using NCO tools now to compress file"
+module load nco
+
+DEFLATE="${DEFLATE:-1}"
+CHUNKSPEC="${CHUNKSPEC:-time/1}"
+KEEP_RAW="${KEEP_RAW:-1}"
+
+indir="$(dirname "${FILE}")"
+base="$(basename "${FILE}" .nc)"
+raw="${indir}/${base}.raw.nc"
+tmp="${indir}/${base}.comp.tmp.nc"
+comp="${indir}/${base}.comp.nc"
+
+echo "============================================================"
+echo "Compress ERA5 -> CICE monthly forcing"
+echo "Date      : $(date)"
+echo "Host      : $(hostname)"
+echo "Job ID    : ${PBS_JOBID:-unknown}"
+echo "Input     : ${FILE}"
+echo "Raw backup: ${raw}"
+echo "Temp      : ${tmp}"
+echo "Compressed: ${comp}"
+echo "Deflate   : ${DEFLATE}"
+echo "Chunkspec : ${CHUNKSPEC}"
+echo "Keep raw  : ${KEEP_RAW}"
+echo "============================================================"
+
+[[ -f "${FILE}" ]] || { echo "Input file not found: ${FILE}" >&2; exit 1; }
+
+rm -f "${tmp}" "${comp}"
+echo "Input size:"
+ls -lh "${FILE}"
+
+nccopy -k nc7 -d "${DEFLATE}" -s -c "${CHUNKSPEC}" -w "${FILE}" "${tmp}"
+mv "${tmp}" "${comp}"
+
+echo "Compressed size:"
+ls -lh "${comp}"
+echo "Inspecting compressed file:"
+ncdump -k "${comp}"
+ncdump -h -s "${comp}" | head -80
+
+if [[ "${KEEP_RAW}" == "1" ]]; then
+  mv "${FILE}" "${raw}"
+  mv "${comp}" "${FILE}"
+  echo "Raw file moved to   : ${raw}"
+  echo "Compressed file installed as: ${FILE}"
+else
+  mv "${comp}" "${FILE}"
+  echo "Compressed file installed as: ${FILE}"
+  echo "Raw file overwritten."
+fi
+
+echo "Final size:"
+ls -lh "${FILE}"
 echo "Finished at $(date)"

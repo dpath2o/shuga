@@ -1,0 +1,91 @@
+#!/bin/bash
+#PBS -N ERA5-CICE-plotting
+#PBS -P jk72
+#PBS -q normal
+#PBS -l ncpus=16
+#PBS -l mem=190GB
+#PBS -l jobfs=1GB
+#PBS -l walltime=08:00:00
+#PBS -l storage=gdata/gv90+scratch/gv90+gdata/xp65
+#PBS -j oe
+#PBS -M daniel.atwater@utas.edu.au
+#PBS -m abe
+
+set -euo pipefail
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+cd /home/581/da1339/AFIM/src/mawsons-chest
+
+FILE="${FILE:?FILE not set}"
+HOURS="${HOURS:-48}"
+STRIDE="${STRIDE:-2}"
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
+# Optional. If unset, the Python script uses its default:
+# <forcing_file_parent>/figures/<forcing_file_stem>
+OUTPUT_DIR="${OUTPUT_DIR:-}"
+
+# Optional comma-separated list, e.g.
+# VARIABLES="airtmp,ttlpcp,snowfall,rainfall,blh,windgust"
+VARIABLES="${VARIABLES:-}"
+
+# Region must be comma-separated for qsub -v safety.
+# Default: circum-Antarctic / Southern Ocean view.
+REGION="${REGION:--180,180,-90,-45}"
+
+# Default south polar stereographic projection.
+PROJECTION="${PROJECTION:-S0/-90/16c}"
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+export TMPDIR="${PBS_JOBFS:-/tmp}"
+
+echo "============================================================"
+echo "ERA5 -> CICE forcing plotting"
+echo "Host        : $(hostname)"
+echo "Date        : $(date)"
+echo "PBS job id  : ${PBS_JOBID:-unknown}"
+echo "Queue       : normalbw"
+echo "NCPUS       : ${PBS_NCPUS:-4}"
+echo "FILE        : ${FILE}"
+echo "HOURS       : ${HOURS}"
+echo "STRIDE      : ${STRIDE}"
+echo "VARIABLES   : ${VARIABLES:-all time-dependent variables}"
+echo "REGION      : ${REGION}"
+echo "PROJECTION  : ${PROJECTION}"
+echo "OUTPUT_DIR  : ${OUTPUT_DIR:-script default}"
+echo "TMPDIR      : ${TMPDIR}"
+echo "============================================================"
+
+args=(
+  --file "${FILE}"
+  --hours "${HOURS}"
+  --stride "${STRIDE}"
+  "--region=${REGION}"
+  --projection "${PROJECTION}"
+  --log-level "${LOG_LEVEL}"
+)
+
+if [[ -n "${OUTPUT_DIR}" ]]; then
+  args+=(--output-dir "${OUTPUT_DIR}")
+fi
+
+if [[ -n "${VARIABLES}" ]]; then
+  IFS=',' read -ra var_array <<< "${VARIABLES}"
+  args+=(--variables)
+  for v in "${var_array[@]}"; do
+    # trim simple whitespace around comma-separated entries
+    v="$(echo "${v}" | xargs)"
+    [[ -n "${v}" ]] && args+=("${v}")
+  done
+fi
+
+python shuga/scripts/forcing/plot_era5_cice_month.py "${args[@]}"
+
+echo "Finished at $(date)"

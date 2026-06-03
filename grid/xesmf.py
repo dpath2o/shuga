@@ -27,7 +27,7 @@ def load_cice_tgrid_for_xesmf(cice_grid_file: str | Path | None = None, *, lon_t
     CICEGridwork handles CICE/MOM6 grid naming conventions and radians/degrees
     conversion. This function is only an xESMF-facing adapter.
     """
-    paths = ShugaPaths()
+    paths     = ShugaPaths()
     grid_path = paths.resolve_cice_grid_file(cice_grid_file)
     grid_spec = CICEGridSpec(lon_type = lon_type)
     gridwork  = CICEGridwork(paths = paths, grid_spec = grid_spec, logger = logger)

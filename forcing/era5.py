@@ -44,7 +44,7 @@ class ERA5Config:
     weight_filename: str | None = None
     rebuild_weights: bool = False
     output_subdir  : str = "monthly_cice6"
-    chunk_in_time  : int = 5
+    chunk_in_time  : int | None = None
     output_dtype   : str = "float32"
 
 def last_day_of_month(year: int, month: int) -> int:
@@ -85,7 +85,10 @@ def open_era5_var(cfg     : ERA5Config,
     if not path.exists():
         raise FileNotFoundError(f"Missing ERA5 file: {path}")
     LOGGER.info("Opening %s", path)
-    ds = xr.open_dataset(path, chunks={"time": cfg.chunk_in_time})
+    if cfg.chunk_in_time is None:
+        ds = xr.open_dataset(path)
+    else:
+        ds = xr.open_dataset(path, chunks={"time": cfg.chunk_in_time})
     if var_name not in ds:
         raise KeyError(f"{var_name!r} not in {path}; available={list(ds.data_vars)}")
     return ds[var_name]
@@ -189,15 +192,12 @@ def write_month(year                  : int,
     if out.exists() and not overwrite:
         LOGGER.info("Output exists; skipping %s", out)
         return out
-    ds               = build_month_dataset(cfg, year, month, include_boundary_layer=include_boundary_layer)
-    encoding         = {name: {"zlib"      : True,
-                               "complevel" : 1,
-                               "dtype"     : "float32",
-                               "chunksizes": (1, ds.dims["ny"], ds.dims["nx"])}
-                        for name in ds.data_vars if set(ds[name].dims) == {"time", "ny", "nx"}}
-    encoding["time"] = {"dtype": "float64"}
-    delayed          = ds.to_netcdf(out, mode="w", unlimited_dims=["time"], encoding = encoding, compute = False)
-    LOGGER.info("Writing %s", out)
-    with ProgressBar():
-        delayed.compute()
+    ds  = build_month_dataset(cfg, year, month, include_boundary_layer=include_boundary_layer)
+    tmp = out.with_suffix(".tmp.nc")
+    if tmp.exists():
+        tmp.unlink()
+    LOGGER.info("Writing uncompressed NetCDF: %s", tmp)
+    ds.to_netcdf(tmp, mode="w", engine="netcdf4")
+    tmp.replace(out)
+    LOGGER.info("Finished writing %s", out)
     return out
