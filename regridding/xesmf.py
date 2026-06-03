@@ -38,6 +38,30 @@ def format_era5_to_cice_weight_filename(cice_grid_file: str | Path,
     extrap    = sanitise_weight_token(extrap_method)
     return f"map_ERA5_to_{grid_stem}_{method}_{extrap}.nc"
 
+def normalise_cice_forcing_dims(da: xr.DataArray) -> xr.DataArray:
+    """
+    Normalise xESMF output dimensions to the legacy CICE forcing convention.
+
+    CICE forcing files historically use:
+        variable(time, ny, nx)
+
+    xESMF may return:
+        variable(time, nj, ni)
+
+    This function renames nj/ni -> ny/nx and keeps time first.
+    """
+    rename = {}
+    if "nj" in da.dims:
+        rename["nj"] = "ny"
+    if "ni" in da.dims:
+        rename["ni"] = "nx"
+    if rename:
+        da = da.rename(rename)
+    if "time" in da.dims:
+        spatial_dims = [d for d in da.dims if d != "time"]
+        da = da.transpose("time", *spatial_dims)
+    return da
+
 @dataclass(frozen=True)
 class XESMFRegridSpec:
     method         : str = "patch"
@@ -86,10 +110,7 @@ def regrid_dataarray_to_cice_tgrid(da       : xr.DataArray,
     """
     out      = regridder(da).astype(dtype)
     out.name = name
-    # xESMF should return dims compatible with destination grid. Keep time first.
-    if "time" in out.dims:
-        spatial_dims = [d for d in out.dims if d != "time"]
-        out = out.transpose("time", *spatial_dims)
+    out      = normalise_cice_forcing_dims(out)
     if long_name is not None:
         out.attrs["long_name"] = long_name
     elif "long_name" in da.attrs:

@@ -28,14 +28,29 @@ from shuga.regridding import (XESMFRegridSpec,
                               regrid_dataarray_to_cice_tgrid,
                               format_era5_to_cice_weight_filename)
 
-LOGGER = logging.getLogger(__name__)
+LOGGER    = logging.getLogger(__name__)
+ERA5_VARS_PRI = [("2t", "t2m", "airtmp", "2 m air temperature", "K"),
+                 ("2d", "d2m", "dewtmp", "2 m dew-point temperature", "K"),
+                 ("sp", "sp", "pair", "surface air pressure", "Pa")]
+ERA5_VARS_SEC = [("msdwlwrf", "msdwlwrf", "dlwsfc", "downward longwave radiation flux", "W/m^2"),
+                 ("msdwswrf", "msdwswrf", "glbrad", "downward shortwave radiation flux", "W/m^2"),
+                 ("mtpr", "mtpr", "ttlpcp", "total precipitation rate", "kg/m^2/s"),
+                 ("10u", "u10", "wndewd", "eastward 10 m wind", "m/s"),
+                 ("10v", "v10", "wndnwd", "northward 10 m wind", "m/s"),
+                 ("blh", "blh", "blh", "boundary layer height", "m"),
+                 ("10fg", "fg10", "windgust", "10 m wind gust since previous post-processing", "m/s"),
+                 ("100u", "u100", "wnd100ewd", "eastward 100 m wind", "m/s"),
+                 ("100v", "v100", "wnd100nwd", "northward 100 m wind", "m/s")]
+VAR_NAMES_REQ = ["airtmp", "dlwsfc", "glbrad", "ttlpcp", "wndewd", "wndnwd"]
+VAR_NAMES_SUP = ["dewtmp", "pair", "blh", "windgust", "wnd100ewd", "wnd100nwd"]
+ALL_VARS_OUT  = VAR_NAMES_REQ + VAR_NAMES_SUP
 
 @dataclass(frozen=True)
 class ERA5Config:
     user_name      : str = "da1339"
     project_name   : str = "gv90"
     grid_res       : str = "0p25"
-    regrid_method  : str = "patch"
+    regrid_method  : str = "bilinear"
     extrap_method  : str = "nearest_s2d"
     era5_root      : Path = Path("/g/data/rt52/era5/single-levels/reanalysis")
     longterm_root  : Path = Path("/g/data/gv90/da1339")
@@ -93,15 +108,7 @@ def open_era5_var(cfg     : ERA5Config,
         raise KeyError(f"{var_name!r} not in {path}; available={list(ds.data_vars)}")
     return ds[var_name]
 
-def build_month_dataset(cfg                   : ERA5Config,
-                        year                  : int,
-                        month                 : int,
-                        include_boundary_layer: bool = False) -> xr.Dataset:
-    """
-    Build one monthly CICE-ready ERA5 forcing file.
-
-    The output remains monthly. It does not concatenate to yearly NetCDF.
-    """
+def build_month_dataset(cfg : ERA5Config, year : int, month : int) -> xr.Dataset:
     grid        = load_cice_tgrid_for_xesmf(cfg.cice_grid_file, lon_type = "0-360", logger = LOGGER)
     F_G_CICE    = Path(grid.attrs["source_path"])
     F_wgt       = cfg.weight_filename or format_era5_to_cice_weight_filename(cice_grid_file = F_G_CICE,
@@ -112,26 +119,18 @@ def build_month_dataset(cfg                   : ERA5Config,
                                   weight_file     = cfg.grid_root / "weights" / F_wgt,
                                   rebuild_weights = cfg.rebuild_weights)
     t2m_src     = open_era5_var(cfg, "2t", "t2m", year, month)
-
     regridder   = build_xesmf_regridder(t2m_src, grid, regrid_spec, logger=LOGGER)
     fields: dict[str, xr.DataArray] = {}
-    # Existing core fields.
     fields["airtmp"] = regrid_dataarray_to_cice_tgrid(t2m_src, regridder, "airtmp", long_name = "2 m air temperature", units = "K", dtype = cfg.output_dtype)
-    mapping = [("msdwlwrf", "msdwlwrf", "dlwsfc", "downward longwave radiation flux", "W/m^2"),
-               ("msdwswrf", "msdwswrf", "glbrad", "downward shortwave radiation flux", "W/m^2"),
-               ("mtpr", "mtpr", "ttlpcp", "total precipitation rate", "kg/m^2/s"),
-               ("10u", "u10", "wndewd", "eastward 10 m wind", "m/s"),
-               ("10v", "v10", "wndnwd", "northward 10 m wind", "m/s")]
-    for var_dir, var_name, out_name, long_name, units in mapping:
+    for var_dir, var_name, out_name, long_name, units in ERA5_VARS_SEC:
         src              = open_era5_var(cfg, var_dir, var_name, year, month)
         fields[out_name] = regrid_dataarray_to_cice_tgrid(src, regridder, out_name, long_name = long_name, units = units, dtype = cfg.output_dtype)
     # Surface pressure retained directly for future rhoa / boundary-layer physics.
     sp_src           = open_era5_var(cfg, "sp", "sp", year, month)
-    fields["pair"]   = regrid_dataarray_to_cice_tgrid(sp_src, regridder, "pair", long_name = "surface air pressure", units = "Pa", dtype = cfg.output_dtype)
+    sp_rg            = regrid_dataarray_to_cice_tgrid(sp_src, regridder, "pair", long_name = "surface air pressure", units = "Pa", dtype = cfg.output_dtype)
     # Specific humidity derived from regridded dewpoint and pressure, matching the legacy script.
     d2m_src          = open_era5_var(cfg, "2d", "d2m", year, month)
     d2m_rg           = regrid_dataarray_to_cice_tgrid(d2m_src, regridder, name = "d2m_regridded", long_name = "2 m dewpoint temperature", units = "K" , dtype = cfg.output_dtype)
-    sp_rg            = regrid_dataarray_to_cice_tgrid(sp_src , regridder, name = "pair"         , long_name = "surface air pressure"    , units = "Pa", dtype = cfg.output_dtype)
     qair             = compute_sfc_qsat(d2m_rg, sp_rg).astype(cfg.output_dtype)
     qair.name        = "spchmd"
     qair.attrs.update(long_name="specific humidity", units="kg/kg")
@@ -139,33 +138,33 @@ def build_month_dataset(cfg                   : ERA5Config,
     fields["pair"]   = sp_rg.rename("pair")
     # Precipitation phase: prefer ERA5 mean snowfall rate if available.
     # On Gadi this is expected as "msr" / variable "msr", but keep this robust.
-    try:
-        msr_src            = open_era5_var(cfg, "msr", "msr", year, month)
-        snow               = regrid_dataarray_to_cice_tgrid(msr_src, regridder, "snowfall",  long_name = "snowfall rate", units = "kg/m^2/s", dtype = cfg.output_dtype)
-        rain               = (fields["ttlpcp"] - snow).clip(min=0.0).astype(cfg.output_dtype)
-        rain.name          = "rainfall"
-        rain.attrs.update(long_name="rainfall rate derived as ttlpcp - snowfall", units="kg/m^2/s")
-        fields["snowfall"] = snow
-        fields["rainfall"] = rain
-    except FileNotFoundError:
-        LOGGER.warning("ERA5 msr file missing for %04d-%02d; skipping snowfall/rainfall fields", year, month)
-    except KeyError:
-        LOGGER.warning("ERA5 msr variable missing for %04d-%02d; skipping snowfall/rainfall fields", year, month)
-    if include_boundary_layer:
-        optional_fields = [("blh", "blh", "blh", "boundary layer height", "m"),
-                           ("10fg", "fg10", "windgust", "10 m wind gust since previous post-processing", "m/s"),
-                           ("100u", "u100", "wnd100ewd", "eastward 100 m wind", "m/s"),
-                           ("100v", "v100", "wnd100nwd", "northward 100 m wind", "m/s")]
-        for var_dir, var_name, out_name, long_name, units in optional_fields:
-            try:
-                src              = open_era5_var(cfg, var_dir, var_name, year, month)
-                fields[out_name] = regrid_dataarray_to_cice_tgrid(src, regridder, out_name, long_name = long_name, units = units, dtype = cfg.output_dtype)
-            except (FileNotFoundError, KeyError) as exc:
-                LOGGER.warning("Skipping optional ERA5 field %s for %04d-%02d: %s", out_name, year, month, exc)
+    msr_src            = open_era5_var(cfg, "msr", "msr", year, month)
+    snow               = regrid_dataarray_to_cice_tgrid(msr_src, regridder, "snow",  long_name = "snowfall rate", units = "kg/m^2/s", dtype = cfg.output_dtype)
+    rain               = (fields["ttlpcp"] - snow).clip(min=0.0).astype(cfg.output_dtype)
+    rain.name          = "rain"
+    rain.attrs.update(long_name="rainfall rate derived as ttlpcp - snowfall", units="kg/m^2/s")
+    fields["snow"] = snow
+    fields["rain"] = rain
+    # coordinates ... likely not be necessary
+    # lon = xr.DataArray(grid["lon"].data, dims = ("ny", "nx"), name = "LON", attrs = {"units": "degrees_east"})
+    # lat = xr.DataArray(grid["lat"].data, dims = ("ny", "nx"), name = "LAT", attrs = {"units": "degrees_north"})
+    # Belt-and-braces: ensure every time-dependent forcing field uses time,ny,nx.
+    for key, da in list(fields.items()):
+        rename = {}
+        if "nj" in da.dims:
+            rename["nj"] = "ny"
+        if "ni" in da.dims:
+            rename["ni"] = "nx"
+        if rename:
+            da = da.rename(rename)
+        if "time" in da.dims:
+            da = da.transpose("time", "ny", "nx")
+        fields[key] = da
+    for key in fields:
+        if "time" in fields[key].dims:
+            fields[key].attrs["coordinates"] = "LAT LON"
     ds = xr.Dataset(data_vars = fields,
-                    coords    = {"LON": (["ny", "nx"], grid["lon"].data, {"units": "degrees_east"}),
-                                 "LAT": (["ny", "nx"], grid["lat"].data, {"units": "degrees_north"}),
-                                 "time": fields["airtmp"]["time"]},
+                    coords    = {"time": fields["airtmp"]["time"]}, # "LON" : lon, "LAT" : lat,
                     attrs     = {"creation_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                  "Conventions"  : "CCSM data model domain description",
                                  "title"        : "Monthly regridded ERA5 forcing for CICE6 standalone",
@@ -182,17 +181,17 @@ def output_path(cfg: ERA5Config, year: int, month: int) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir / f"era5_for_cice6_{year:04d}_{month:02d}.nc"
 
-def write_month(year                  : int,
-                month                 : int,
-                cfg                   : ERA5Config | None = None,
-                overwrite             : bool = False,
-                include_boundary_layer: bool = False) -> Path:
+def write_month(year : int, month : int, cfg : ERA5Config | None = None, overwrite : bool = False) -> Path:
     cfg = cfg or ERA5Config()
     out = output_path(cfg, year, month)
     if out.exists() and not overwrite:
         LOGGER.info("Output exists; skipping %s", out)
         return out
-    ds  = build_month_dataset(cfg, year, month, include_boundary_layer=include_boundary_layer)
+    ds  = build_month_dataset(cfg, year, month)
+    for v in VAR_NAMES_OUT:
+        if v in ds:
+            x = ds[v].isel(time=0)
+            print(f"{v:10s}", x.dims, float(x.min()), float(x.max()), float(x.mean()))
     tmp = out.with_suffix(".tmp.nc")
     if tmp.exists():
         tmp.unlink()

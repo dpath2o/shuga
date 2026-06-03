@@ -67,10 +67,8 @@ def main():
         logging.info("── variable: %s ──", variable)
         # Keep only this variable + coordinate arrays; drop everything else.
         # This caps RAM at  1 var × ntime × ny × nx  (a few hundred MB at most).
-        drop = [v for v in all_data_vars
-                if v not in {variable} | _COORD_VARS]
-        with xr.open_dataset(args.file, engine="netcdf4",
-                              drop_variables=drop) as var_ds:
+        drop = [v for v in all_data_vars if v not in {variable} | _COORD_VARS]
+        with xr.open_dataset(args.file, engine="netcdf4", drop_variables=drop) as var_ds:
             for i_t in range(ntime):
                 p = plotter.plot_hour(var_ds, variable, i_t,
                                       D_out      = D_out,

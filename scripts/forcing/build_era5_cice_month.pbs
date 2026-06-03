@@ -21,7 +21,6 @@ cd /home/581/da1339/AFIM/src/mawsons-chest/shuga/scripts/forcing
 
 YEAR="${YEAR:?YEAR not set}"
 MONTH="${MONTH:?MONTH not set}"
-INCLUDE_BL="${INCLUDE_BL:-1}"
 OVERWRITE="${OVERWRITE:-0}"
 REGRID_METHOD="${REGRID_METHOD:-bilinear}"
 EXTRAP_METHOD="${EXTRAP_METHOD:-nearest_s2d}"
@@ -55,7 +54,6 @@ echo "MEM         : 1020GB"
 echo "JOBFS       : ${PBS_JOBFS:-unset}"
 echo "YEAR        : ${YEAR}"
 echo "MONTH       : ${MONTH}"
-echo "INCLUDE_BL  : ${INCLUDE_BL}"
 echo "OVERWRITE   : ${OVERWRITE}"
 echo "LOG_FILE    : ${LOG_FILE}"
 echo "ReG_METHOD  : ${REGRID_METHOD}"
@@ -71,10 +69,6 @@ args=(--year "${YEAR}"
       --log-file "${LOG_FILE}"
       --regrid-method "${REGRID_METHOD}"
       --extrap-method "${EXTRAP_METHOD}")
-
-if [[ "${INCLUDE_BL}" == "1" ]]; then
-  args+=(--include-boundary-layer)
-fi
 
 if [[ "${OVERWRITE}" == "1" ]]; then
   args+=(--overwrite)

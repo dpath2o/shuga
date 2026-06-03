@@ -25,7 +25,6 @@ def parse_args():
                                                                                  "(normally /g/data/<project>/<user>/grids/ACCESS-OM3-025_Cgrid.nc)."))
     parser.add_argument("--rebuild-weights", action = "store_true", help = "Force xESMF to rebuild the regridding weights.")
     parser.add_argument("--overwrite", action = "store_true")
-    parser.add_argument("--include-boundary-layer",  action = "store_true", help = "Also try to regrid optional blh, wind gust, and 100 m winds.")
     parser.add_argument("--log-level", default = "INFO", choices = ["DEBUG", "INFO", "WARNING", "ERROR"])
     parser.add_argument("--log-file", type = Path, default = None, help = ("Path to a persistent log file. "
                                                                            "Default: ~/logs/forcing/build_era5_cice_month_YYYY_MM.log"))
@@ -41,7 +40,6 @@ def main():
     logger.info("ERA5 -> CICE monthly forcing build")
     logger.info("year                  = %04d", args.year)
     logger.info("month                 = %02d", args.month)
-    logger.info("include_boundary_layer= %s", args.include_boundary_layer)
     logger.info("overwrite             = %s", args.overwrite)
     logger.info("rebuild_weights       = %s", args.rebuild_weights)
     logger.info("regrid_method         = %s", args.regrid_method)
@@ -59,11 +57,10 @@ def main():
     if args.weight_file is not None:
         cfg_kwargs["weight_filename"] = args.weight_file
     cfg = ERA5Config(**cfg_kwargs)
-    out = write_month(year                   = args.year,
-                      month                  = args.month,
-                      cfg                    = cfg,
-                      overwrite              = args.overwrite,
-                      include_boundary_layer = args.include_boundary_layer)
+    out = write_month(year      = args.year,
+                      month     = args.month,
+                      cfg       = cfg,
+                      overwrite = args.overwrite)
     logger.info("output_file             = %s", out)
     print(out)
 

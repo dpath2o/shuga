@@ -3,7 +3,7 @@
 #PBS -P jk72
 #PBS -q normal          
 #PBS -l ncpus=4         
-#PBS -l mem=16GB        
+#PBS -l mem=190GB        
 #PBS -l jobfs=1GB
 #PBS -l walltime=08:00:00
 #PBS -l storage=gdata/gv90+scratch/gv90+gdata/xp65

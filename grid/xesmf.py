@@ -32,7 +32,7 @@ def load_cice_tgrid_for_xesmf(cice_grid_file: str | Path | None = None, *, lon_t
     grid_spec = CICEGridSpec(lon_type = lon_type)
     gridwork  = CICEGridwork(paths = paths, grid_spec = grid_spec, logger = logger)
     bundle    = gridwork.load_cice_grid(P_grid = grid_path, build_faces = False)
-    return xr.Dataset(data_vars = {"lon": bundle.tgrid["TLON"],
-                                   "lat": bundle.tgrid["TLAT"]},
-                      attrs     = {"source_path": str(grid_path),
-                                   "grid_kind"  : bundle.grid_kind})
+    lon       = xr.DataArray(bundle.tgrid["TLON"].values, dims = ("ny", "nx"), name = "lon", attrs = {"units": "degrees_east"})
+    lat       = xr.DataArray(bundle.tgrid["TLAT"].values, dims = ("ny", "nx"), name = "lat", attrs = {"units": "degrees_north"})
+    return xr.Dataset(data_vars = {"lon": lon, "lat": lat},
+                      attrs     = { "source_path" : str(grid_path), "grid_kind" : bundle.grid_kind})
