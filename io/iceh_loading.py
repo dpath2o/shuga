@@ -41,7 +41,6 @@ def _is_date_only(value: str | None) -> bool:
     s = str(value).strip()
     return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", s))
 
-
 def _time_bounds(dt0_str: str | None, dtN_str: str | None, *, frequency: str) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
     dt0 = pd.to_datetime(dt0_str) if dt0_str is not None else None
     dtN = pd.to_datetime(dtN_str) if dtN_str is not None else None
@@ -74,42 +73,34 @@ def _apply_hemisphere_mask(ds: xr.Dataset, hemisphere: str | None) -> xr.Dataset
     mask = lat < 0 if hemi == "SH" else lat > 0
     return ds.where(mask)
 
-def _split_requested_variables(variables: list[str] | None, static_store: Path | None) -> tuple[list[str] | None, list[str] | None]:
+def _split_requested_variables(variables: list[str] | None, paths: ShugaPaths, static_store: Path | None, *,
+                               chunks: dict | None = None, logger = LOGGER) -> tuple[list[str] | None, list[str] | None]:
     if variables is None:
         return None, None
     requested = list(dict.fromkeys(variables))
     static_names: set[str] = set()
-    if static_store is not None and static_store.exists():
+    ds_static = _open_static_dataset(paths, static_store, variables = None, chunks = chunks, logger = logger)
+    if ds_static is not None:
         try:
-            ds_static = xr.open_zarr(static_store, consolidated=False)
-            try:
-                static_names = set(ds_static.data_vars) | set(ds_static.coords)
-            finally:
-                ds_static.close()
-        except Exception:
-            static_names = set()
+            static_names = set(ds_static.data_vars) | set(ds_static.coords)
+            static_names.discard("time")
+            static_names.discard("time_bounds")
+        finally:
+            ds_static.close()
     static_requested  = [v for v in requested if v in static_names]
     dynamic_requested = [v for v in requested if v not in static_names]
     return dynamic_requested or None, static_requested or None
 
-def _merge_static(ds_all: xr.Dataset, static_store: Path | None, variables: list[str] | None) -> xr.Dataset:
-    if static_store is None or not static_store.exists():
+def _merge_static(ds_all: xr.Dataset, paths: ShugaPaths, static_store: Path | None, variables: list[str] | None, *,
+                  chunks: dict | None = None, logger = LOGGER) -> xr.Dataset:
+    ds_static_all = _open_static_dataset(paths, static_store, variables = variables, chunks = chunks, logger = logger)
+    if ds_static_all is None:
         return ds_all
-    ds_static_all = xr.open_zarr(static_store, consolidated=False)
-    static_name_set = set(ds_static_all.data_vars) | set(ds_static_all.coords)
-    static_name_set.discard("time")
-    static_name_set.discard("time_bounds")
-    if variables is None:
-        ds_static_use = ds_static_all
-    else:
-        ds_static_use = xr.Dataset()
-        for v in variables:
-            if v in ds_static_all.data_vars:
-                ds_static_use[v] = ds_static_all[v]
-            elif v in ds_static_all.coords:
-                ds_static_use = ds_static_use.assign_coords({v: ds_static_all.coords[v]})
-    if len(ds_static_use.data_vars) > 0 or len(ds_static_use.coords) > 0:
-        ds_all = xr.merge([ds_all, ds_static_use], compat="override", combine_attrs="override")
+    try:
+        if len(ds_static_all.data_vars) > 0 or len(ds_static_all.coords) > 0:
+            ds_all = xr.merge([ds_all, ds_static_all], compat = "override", combine_attrs = "override")
+    finally:
+        ds_static_all.close()
     return ds_all
 
 def _group_bounds(group: str, *, frequency: str) -> tuple[pd.Timestamp, pd.Timestamp]:
@@ -176,6 +167,30 @@ def _open_grouped_iceh_store(zarr_root  : Path, *,
         raise ValueError("No CICE datasets remained after filtering by time/variables.")
     return xr.concat(ds_list, dim="time", data_vars="minimal",  coords="minimal", compat="override", combine_attrs="override")
 
+def _open_static_dataset(paths: ShugaPaths, static_store: Path | None, *,
+                         variables: list[str] | None = None,
+                         chunks   : dict | None = None,
+                         logger = LOGGER) -> xr.Dataset | None:
+    """
+    Open the universal CICE static-coordinate store through CICEGridwork.
+
+    This supports both proper xarray-zarr groups and loose-array static stores.
+    """
+    try:
+        from shuga.grid.cice import CICEGridwork
+        gridwork = CICEGridwork(paths=paths, logger=logger)
+        return gridwork.load_cice_static(P_cice_static_store = static_store,
+                                         variables           = variables,
+                                         require             = (),
+                                         chunks              = chunks,
+                                         consolidated        = False,
+                                         add_aliases         = True)
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        logger.warning("Could not open CICE static store %s: %s", static_store, exc)
+        return None
+
 class IceHistoryLoader:
     """
     Frequency-aware CICE ice-history loader.
@@ -206,28 +221,32 @@ class IceHistoryLoader:
              cice_store  : str | Path | None = None,
              static_store: str | Path | None = None,
              chunks      : dict | None = None) -> xr.Dataset:
-        chunks         = chunks or self.default_chunks()
-        variables_list = _maybe_listify_variables(variables)
-        if variables_list is None:
+        chunks   = chunks or self.default_chunks()
+        var_list = _maybe_listify_variables(variables)
+        if var_list is None:
             self.logger.warning("IceHistoryLoader.load() called with variables=None; this may be expensive.")
-        zarr_root            = (Path(cice_store).expanduser() if cice_store is not None else self.paths.resolve_cice_store())
-        static_eff           = (Path(static_store).expanduser() if static_store is not None else self.paths.resolve_static_store())
-        dynamic_requested, _ = _split_requested_variables(variables_list, static_eff)
-        allow_empty_dynamic  = variables_list is not None and dynamic_requested is None
-        ds_all               = _open_grouped_iceh_store(zarr_root,
-                                                        frequency   = self.frequency,
-                                                        dt0_str     = dt0_str or self.run.start_date,
-                                                        dtN_str     = dtN_str or self.run.end_date,
-                                                        variables   = dynamic_requested,
-                                                        chunks      = chunks,
-                                                        allow_empty = allow_empty_dynamic,
-                                                        logger      = self.logger)
-        ds_all               = _merge_static(ds_all, static_eff, variables_list)
-        ds_all               = _apply_hemisphere_mask(ds_all, hemisphere or self.run.hemisphere)
-        if variables_list is not None:
-            present = [v for v in variables_list if v in ds_all.data_vars or v in ds_all.coords]
+        zarr_root         = (Path(cice_store).expanduser() if cice_store is not None else self.paths.resolve_cice_store())
+        stat_eff          = (Path(static_store).expanduser() if static_store is not None else self.paths.resolve_static_store())
+        dyn_req, stat_req = _split_requested_variables(var_list, self.paths, stat_eff, chunks = chunks, logger = self.logger)
+        only_stat_req     = var_list is not None and dyn_req is None and stat_req is not None
+        if only_stat_req:
+            ds_all = xr.Dataset()
+        else:
+            ds_all = _open_grouped_iceh_store(zarr_root,
+                                              frequency   = self.frequency,
+                                              dt0_str     = dt0_str or self.run.start_date,
+                                              dtN_str     = dtN_str or self.run.end_date,
+                                              variables   = dyn_req,
+                                              chunks      = chunks,
+                                              allow_empty = False,
+                                              logger      = self.logger)
+
+        ds_all = _merge_static(ds_all, self.paths, stat_eff, var_list, chunks = chunks, logger = self.logger)
+        ds_all = _apply_hemisphere_mask(ds_all, hemisphere or self.run.hemisphere)
+        if var_list is not None:
+            present = [v for v in var_list if v in ds_all.data_vars or v in ds_all.coords]
             if not present:
-                raise ValueError(f"None of the requested variables were found after merging static/dynamic stores: {variables_list}")
+                raise ValueError(f"None of the requested variables were found after merging static/dynamic stores: {var_list}")
             ds_all = ds_all[present]
         return ds_all
 

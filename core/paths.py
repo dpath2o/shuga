@@ -57,13 +57,9 @@ class ShugaPaths:
             self.archive_root = Path.home() / "AFIM_archive"
         else:
             self.archive_root = Path(self.archive_root).expanduser()
-        if self.static_store is None:
-            self.static_store = self.afim_output_root / "CICE_0p25_Cgrid_coords.zarr"
-        else:
+        if self.static_store is not None:
             self.static_store = Path(self.static_store).expanduser()
-        if self.classification_root is None:
-            self.classification_root = self.archive_root
-        else:
+        if self.classification_root is not None:
             self.classification_root = Path(self.classification_root).expanduser()
         if self.cice_store is not None:
             self.cice_store = Path(self.cice_store).expanduser()
@@ -81,14 +77,6 @@ class ShugaPaths:
 
     @property
     def analysis_zarr_root_path(self) -> Path:
-        """
-        Root for derived shuga products: classifications, metrics, diagnostics.
-
-        Prefer the AFIM archive tree when it already exists or when archive-driven
-        history is present. Otherwise fall back to the normal afim_output tree.
-        """
-        if self.afim_output_root is not None:
-            return self.zarr_root
         archive_target = self.archive_zarr_root_path
         archive_history = self.archive_root_path / "history"
         if archive_target.exists() or archive_history.exists():
@@ -130,10 +118,12 @@ class ShugaPaths:
 
     @property
     def output_root(self) -> Path:
-        if self.afim_output_root is not None:
-            return Path(self.afim_output_root).expanduser()
-        run = self._require_run("output_root")
-        return Path(f"/g/data/{run.project}/{run.user}/afim_output/{run.sim_name}")
+        base = Path(self.afim_output_root).expanduser() if self.afim_output_root is not None else Path(f"/g/data/{self._project}/{self._user}/afim_output")
+        if self.run is None:
+            return base
+        if base.name == self.run.sim_name:
+            return base
+        return base / self.run.sim_name
 
     @property
     def zarr_root(self) -> Path:
@@ -145,10 +135,12 @@ class ShugaPaths:
 
     @property
     def archive_root_path(self) -> Path:
-        if self.archive_root is not None:
-            return Path(self.archive_root).expanduser()
-        run = self._require_run("archive_root_path")
-        return Path.home() / "AFIM_archive" / run.sim_name
+        base = Path(self.archive_root).expanduser() if self.archive_root is not None else Path.home() / "AFIM_archive"
+        if self.run is None:
+            return base
+        if base.name == self.run.sim_name:
+            return base
+        return base / self.run.sim_name
 
     @property
     def default_cice_static_store_path(self) -> Path:

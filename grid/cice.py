@@ -352,6 +352,52 @@ class CICEGridwork:
             self._grid_bundle = bundle
         return bundle
 
+    def _open_loose_static_zarr_arrays(self, P_: Path, *, chunks: dict | None = None) -> xr.Dataset:
+        """
+        Open a directory containing loose per-variable zarr arrays but no root zarr group.
+
+        This handles stores that look like:
+
+            CICE_0p25_Cgrid_coords.zarr/
+                TLON/
+                TLAT/
+                tarea/
+                ...
+
+        rather than a proper xarray Dataset zarr store with root .zgroup/zarr.json.
+        """
+        import dask.array as da
+        var_dirs = sorted([p for p in P_.iterdir() if p.is_dir()])
+        if not var_dirs:
+            raise FileNotFoundError(f"No zarr array directories found in {P_}")
+        data_vars: dict[str, xr.DataArray] = {}
+        for d in var_dirs:
+            name = d.name
+            try:
+                arr = da.from_zarr(str(d))
+            except Exception as exc:
+                self._warn(f"Skipping {d}: could not open as zarr array: {exc}")
+                continue
+            if arr.ndim == 2:
+                dims = ("nj", "ni")
+            elif arr.ndim == 1:
+                dims = (f"{name}_dim",)
+            elif arr.ndim == 0:
+                dims = ()
+            else:
+                dims = tuple(f"{name}_dim_{i}" for i in range(arr.ndim))
+            data_vars[name] = xr.DataArray(arr, dims=dims, name=name)
+        if not data_vars:
+            raise RuntimeError(f"No readable zarr arrays found in {P_}")
+        ds = xr.Dataset(data_vars)
+        if chunks is not None:
+            ds = ds.chunk(chunks)
+        ds.attrs.update(source_path=str(P_),
+                        grid_kind="cice_static_loose_zarr_arrays",
+                        loader="CICEGridwork._open_loose_static_zarr_arrays",
+                        warning="Opened from loose zarr arrays because no root zarr group metadata was present.")
+        return ds
+
     def load_cice_static(self, P_cice_static_store: str | Path | None = None, *,
                          variables    : Iterable[str] | None = None,
                          require      : Iterable[str] = ("TLON", "TLAT"),
@@ -412,7 +458,15 @@ class CICEGridwork:
         if not P_.exists():
             raise FileNotFoundError(P_)
         self._log(f"Opening CICE static-coordinate store: {P_}")
-        ds = xr.open_zarr(P_, consolidated=consolidated, chunks=chunks)
+        try:
+            ds = xr.open_zarr(P_, consolidated=consolidated, chunks=chunks)
+        except Exception as exc:
+            msg = str(exc)
+            if "No group found" in msg or "GroupNotFoundError" in exc.__class__.__name__:
+                self._warn(f"{P_} is not a valid xarray zarr group; attempting loose-array fallback.")
+                ds = self._open_loose_static_zarr_arrays(P_, chunks=chunks)
+            else:
+                raise
         missing_required = [v for v in require if v not in ds]
         if missing_required:
             raise KeyError(f"Required CICE static variable(s) missing from {P_}: "
@@ -473,3 +527,7 @@ class CICEGridwork:
             ds = ds[present]
         ds.attrs.update(source_path = str(P_), grid_kind = "cice_static_zarr", loader = "CICEGridwork.load_cice_static")
         return ds
+
+    def open_cice_static(self, *args, **kwargs) -> xr.Dataset:
+        """Backward-compatible alias for load_cice_static()."""
+        return self.load_cice_static(*args, **kwargs)

@@ -47,6 +47,10 @@ __all__ = ["__version__",
            "SeaIceObservations",
            "AF2020Observations",
            "NSIDCObservations",
+           "AF2020Spec",
+           "AF2020Obs",
+           "NSIDCObs",
+           "SeaIceObs",
            "load_ice_history",
            "load_cice",
            "load_classified",
@@ -98,13 +102,19 @@ def __getattr__(name):
         from .plotting.cice import CICEPlotter
         return CICEPlotter
 
-    if name in {"SeaIceObservations", "AF2020Observations", "NSIDCObservations", "SeaIceObs", "AF2020Obs", "NSIDCObs"}:
-        from .observations import SeaIceObservations, AF2020Observations, NSIDCObservations
-        return {
-            "SeaIceObservations": SeaIceObservations,
-            "AF2020Observations": AF2020Observations,
-            "NSIDCObservations": NSIDCObservations,
-        }[name]
+    if name in {"SeaIceObservations", "SeaIceObs",
+                "AF2020Spec", "AF2020Observations","AF2020Obs",
+                "NSIDCObservations", "NSIDCObs"}:
+        from .observations import (SeaIceObservations, SeaIceObs,
+                                   AF2020Spec, AF2020Observations, AF2020Obs,
+                                   NSIDCObservations, NSIDCObs)
+        return {"SeaIceObservations": SeaIceObservations,
+                "SeaIceObs": SeaIceObs,
+                "AF2020Spec": AF2020Spec,
+                "AF2020Observations": AF2020Observations,
+                "AF2020Obs": AF2020Obs,
+                "NSIDCObservations": NSIDCObservations,
+                "NSIDCObs": NSIDCObs}[name]
 
     if name == "report_sim_status":
         from .core.reporting import report_sim_status

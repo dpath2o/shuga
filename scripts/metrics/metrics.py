@@ -40,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bin-window", type=int, default=11)
     p.add_argument("--bin-min-days", type=int, default=9)
     p.add_argument("--roll-window", type=int, default=15)
+    p.add_argument("--iceh-frequency", choices = ["daily", "hourly"], default = "daily",
+                   help="CICE history frequency. daily -> iceh_daily.zarr/YYYY-MM; hourly -> iceh_hourly.zarr/YYYY_MM_DD.")
     p.add_argument("--cice-store", default=None)
     p.add_argument("--static-store", default=None)
     p.add_argument("--classification-root", default=None)
@@ -87,12 +89,13 @@ def main() -> None:
     methods       = [normalize_method(m) for m in _comma_split(args.methods)]
     metric_groups = _comma_split(args.metric_groups)
     metric_names  = _comma_split(args.metric_names)
-    run           = RunSpec(sim_name   = args.sim_name,
-                            start_date = args.start_date,
-                            end_date   = args.end_date,
-                            hemisphere = args.hemisphere,
-                            project    = args.project,
-                            user       = args.user)
+    run           = RunSpec(sim_name       = args.sim_name,
+                            start_date     = args.start_date,
+                            end_date       = args.end_date,
+                            hemisphere     = args.hemisphere,
+                            project        = args.project,
+                            user           = args.user,
+                            iceh_frequency = args.iceh_frequency)
     classify      = ClassificationSpec(ice_type     = args.ice_type,
                                        grid_type    = args.grid_type,
                                        ispd_thresh  = args.ispd_thresh,
@@ -125,8 +128,8 @@ def main() -> None:
     logger.info("Logging to: %s", paths.metrics_log_path())
     logger.info("Resolved CICE store: %s", paths.resolve_cice_store())
     static_store  = paths.resolve_static_store()
-    if static_store is not None:
-        logger.info("Resolved static store: %s", static_store)
+    if static_store is None:
+        logger.warning("No CICE static store resolved. Metrics requiring tarea/TLON/TLAT or face areas may fail.")
     logger.info("Resolved classification root: %s", paths.classification_root_path)
     runner              = CICEMetrics(run=run, classify=classify, metrics=metrics, paths=paths, logger=logger)
     plotter             = CICEPlotter(run          = run,

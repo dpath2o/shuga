@@ -1,34 +1,33 @@
 # Quickstart
 
-This page gives the shortest practical workflow for running `shuga` from CICE history to classified masks and metrics.
+This page gives a minimal end-to-end `shuga` workflow: load CICE history, classify fast ice, compute metrics, and plot/load outputs.
 
-The examples assume the common Gadi layout:
-
-```text
-/g/data/gv90/da1339/afim_output/<SIM_NAME>/
-```
-
-with CICE history and Zarr products beneath that simulation directory.
-
-## 1. Put the repository on `PYTHONPATH`
-
-From the repository root:
+## 1. Put the repo on `PYTHONPATH`
 
 ```bash
+cd ~/AFIM/src/mawsons-chest
 export PYTHONPATH="$PWD:$PYTHONPATH"
 ```
 
-For Gadi jobs, the PBS scripts usually set this explicitly. For notebook sessions, set it once in the shell that launches Jupyter.
-
-## 2. Define the run context
+For notebooks:
 
 ```python
-from shuga import RunSpec, ClassificationSpec, ShugaPaths
+from pathlib import Path
+import sys
+repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+```
+
+## 2. Define specs
+
+```python
+from shuga import RunSpec, ClassificationSpec, MetricsSpec, PlottingSpec, ShugaPaths
 
 run = RunSpec(
-    sim_name="LD-static-Cs2p5e-4",
-    start_date="1993-01-01",
-    end_date="1993-12-31",
+    sim_name="LD-blend-base",
+    start_date="2000-04-01",
+    end_date="2003-06-30",
     hemisphere="SH",
     project="gv90",
     user="da1339",
@@ -38,115 +37,52 @@ run = RunSpec(
 classify = ClassificationSpec(
     ice_type="FI",
     grid_type="Tc",
-    ispd_thresh=5e-4,
+    ispd_thresh=5.0e-4,
+    aice_thresh=0.15,
     methods=("raw", "binary-days", "rolling-mean"),
     bin_window=11,
     bin_min_days=9,
     roll_window=15,
 )
 
-paths = ShugaPaths(run=run, classify=classify)
+metrics = MetricsSpec(methods=("binary-days",))
+plotting = PlottingSpec(fig_size=20.0)
+paths = ShugaPaths(run=run, classify=classify, metrics=metrics, plotting=plotting)
 ```
 
-The same `run`, `classify`, and `paths` objects should be reused by classification, metrics, plotting, and loaders. This prevents path drift.
-
-## 3. Check CICE history loading
+## 3. Check CICE loading
 
 ```python
 from shuga import load_cice
 
-ds = load_cice(
-    run=run,
-    classify=classify,
-    paths=paths,
-    variables=["aice", "hi", "tarea", "TLON", "TLAT"],
-)
-
+ds = load_cice(run=run, classify=classify, paths=paths, variables=["aice", "hi", "TLON", "TLAT", "tarea"])
 print(ds)
 ```
 
-For daily grouped stores, this opens monthly Zarr groups such as:
+## 4. Convert NetCDF to grouped Zarr, if needed
 
-```text
-iceh_daily.zarr/1993-01
-iceh_daily.zarr/1993-02
-...
+```bash
+python shuga/scripts/conversion/nc2zarr.py \
+  --sim-name LD-blend-base \
+  --start-date 2000-01-01 \
+  --end-date 2003-12-31 \
+  --iceh-frequency daily
 ```
 
-If requested static variables are not in the history store, `load_cice()` will also use `iceh_static.zarr` when present.
-
-## 4. Run classification
+## 5. Run classification
 
 ```python
 from shuga import CICEClassifier
-
-classifier = CICEClassifier(run=run, classify=classify, paths=paths)
-classifier.run_methods(overwrite=False)
+CICEClassifier(run=run, classify=classify, paths=paths).run_methods(overwrite=False)
 ```
 
-Expected products are method-specific `data.zarr` stores:
-
-```text
-/g/data/gv90/da1339/afim_output/<SIM_NAME>/zarr/SH/ispd_thresh_5.0e-4/FI/Tc/
-├── raw/
-│   └── data.zarr
-├── bin-win-11_bin-min-09/
-│   └── data.zarr
-└── roll-days-15/
-    └── data.zarr
-```
-
-## 5. Run metrics
-
-```python
-from shuga import CICEMetrics
-
-metrics = CICEMetrics(run=run, classify=classify, paths=paths)
-metrics.compute_metrics("binary-days", overwrite=False)
-```
-
-Expected metric products are `mets.zarr` stores beside the classified data:
-
-```text
-bin-win-11_bin-min-09/
-├── data.zarr
-└── mets.zarr
-```
-
-## 6. Load outputs for analysis
-
-```python
-from shuga import load_classified, load_metrics
-
-classified = load_classified(
-    run=run,
-    classify=classify,
-    paths=paths,
-    classification="binary-days",
-    variables=["FI_mask"],
-)
-
-mets = load_metrics(
-    run=run,
-    classify=classify,
-    paths=paths,
-    classification="binary-days",
-    variables=["FIA", "FIT", "FIP", "FIA_by_region", "FIT_by_region"],
-)
-
-print(classified)
-print(mets)
-```
-
-## 7. Command-line workflows
-
-Classification:
+or:
 
 ```bash
 python shuga/scripts/classification/classify.py \
-  --sim-name LD-static-Cs2p5e-4 \
-  --start-date 1993-01-01 \
-  --end-date 1993-12-31 \
+  --sim-name LD-blend-base \
+  --start-date 2000-04-01 \
+  --end-date 2003-06-30 \
   --hemisphere SH \
   --ice-type FI \
   --BorC2T-type Tc \
@@ -155,57 +91,54 @@ python shuga/scripts/classification/classify.py \
   --bin-window 11 \
   --bin-min-days 9 \
   --roll-window 15 \
-  --project gv90 \
-  --user da1339
+  --skip-history-conversion
 ```
 
-Metrics:
+## 6. Run metrics
+
+```python
+from shuga import CICEMetrics
+runner = CICEMetrics(run=run, classify=classify, metrics=metrics, paths=paths)
+runner.compute_metrics("binary-days", metric_groups=["fi_core", "fi_spatial", "fi_regional", "fi_summary"], update_missing_only=True)
+```
+
+or:
 
 ```bash
 python shuga/scripts/metrics/metrics.py \
-  --sim-name LD-static-Cs2p5e-4 \
-  --start-date 1993-01-01 \
-  --end-date 1993-12-31 \
+  --sim-name LD-blend-base \
+  --start-date 2000-04-01 \
+  --end-date 2003-06-30 \
   --hemisphere SH \
   --ice-type FI \
   --BorC2T-type Tc \
   --ispd-thresh 5e-4 \
   --methods binary-days \
-  --bin-window 11 \
-  --bin-min-days 9 \
-  --roll-window 15 \
-  --project gv90 \
-  --user da1339
+  --metric-groups fi_core,fi_spatial,fi_regional,fi_summary \
+  --update-missing-only
 ```
 
-Use `--help` on the scripts for the authoritative list of flags.
-
-## 8. Basic sanity checks
-
-After a run:
-
-```bash
-python -m compileall shuga
-```
-
-and in Python:
+## 7. Load and plot
 
 ```python
-from shuga import load_metrics
+from shuga import load_classified, load_metrics, CICEPlotter
 
-ds = load_metrics(
-    run=run,
-    classify=classify,
-    paths=paths,
-    classification="binary-days",
-    variables=["FIA", "FIT", "FIP"],
-)
-print(ds)
+classified = load_classified(run=run, classify=classify, paths=paths, classification="binary-days", variables=["FI_mask", "PI_mask"])
+mets = load_metrics(run=run, classify=classify, metrics=metrics, paths=paths, classification="binary-days", variables=["FIA", "FIT", "FIP"])
+
+plotter = CICEPlotter(run=run, classify=classify, metrics=metrics, plotting=plotting, paths=paths)
+plotter.plot_fip(method="binary-days", source="sim", region_name="Aus")
+plotter.plot_timeseries("FIA", method="binary-days", region="total")
 ```
 
-Expected dimensions:
+## 8. PBS examples
 
-- `FIA(time)`
-- `FIT(time)`
-- `FIP(nj, ni)`
-- regional variables such as `FIA_by_region(time, region)`
+```bash
+qsub -v SIM_NAME=LD-blend-base,START_DATE=2000-04-01,END_DATE=2003-06-30,SKIP_HISTORY_CONVERSION=true \
+  shuga/scripts/classification/classify.pbs
+```
+
+```bash
+qsub -v SIM_NAME=LD-blend-base,START_DATE=2000-04-01,END_DATE=2003-06-30,METRIC_GROUPS=fi_core\|fi_spatial\|fi_regional \
+  shuga/scripts/metrics/metrics.pbs
+```

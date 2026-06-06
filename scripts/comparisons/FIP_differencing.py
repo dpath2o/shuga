@@ -1,32 +1,24 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-
 import argparse
 import shutil
 from dataclasses import replace
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import xarray as xr
-
 from shuga.core.types import ClassificationSpec, MetricsSpec, ObservationSpec, PlottingSpec, RunSpec
 from shuga.core.paths import ShugaPaths
 from shuga.io import load_classified, load_metrics
 from shuga.plotting.cice import CICEPlotter, compute_fip
-from shuga.regridder.pyresample import (
-    add_lonlat_from_epsg3031,
-    area_definition_from_xy,
-    compute_fipdiff_stats_weighted,
-    fip_difference_dataset,
-    fip_weight,
-    resample_swath_to_area,
-)
-
-
+from shuga.regridder.pyresample import (add_lonlat_from_epsg3031,
+                                        area_definition_from_xy,
+                                        compute_fipdiff_stats_weighted,
+                                        fip_difference_dataset,
+                                        fip_weight,
+                                        resample_swath_to_area)
 AF2020_MIN = pd.Timestamp("2000-03-01")
 AF2020_MAX = pd.Timestamp("2018-02-15")
-
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute and plot continuous/categorical FIP differences: simulation - AF2020.")
@@ -61,7 +53,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--chunks-time", type=int, default=31)
     return p.parse_args()
 
-
 def _comparison_window(args: argparse.Namespace) -> tuple[str, str]:
     req0 = pd.Timestamp(args.fip_start or args.start_date)
     req1 = pd.Timestamp(args.fip_end or args.end_date)
@@ -71,7 +62,6 @@ def _comparison_window(args: argparse.Namespace) -> tuple[str, str]:
         raise ValueError(f"No overlap with AF2020 period: requested {req0.date()}..{req1.date()}")
     return use0.strftime("%Y-%m-%d"), use1.strftime("%Y-%m-%d")
 
-
 def _open_static_grid(sim_name: str) -> xr.Dataset:
     path = Path.home() / "AFIM_archive" / sim_name / "zarr" / "iceh_static.zarr"
     if not path.exists():
@@ -79,42 +69,36 @@ def _open_static_grid(sim_name: str) -> xr.Dataset:
     ds = xr.open_zarr(path, consolidated=False)
     return ds[["TLON", "TLAT"]]
 
-
 def _metric_fip_is_compatible(da: xr.DataArray, fip_start: str, fip_end: str) -> bool:
     attrs = da.attrs
-    t0 = attrs.get("time_start") or attrs.get("start_date") or attrs.get("dt0_str")
-    t1 = attrs.get("time_end") or attrs.get("end_date") or attrs.get("dtN_str")
+    t0    = attrs.get("time_start") or attrs.get("start_date") or attrs.get("dt0_str")
+    t1    = attrs.get("time_end") or attrs.get("end_date") or attrs.get("dtN_str")
     if t0 is None or t1 is None:
         return False
     return pd.Timestamp(t0).date() == pd.Timestamp(fip_start).date() and pd.Timestamp(t1).date() == pd.Timestamp(fip_end).date()
 
-
-def _load_or_compute_sim_fip(
-    args: argparse.Namespace,
-    run: RunSpec,
-    classify: ClassificationSpec,
-    metrics: MetricsSpec,
-    plotting: PlottingSpec,
-    observations: ObservationSpec,
-    paths: ShugaPaths,
-    fip_start: str,
-    fip_end: str,
-) -> xr.DataArray:
+def _load_or_compute_sim_fip(args        : argparse.Namespace,
+                             run         : RunSpec,
+                             classify    : ClassificationSpec,
+                             metrics     : MetricsSpec,
+                             plotting    : PlottingSpec,
+                             observations: ObservationSpec,
+                             paths       : ShugaPaths,
+                             fip_start   : str,
+                             fip_end     : str) -> xr.DataArray:
     if args.sim_fip_source in ("auto", "metrics"):
         try:
-            ds_met = load_metrics(
-                run=run,
-                classify=classify,
-                metrics=metrics,
-                plotting=plotting,
-                observations=observations,
-                paths=paths,
-                classification=args.classification,
-                variables=["FIP"],
-                hemisphere=args.hemisphere,
-                grid_type=args.grid_type,
-                chunks={"time": args.chunks_time},
-            )
+            ds_met = load_metrics(run            = run,
+                                  classify       = classify,
+                                  metrics        = metrics,
+                                  plotting       = plotting,
+                                  observations   = observations,
+                                  paths          = paths,
+                                  classification = args.classification,
+                                  variables      = ["FIP"],
+                                  hemisphere     = args.hemisphere,
+                                  grid_type      = args.grid_type,
+                                  chunks         = {"time": args.chunks_time})
             if "FIP" in ds_met:
                 da = ds_met["FIP"].squeeze(drop=True)
                 if args.sim_fip_source == "metrics" or _metric_fip_is_compatible(da, fip_start, fip_end):

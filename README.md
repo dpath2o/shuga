@@ -1,176 +1,229 @@
 # shuga
 
-`shuga` is a standalone CICE post-processing package for Antarctic fast-ice workflows. It replaces the older AFIM JSON-driven classification and metrics scripts with a shared, code-first package built around explicit runtime specifications, common path rules, and reusable loading logic.
+`shuga` is a CICE-focused Python toolbox for sea-ice post-processing, with an emphasis on Antarctic landfast sea ice, C-grid free-slip/lateral-drag experiments, and reproducible NCI Gadi workflows. It replaces older notebook- and JSON-driven AFIM analysis scripts with explicit runtime specifications, common path rules, reusable CICE/Zarr loading, classification, metrics, plotting, observations, regridding, and forcing utilities.
 
-The package has two primary peer workflows:
+The present documentation target is **version 0.5**.
 
-- `shuga.classify.CICEClassifier`: compute raw, binary-days, and rolling-mean fast-ice masks.
-- `shuga.metrics.CICEMetrics`: compute fast-ice persistence, area, volume, thickness, and regional FIA/FIT from those masks.
+## What shuga does
 
-The key design goal is to prevent path drift between modules. Classification and metrics both use the same `ShugaPaths` object, so directory naming is defined once and reused everywhere.
+```text
+CICE iceh*.nc
+    ↓
+NetCDF → grouped Zarr conversion
+    ↓
+CICE history loading with universal static-grid merge
+    ↓
+Fast-ice / pack-ice / sea-ice classification
+    ↓
+Metrics: area, volume, thickness, persistence, rates, regions, stresses, diagnostics
+    ↓
+Plotting, observational comparison, publication notebooks, Gadi workflows
+```
 
-## Package layout
+The package is designed around large CICE history workflows. Zarr is used because it allows lazy loading, Dask chunking, month/day group access, and storage of static CICE grid fields only once.
+
+## Core runtime objects
+
+| Object | Purpose |
+|---|---|
+| `RunSpec` | Simulation name, date window, hemisphere, project/user, and CICE history frequency. |
+| `ClassificationSpec` | Ice domain, grid type, speed threshold, concentration threshold, and classification-window parameters. |
+| `MetricsSpec` | Metric groups, scaling factors, observation-skill settings, and optional diagnostic controls. |
+| `ObservationSpec` | Observation roots and product-specific settings. |
+| `CICEGridSpec` | CICE grid, mask, bathymetry, form-factor, and grid-asset paths. |
+| `PlottingSpec` | Common figure and PyGMT plotting settings. |
+| `ShugaPaths` | Single path authority for CICE stores, static grid, classifications, metrics, graphics, and logs. |
+
+The central rule is: **use `ShugaPaths` and public loaders instead of hand-building paths in notebooks or scripts**.
+
+## Package structure
 
 ```text
 shuga/
-    core/
-        logging.py
-        naming.py
-        paths.py
-        regions.py
-        types.py
-    io/
-        zarr_loading.py
-    classify/
-        cice.py
-    metrics/
-        cice.py
-
-scripts/
-    classification/
-        classify.py
-        classify.pbs
-        classify_pbs_wrapper.sh
-    metrics/
-        metrics.py
-        metrics.pbs
-        metrics_pbs_wrapper.sh
-
-notebooks/
-    example_LD-waves-exp01_1993.ipynb
-docs/
-    quickstart.md
-    architecture.md
+├── classify/       # CICEClassifier workflow
+├── core/           # dataclasses, paths, naming, regions, conversion
+├── forcing/        # ERA5 forcing helpers; ORAS support planned
+├── grid/           # CICE grid/static-grid/lateral-drag helpers
+├── io/             # public loaders and store discovery
+├── metrics/        # CICEMetrics workflow and calculations
+├── observations/   # AF2020, NSIDC, legacy compatibility
+├── plotting/       # PyGMT/data-prep plotting helpers
+├── regridding/     # CICE velocity grid handling, pyresample, xESMF
+└── scripts/        # command-line and PBS entry points
 ```
 
-## Defaults and path conventions
+Waves and tides tooling exists in the repository but is deliberately not documented here yet.
 
-By default, `shuga` assumes the Gadi layout below:
+## Data layout
 
-- project: `gv90`
-- user: `da1339`
-- daily CICE store:
-  `/g/data/[PROJECT]/[USER]/afim_output/[SIM_NAME]/zarr/iceh_daily.zarr`
-- static store:
-  `/g/data/[PROJECT]/[USER]/afim_output/[SIM_NAME]/zarr/iceh_static.zarr`
-- classification root:
-  `/g/data/[PROJECT]/[USER]/afim_output/[SIM_NAME]/zarr/[SH|NH]/ispd_thresh_[THRESH]/[ICE_TYPE]/[GRID_TYPE]/`
-- classification stores:
-  - `raw/data.zarr`
-  - `bin-win-11_bin-min-09/data.zarr`
-  - `roll-days-15/data.zarr`
-- metrics stores:
-  - `raw/mets.zarr`
-  - `bin-win-11_bin-min-09/mets.zarr`
-  - `roll-days-15/mets.zarr`
-- FIP graphics:
-  `/g/data/[PROJECT]/[USER]/GRAPHICAL/AFIM/[SIM_NAME]/FIP/`
-- time-series graphics:
-  `/g/data/[PROJECT]/[USER]/GRAPHICAL/AFIM/timeseries/`
-- logs:
-  `~/logs/classification/` and `~/logs/metrics/`
+Current default layout assumes Gadi and AFIM-style directories:
 
-Threshold directories follow the shared formatting rule:
+```text
+~/AFIM_archive -> /g/data/gv90/da1339/afim_output    # often a symlink
 
-- `ispd_thresh_5.0e-4`
-
-while log filenames use the compact form:
-
-- `metrics_<SIM>_<ICE>_<GRID>_ispd_thresh5e-4_BW11_BM9_roll15.log`
-
-## Fast-ice methods
-
-`shuga` currently supports three mask products:
-
-- `raw`: daily speed-threshold classification.
-- `binary-days`: centered rolling count over the raw mask.
-- `rolling-mean`: centered rolling mean of ice-speed magnitude before thresholding.
-
-The classifier automatically pads the read window by half the binary or rolling window so edge dates are handled from available data and then cropped back to the requested interval.
-
-## Regional outputs
-
-The metrics workflow includes pan-Antarctic totals plus FIA/FIT for the eight Antarctic sectors:
-
-- `DML`
-- `WIO`
-- `EIO`
-- `Aus`
-- `VOL`
-- `AS`
-- `BS`
-- `WS`
-
-## Command-line examples
-
-### Classification
-
-```bash
-python scripts/classification/classify.py   --sim-name LD-waves-exp01   --start-date 1993-01-01   --end-date 1993-12-31   --hemisphere SH   --ice-type FI   --BorC2T-type Tc   --ispd-thresh 5e-4   --methods raw,binary-days,rolling-mean   --bin-window 11   --bin-min-days 9   --roll-window 15   --project gv90   --user da1339
+~/AFIM_archive/<SIM_NAME>/zarr/
+├── iceh_daily.zarr/YYYY-MM/              # daily dynamic history
+├── iceh_hourly.zarr/YYYY_MM_DD/          # optional hourly dynamic history
+└── SH/ispd_thresh_5.0e-4/
+    ├── FI/Tc/bin-win-11_bin-min-09/data.zarr
+    ├── FI/Tc/bin-win-11_bin-min-09/mets.zarr
+    ├── PI/Tc/...
+    └── SI/Tc/...
 ```
 
-### Metrics + plotting
+The **universal CICE 1/4-degree C-grid static store** is grid-level rather than simulation-level:
 
-```bash
-python scripts/metrics/metrics.py   --sim-name LD-waves-exp01   --start-date 1993-01-01   --end-date 1993-12-31   --hemisphere SH   --ice-type FI   --BorC2T-type Tc   --ispd-thresh 5e-4   --methods raw,binary-days,rolling-mean   --bin-window 11   --bin-min-days 9   --roll-window 15   --project gv90   --user da1339   --plot-fip   --plot-fia   --plot-fit
+```text
+~/AFIM_archive/CICE_0p25_Cgrid_coords.zarr
 ```
 
-### PBS wrapper usage
+It is used when workflows need static variables such as `TLON`, `TLAT`, `tarea`, `uarea`, `earea`, `narea`, masks, metrics, and grid angles.
 
-Classification:
+## Ice domains
 
-```bash
-./scripts/classification/classify_pbs_wrapper.sh   -s LD-waves-exp01 -b 1993-01-01 -e 1993-12-31 -H SH -i FI -g Tc   -t 5e-4 -m raw,binary-days,rolling-mean -B 11 -N 9 -R 15 -P gv90 -U da1339
-```
+| Domain | Meaning | Speed classified? | Stored product? |
+|---|---|---:|---:|
+| `FI` | Fast/landfast ice candidate cells | Yes | `data.zarr` |
+| `PI` | Pack ice, defined as sea ice that is not fast ice | Indirectly | derived/written with FI workflow |
+| `SI` | Sea ice defined by concentration threshold in a hemisphere | No | metrics domain; no speed classification |
 
-Metrics:
+Fast ice uses raw, binary-days, or rolling-mean classification. Pack ice is derived as sea ice minus fast ice. Sea ice is not speed-thresholded.
 
-```bash
-./scripts/metrics/metrics_pbs_wrapper.sh   -s LD-waves-exp01 -b 1993-01-01 -e 1993-12-31 -H SH -i FI -g Tc   -t 5e-4 -m binary-days,rolling-mean -B 11 -N 9 -R 15 -P gv90 -U da1339   -f -a -T -r total
-```
-
-## Python API example
+## Typical notebook usage
 
 ```python
-from shuga import RunSpec, ClassificationSpec, MetricsSpec, ShugaPaths
-from shuga.classify import CICEClassifier
-from shuga.metrics import CICEMetrics
+from pathlib import Path
+import sys
+
+repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
+from shuga import (
+    RunSpec, ClassificationSpec, MetricsSpec, PlottingSpec,
+    ShugaPaths, load_metrics, CICEPlotter,
+)
 
 run = RunSpec(
-    sim_name="LD-waves-exp01",
-    start_date="1993-01-01",
-    end_date="1993-12-31",
+    sim_name="LD-blend-base",
+    start_date="2000-04-01",
+    end_date="2003-06-30",
     hemisphere="SH",
+    project="gv90",
+    user="da1339",
+    iceh_frequency="daily",
 )
 
 classify = ClassificationSpec(
     ice_type="FI",
     grid_type="Tc",
-    ispd_thresh=5e-4,
-    methods=("raw", "binary-days", "rolling-mean"),
+    ispd_thresh=5.0e-4,
+    methods=("binary-days",),
     bin_window=11,
     bin_min_days=9,
     roll_window=15,
 )
 
-paths = ShugaPaths(run=run, classify=classify)
+metrics = MetricsSpec(methods=("binary-days",))
+plotting = PlottingSpec(fig_size=20.0)
+paths = ShugaPaths(run=run, classify=classify, metrics=metrics, plotting=plotting)
 
-classifier = CICEClassifier(run=run, classify=classify, paths=paths)
-classifier.run_methods(overwrite=False)
+ds = load_metrics(
+    run=run,
+    classify=classify,
+    metrics=metrics,
+    paths=paths,
+    classification="binary-days",
+    variables=["FIA", "FIT", "FIP", "FIHI", "FIST"],
+)
 
-metrics = CICEMetrics(run=run, classify=classify, paths=paths)
-metrics.compute_metrics("binary-days", overwrite=False)
-ds = metrics.load_metrics("binary-days")
+plotter = CICEPlotter(run=run, classify=classify, metrics=metrics, plotting=plotting, paths=paths)
+plotter.plot_fip(method="binary-days", region_name="Aus")
+plotter.plot_timeseries("FIA", method="binary-days", region="total")
 ```
 
-## Notes
+Publication notebooks should define experiments, scientific windows, and final figure composition, while `shuga` owns reusable loading, masks, metrics, and plotting/data-prep logic.
 
-- The grouped-month `iceh_daily.zarr/YYYY-MM` layout is supported directly.
-- `iceh_static.zarr` is merged automatically when present.
-- Plotting methods use PyGMT and only import it when you actually request a plot.
-- `load_classification()` and `load_metrics()` are included so downstream notebooks can read computed products quickly without rebuilding them.
+## Command-line usage
 
-See:
-- `docs/quickstart.md`
-- `docs/architecture.md`
-- `notebooks/example_LD-waves-exp01_1993.ipynb`
+Convert CICE NetCDF history to grouped Zarr:
+
+```bash
+python shuga/scripts/conversion/nc2zarr.py \
+  --sim-name LD-blend-base \
+  --start-date 2000-01-01 \
+  --end-date 2003-12-31 \
+  --iceh-frequency daily
+```
+
+Classify fast ice:
+
+```bash
+python shuga/scripts/classification/classify.py \
+  --sim-name LD-blend-base \
+  --start-date 2000-04-01 \
+  --end-date 2003-06-30 \
+  --hemisphere SH \
+  --ice-type FI \
+  --BorC2T-type Tc \
+  --ispd-thresh 5e-4 \
+  --methods raw,binary-days,rolling-mean \
+  --bin-window 11 \
+  --bin-min-days 9 \
+  --roll-window 15 \
+  --skip-history-conversion
+```
+
+Compute metrics:
+
+```bash
+python shuga/scripts/metrics/metrics.py \
+  --sim-name LD-blend-base \
+  --start-date 2000-04-01 \
+  --end-date 2003-06-30 \
+  --hemisphere SH \
+  --ice-type FI \
+  --BorC2T-type Tc \
+  --ispd-thresh 5e-4 \
+  --methods binary-days \
+  --metric-groups fi_core,fi_spatial,fi_regional,fi_summary \
+  --update-missing-only
+```
+
+On Gadi, prefer PBS wrappers under `shuga/scripts/*`.
+
+## Documentation map
+
+| Page | Purpose |
+|---|---|
+| [`docs/quickstart.md`](docs/quickstart.md) | Minimal end-to-end workflow. |
+| [`docs/architecture.md`](docs/architecture.md) | Package design and module boundaries. |
+| [`docs/io.md`](docs/io.md) | CICE/Zarr loading and store resolution. |
+| [`docs/data_conversion.md`](docs/data_conversion.md) | NetCDF-to-Zarr conversion and storage design. |
+| [`docs/static-grid.md`](docs/static-grid.md) | Universal CICE static-grid store. |
+| [`docs/classification.md`](docs/classification.md) | FI/PI/SI classification mathematics and outputs. |
+| [`docs/metrics.md`](docs/metrics.md) | Metric definitions, groups, units, and relevance. |
+| [`docs/plotting.md`](docs/plotting.md) | PyGMT plotting/data-prep philosophy and examples. |
+| [`docs/observations.md`](docs/observations.md) | AF2020 and NSIDC observation support. |
+| [`docs/regridding.md`](docs/regridding.md) | CICE velocity grid handling, pyresample, and xESMF. |
+| [`docs/forcing.md`](docs/forcing.md) | ERA5 forcing support and future ORAS direction. |
+| [`docs/gadi-workflows.md`](docs/gadi-workflows.md) | PBS workflows and Gadi usage. |
+| [`docs/developer-guide.md`](docs/developer-guide.md) | Extension and maintenance rules. |
+
+## External references
+
+- [CICE Consortium documentation](https://cice-consortium-cice.readthedocs.io/)
+- [CICE source code](https://github.com/CICE-Consortium/CICE)
+- [Icepack source code](https://github.com/CICE-Consortium/Icepack)
+- [xarray documentation](https://docs.xarray.dev/)
+- [Dask documentation](https://docs.dask.org/)
+- [Zarr Python documentation](https://zarr.readthedocs.io/)
+- [PyGMT documentation](https://www.pygmt.org/)
+- [pyresample documentation](https://pyresample.readthedocs.io/)
+- [xESMF documentation](https://xesmf.readthedocs.io/)
+- [NCO documentation](https://nco.sourceforge.net/nco.html)
+- [NCI Gadi user guide](https://opus.nci.org.au/display/Help/Gadi)
+
+## Status
+
+`shuga` is an active research toolbox. APIs and store layouts may still evolve as lateral-drag, observation-comparison, and forcing-sensitivity workflows mature.

@@ -45,14 +45,20 @@ class AF2020Observations:
                  af20_cfg: AF2020Spec | None = None,
                  logger = None) -> None:
         self.af20_cfg     = af20_cfg or AF2020Spec()
-        self.run          = run or RunSpec(sim_name = "AF2020", start_date = "2000-01-01", end_date = "2018-12-31")
+        self.run          = run or RunSpec(sim_name="AF2020", start_date="2000-01-01", end_date="2018-12-31")
         self.observations = observations or ObservationSpec()
-        self.paths        = paths or ShugaPaths(run = self.run, classify = None, observations = self.observations)  # type: ignore[arg-type]
-        self.D_org_nc     = Path(D_org_nc).expanduser() if D_org_nc is not None else self.af20_cfg.D_org_nc
-        self.D_reG        = Path(D_reG).expanduser() if D_reG is not None else self.af20_cfg.D_reG
-        self.chunks       = chunks or {"time": "auto"}
-        self.logger       = logger or build_file_logger("shuga.observations.AF2020", Path.home() / "logs" / "observations" / "shuga_AF2020.log")
-        self._raw_cache: xr.Dataset | None = None
+        self.paths        = paths or ShugaPaths(run=self.run, classify=None, observations=self.observations)  # type: ignore[arg-type]
+        org_root          = D_org_nc if D_org_nc is not None else self.af20_cfg.D_org_nc
+        reg_root          = D_reG    if D_reG    is not None else self.af20_cfg.D_reG
+        if org_root is None:
+            org_root = self.paths.fi_obs_root_path / "org"
+        if reg_root is None:
+            reg_root = self.paths.fi_obs_root_path
+        self.D_org_nc = Path(org_root).expanduser()
+        self.D_reG    = Path(reg_root).expanduser()
+        self.chunks   = chunks or {"time": "auto"}
+        self.logger   = logger or build_file_logger("shuga.observations.AF2020", Path.home() / "logs" / "observations" / "shuga_AF2020.log")
+        self._org_cache: xr.Dataset | None = None
         self._fia_daily_cache: xr.Dataset | None = None
 
     # ---------------------------------------------------------------------
@@ -72,13 +78,21 @@ class AF2020Observations:
     def open_org(self, start_date: str | None = None, end_date: str | None = None) -> xr.Dataset:
         """Open origin AF2020 native 15-day rasters and subset them to the requested dates."""
         files = self.org_files(start_date, end_date)
-        self.logger.info("Opening %s AF2020 orgin files from %s", len(files), self.D_org_nc)
+        self.logger.info("Opening %s AF2020 origin files from %s", len(files), self.D_org_nc)
         ds = xr.open_mfdataset(files, engine = "netcdf4", combine = "by_coords", chunks = self.chunks, data_vars = "minimal", coords = "minimal", compat = "override")
         ds = self._normalise_org(ds)
         if start_date is not None or end_date is not None:
             ds = ds.sel(time=slice(start_date, end_date))
         self._org_cache = ds
         return ds
+
+    def open_raw(self, start_date: str | None = None, end_date: str | None = None) -> xr.Dataset:
+        """Backward-compatible alias for open_org()."""
+        return self.open_org(start_date=start_date, end_date=end_date)
+
+    def raw_files(self, start_date: str | None = None, end_date: str | None = None) -> list[Path]:
+        """Backward-compatible alias for org_files()."""
+        return self.org_files(start_date=start_date, end_date=end_date)
 
     def _normalise_org(self, ds: xr.Dataset) -> xr.Dataset:
         """Standardise origin AF2020 names while preserving the native grid."""

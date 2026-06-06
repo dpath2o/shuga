@@ -28,6 +28,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bin-window", type=int, default=11)
     p.add_argument("--bin-min-days", type=int, default=9)
     p.add_argument("--roll-window", type=int, default=15)
+    p.add_argument(
+        "--iceh-frequency",
+        choices=["daily", "hourly"],
+        default="daily",
+        help="CICE history frequency. daily -> iceh_daily.zarr/YYYY-MM; hourly -> iceh_hourly.zarr/YYYY_MM_DD.",
+    )
+    p.add_argument(
+        "--hourly-root",
+        default=None,
+        help="Optional root containing hourly CICE NetCDF files.",
+    )
+    p.add_argument(
+        "--chunks-time",
+        type=int,
+        default=None,
+        help="Time chunk size. Defaults to 31 for daily and 24 for hourly.",
+    )
     p.add_argument("--afim-output-root", default=None)
     p.add_argument("--logs-root", default=None)
     p.add_argument("--archive-root", default=None)
@@ -52,6 +69,7 @@ def main() -> None:
         hemisphere=args.hemisphere,
         project=args.project,
         user=args.user,
+        iceh_frequency=args.iceh_frequency,
     )
     classify = ClassificationSpec(
         ice_type=args.ice_type,
@@ -75,11 +93,25 @@ def main() -> None:
     logger = build_file_logger("shuga.nc2zarr", log_path, level=args.log_level)
     logger.info("Logging to: %s", log_path)
 
-    converter = NC2Zarr(paths=paths, logger=logger, netcdf_engine=args.netcdf_engine)
+    chunks_time = args.chunks_time
+    if chunks_time is None:
+        chunks_time = 24 if args.iceh_frequency == "hourly" else 31
+    chunks = {"time": chunks_time}
+
+    logger.info("Resolved CICE grouped-store target : %s", paths.resolve_cice_store_target())
+    logger.info("Resolved CICE static-store target  : %s", paths.resolve_static_store_target())
+    logger.info("Resolved existing CICE static store: %s", paths.resolve_static_store())
+    converter = NC2Zarr(
+        paths=paths,
+        logger=logger,
+        chunks=chunks,
+        netcdf_engine=args.netcdf_engine,
+    )
     result = converter.ensure_iceh_stores(
         dt0_str=args.start_date,
         dtN_str=args.end_date,
         daily_root=args.daily_root,
+        hourly_root=args.hourly_root,
         overwrite=args.overwrite,
         overwrite_static=args.overwrite_static,
         delete_original=args.delete_original,

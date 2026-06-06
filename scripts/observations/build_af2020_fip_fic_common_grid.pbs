@@ -16,15 +16,13 @@ module purge
 module use /g/data/xp65/public/modules
 module load conda/analysis3-25.12
 
-: "${SIM_NAME:=LD-static-Cs1e-3}"
-: "${AF2020_RAW_ROOT:=/g/data/jk72/af1544/fraser2020_data/}"
 : "${OUT_STORE:=/g/data/gv90/da1339/SeaIce/FI_obs/AF-FI-2020db_common-5km_pyresample.zarr}"
 : "${CICE_STATIC_STORE:=}"
 : "${OVERWRITE:=0}"
 
-args=(--sim-name "${SIM_NAME}" --af2020-raw-root "${AF2020_RAW_ROOT}" --out-store "${OUT_STORE}"
-      --pixel-size-m "${PIXEL_SIZE_M:-5000}" --radius-of-influence-m "${ROI_M:-10000}" --buffer-m "${BUFFER_M:-20000}"
-      --cice-lon-shift-deg "${CICE_LON_SHIFT_DEG:-0.25}" --time-batch "${TIME_BATCH:-8}" --chunks-time "${CHUNKS_TIME:-16}")
+args=(--out-store "${OUT_STORE}" --pixel-size-m "${PIXEL_SIZE_M:-5000}" --radius-of-influence-m "${ROI_M:-10000}"
+      --buffer-m "${BUFFER_M:-20000}" --cice-lon-shift-deg "${CICE_LON_SHIFT_DEG:-0.25}"
+      --time-batch "${TIME_BATCH:-8}" --chunks-time "${CHUNKS_TIME:-16}")
 
 if [[ -n "${CICE_STATIC_STORE}" ]]; then
   args+=(--cice-static-store "${CICE_STATIC_STORE}")

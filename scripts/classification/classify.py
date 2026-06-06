@@ -113,6 +113,12 @@ def main() -> None:
                               archive_root        = args.archive_root)
     logger = build_file_logger("shuga.classify", paths.classification_log_path(), level=args.log_level)
     logger.info("Logging to: %s", paths.classification_log_path())
+    static_store = paths.resolve_static_store()
+    if static_store is None:
+        logger.warning("No CICE static store resolved. Classification may fail if TLON/TLAT "
+                       "or other static fields have been stripped from grouped history zarr.")
+    else:
+        logger.info("Resolved universal CICE static store: %s", static_store)
     has_explicit_grid_assets = any(v is not None for v in (args.grid_file,
                                                            args.kmt_file,
                                                            args.bathymetry_file,

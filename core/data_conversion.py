@@ -309,17 +309,43 @@ class NC2Zarr:
             ds_out["time"].attrs.pop("bounds", None)
         return self._strip_unsafe_zarr_encoding(ds_out)
 
-    def _maybe_update_static_store(self, ds_static_new: xr.Dataset, *, static_store: Path, overwrite: bool, context: str) -> None:
+    def _open_existing_static_store(self, static_store: Path) -> xr.Dataset:
+        """
+        Open an existing static store through CICEGridwork so both proper
+        xarray-zarr groups and loose-array static stores are supported.
+        """
+        from shuga.grid.cice import CICEGridwork
+
+        return CICEGridwork(paths=self.paths, logger=self.logger).load_cice_static(P_cice_static_store = static_store,
+                                                                                   require             = (),
+                                                                                   variables           = None,
+                                                                                   consolidated        = False,
+                                                                                   add_aliases         = True)
+
+    def _prepare_iceh_static_for_write(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Prepare static dataset for zarr writing.
+
+        This preserves the older NC2Zarr call site while delegating the encoding
+        cleanup to CICEStaticBuilder.
+        """
+        return CICEStaticBuilder.prepare_for_write(ds)
+
+    def _maybe_update_static_store(self, ds_static_new: xr.Dataset, *,
+                                   static_store: Path,
+                                   overwrite: bool,
+                                   context: str) -> None:
         if not ds_static_new.data_vars and not ds_static_new.coords:
             self.logger.warning("[%s] extracted empty static dataset; skipping static-store update", context)
             return
         static_store.parent.mkdir(parents=True, exist_ok=True)
         if static_store.exists():
-            ds_static_ref = xr.open_zarr(static_store, consolidated=False)
+            ds_static_ref = self._open_existing_static_store(static_store)
             try:
                 self._warn_if_iceh_static_differs(ds_static_new, ds_static_ref, context=context)
             finally:
                 ds_static_ref.close()
+
             if not overwrite:
                 return
             shutil.rmtree(static_store)

@@ -1,241 +1,155 @@
 # Metrics
 
-`CICEMetrics` computes fast-ice and sea-ice diagnostics from CICE history and classified masks.
-
-The metrics workflow is split into a public orchestrator plus reusable helper modules.
-
-## Public workflow
-
-```python
-from shuga import RunSpec, ClassificationSpec, ShugaPaths, CICEMetrics
-
-run = RunSpec(
-    sim_name="LD-static-Cs2p5e-4",
-    start_date="1993-01-01",
-    end_date="1993-12-31",
-    hemisphere="SH",
-)
-
-classify = ClassificationSpec(
-    ice_type="FI",
-    grid_type="Tc",
-    methods=("binary-days",),
-    ispd_thresh=5e-4,
-    bin_window=11,
-    bin_min_days=9,
-)
-
-paths = ShugaPaths(run=run, classify=classify)
-
-metrics = CICEMetrics(run=run, classify=classify, paths=paths)
-metrics.compute_metrics("binary-days", overwrite=False)
-```
-
-## Metric groups
+`shuga.metrics.CICEMetrics` computes diagnostics from CICE history fields and classified masks. Metrics are written as method-specific `mets.zarr` stores beside the corresponding `data.zarr` classification product.
 
 Metric names and groups are defined in `shuga/metrics/registry.py`.
 
-| Group | Contents |
+## Notation
+
+| Symbol | Meaning |
 |---|---|
-| `fi_core` | Fast-ice area, volume, thickness, persistence, strength, and tendency metrics. |
-| `si_core` | Sea-ice area, volume, thickness, persistence/concentration, strength, and tendency metrics. |
-| `regional` | Regional FIA/FIT/SIA/SIT. |
-| `spatial` | Spatial persistence, spatial thickness, and yearly tendency fields. |
-| `summary` | Seasonal extrema, timing, persistence-stability, and observation skill summaries. |
-| `stress` | Fast-ice and sea-ice stress diagnostics. |
-| `default` | Standard full set. |
-| `all` | Alias for full set. |
+| `a(t,i,j)` | sea-ice concentration, usually `aice` |
+| `h(t,i,j)` | ice thickness, usually `hi` |
+| `A(i,j)` | T-grid cell area, usually `tarea` |
+| `M_F` | fast-ice mask |
+| `M_P` | pack-ice mask |
+| `M_S` | sea-ice mask |
 
-Use the registry rather than hard-coding metric lists:
+Fast-ice metrics use `M_F`, pack-ice metrics use `M_P`, and sea-ice metrics use `M_S`.
 
-```python
-from shuga.metrics.registry import expand_metric_names
+## Metric groups
 
-names = expand_metric_names(metric_groups=["fi_core", "regional"])
-```
+| Group | Description |
+|---|---|
+| `fi_core` | FIA, FIV, FIT, FIP, FIS, thermodynamic/mechanical rates. |
+| `fi_spatial` | FIHI, FIST, and annualised spatial rate fields. |
+| `fi_regional` | FIA/FIT by Antarctic sector. |
+| `fi_summary` | Seasonal maxima, minima, and timing summaries. |
+| `fi_stress` | Stress/form-factor diagnostics where source variables exist. |
+| `fi_diags` | Mean fast-ice diagnostic fields such as speed and stress budgets. |
+| `fi_spec` | FIPSI, winter-persistence, and observation skill metrics. |
+| `pi_*`, `si_*` | Pack-ice and sea-ice analogues. |
+| `fi_all`, `pi_all`, `si_all` | Domain-specific full groups. |
 
-Metric group expansion preserves registry order.
+## Fast-ice core metrics
 
-## Core fast-ice metrics
+### `FIA`: fast-ice area
 
-| Metric | Dimensions | Description |
+\[
+\mathrm{FIA}(t)=10^{-9}\sum_{i,j} M_F(t,i,j)a(t,i,j)A(i,j).
+\]
+
+Units: `10^3 km^2`. This is the primary scalar diagnostic for fast-ice extent, growth, maximum, retreat, and bias.
+
+### `FIV`: fast-ice volume
+
+\[
+\mathrm{FIV}(t)=10^{-12}\sum_{i,j}M_F(t,i,j)a(t,i,j)h(t,i,j)A(i,j).
+\]
+
+Units: commonly `10^3 km^3`, depending on `MetricsSpec.volume_scale`.
+
+### `FIT`: fast-ice mean thickness
+
+\[
+\mathrm{FIT}(t)=
+\frac{\sum_{i,j}M_F a h A}{\sum_{i,j}M_F a A}.
+\]
+
+Units: `m`. Interpret with `FIA`, because a compact thick fast-ice region and a broader thin region can have similar mean thickness.
+
+### `FIP`: fast-ice persistence
+
+\[
+\mathrm{FIP}(i,j)=\frac{1}{N_{ij}}\sum_{t\in\mathcal{T}}M_F(t,i,j).
+\]
+
+Units: `1`. A value of 1 means fast ice for all valid timesteps; 0.5 means fast ice for half of them. This is the main map diagnostic for spatial fast-ice comparison.
+
+### `FIS`: fast-ice strength
+
+\[
+\mathrm{FIS}(t)=
+\frac{\sum M_F S A}{\sum M_F A},
+\]
+
+where `S` is CICE `strength`. Units follow CICE, typically `N m-1`.
+
+### Rate metrics
+
+| Variable | Meaning | Typical relevance |
 |---|---|---|
-| `FIA` | `time` | Fast-ice area. |
-| `FIV` | `time` | Fast-ice volume. |
-| `FIT` | `time` | Fast-ice mean thickness. |
-| `FIP` | `nj, ni` | Fast-ice persistence. |
-| `FIS` | `time` | Fast-ice strength diagnostic. |
-| `FITVR` | `time` | Fast-ice thermodynamic volume-rate diagnostic. |
-| `FIMVR` | `time` | Fast-ice dynamic volume-rate diagnostic. |
-| `FITAR` | `time` | Fast-ice thermodynamic area-rate diagnostic. |
-| `FIMAR` | `time` | Fast-ice dynamic area-rate diagnostic. |
+| `FITVR` | fast-ice thermodynamic volume-rate diagnostic | thermodynamic growth/melt contribution |
+| `FIMVR` | fast-ice mechanical/dynamic volume-rate diagnostic | convergence, divergence, export, mechanical redistribution |
+| `FITAR` | fast-ice thermodynamic area-rate diagnostic | thermodynamic concentration/area change |
+| `FIMAR` | fast-ice mechanical/dynamic area-rate diagnostic | mechanical area change |
 
-## Core sea-ice metrics
+These help diagnose whether missing FIA growth is thermodynamic, mechanical, or a combination.
 
-| Metric | Dimensions | Description |
-|---|---|---|
-| `SIA` | `time` | Sea-ice area. |
-| `SIV` | `time` | Sea-ice volume. |
-| `SIT` | `time` | Sea-ice mean thickness. |
-| `SIP` | `nj, ni` | Mean sea-ice concentration/persistence field. |
-| `SIS` | `time` | Sea-ice strength diagnostic. |
-| `SITVR` | `time` | Sea-ice thermodynamic volume-rate diagnostic. |
-| `SIMVR` | `time` | Sea-ice dynamic volume-rate diagnostic. |
-| `SITAR` | `time` | Sea-ice thermodynamic area-rate diagnostic. |
-| `SIMAR` | `time` | Sea-ice dynamic area-rate diagnostic. |
+## Spatial fast-ice metrics
+
+| Variable | Dimensions | Units | Meaning |
+|---|---|---|---|
+| `FIHI` | `nj, ni` | `m` | Time-mean fast-ice thickness field. |
+| `FIST` | `nj, ni` | `N m-1` or source units | Time-mean fast-ice strength field. |
+| `FITVR_YR` | `nj, ni` | tendency units | Annualised thermodynamic volume/thickness-rate field. |
+| `FIMVR_YR` | `nj, ni` | tendency units | Annualised mechanical/dynamic volume/thickness-rate field. |
+| `FITAR_YR` | `nj, ni` | tendency units | Annualised thermodynamic area-rate field. |
+| `FIMAR_YR` | `nj, ni` | tendency units | Annualised mechanical/dynamic area-rate field. |
+
+`FIHI`, `FIST`, and `FIMAR_YR` are particularly useful for separating persistent fast-ice locations from thermodynamic or mechanical growth mechanisms.
 
 ## Regional metrics
 
-Regional metrics are computed over the eight Antarctic sectors:
+The Antarctic sectors are `DML`, `WIO`, `EIO`, `Aus`, `VOL`, `AS`, `BS`, and `WS`.
 
-- `DML`
-- `WIO`
-- `EIO`
-- `Aus`
-- `VOL`
-- `AS`
-- `BS`
-- `WS`
-
-Products include:
-
-| Metric | Dimensions |
-|---|---|
-| `FIA_by_region` | `time, region` |
-| `FIT_by_region` | `time, region` |
-| `SIA_by_region` | `time, region` |
-| `SIT_by_region` | `time, region` |
+| Variable | Dimensions | Units | Meaning |
+|---|---|---|---|
+| `FIA_by_region` | `time, region` | `10^3 km^2` | Regional fast-ice area. |
+| `FIT_by_region` | `time, region` | `m` | Regional area-weighted fast-ice thickness. |
 
 ## Seasonal summaries
 
-Seasonal summaries are scalar diagnostics derived from 1-D time series such as `FIA`, `FIT`, `SIA`, and `SIT`.
+| Variable pattern | Units | Meaning |
+|---|---|---|
+| `FIA_max_mean`, `FIA_max_std` | `10^3 km^2` | Mean and spread of seasonal/annual maxima. |
+| `FIA_min_mean`, `FIA_min_std` | `10^3 km^2` | Mean and spread of seasonal/annual minima. |
+| `FIA_doy_max_mean`, `FIA_doy_max_std` | day / days | Timing and spread of maximum FIA. |
+| `FIA_doy_min_mean`, `FIA_doy_min_std` | day / days | Timing and spread of minimum FIA. |
+| `FIT_*` analogues | `m` or days | Thickness extrema and timing. |
 
-Examples:
+## Observation skill and persistence-stability
 
-- `FIA_max_mean`
-- `FIA_min_mean`
-- `FIA_doy_max_mean`
-- `FIA_doy_min_mean`
-- `FIT_max_mean`
-- `SIA_min_mean`
+| Variable | Units | Meaning |
+|---|---|---|
+| `FIPSI` | `1` or area-scaled diagnostic | Fast-ice persistence stability index. |
+| `persistent_winter_area` | `10^3 km^2` | Area persistent through winter window. |
+| `ever_winter_area` | `10^3 km^2` | Area ever classified as fast ice during winter. |
+| `FIA_Bias`, `FIA_RMSE`, `FIA_MAE`, `FIA_Corr` | area units / 1 | FIA skill metrics. |
+| `FIT_Bias`, `FIT_RMSE`, `FIT_MAE`, `FIT_Corr` | m / 1 | FIT skill metrics. |
 
-The underlying extrema table logic is in `shuga/metrics/temporal.py`.
+## Stress and diagnostics
 
-Use directly for report tables:
+Examples include `FIKuxE_mean`, `FIKuxE_abs_mean`, `FIKuE_mag_mean`, `FI_tau_air_mean`, `FI_tau_ocean_mean`, `FI_tau_internal_mean`, `FI_tau_ld_est_mean`, `FI_strain_invariant_mean`, and `FI_ld_mag_proxy_mean`. Units follow the underlying source fields. These variables diagnose why the model produces or fails to produce fast ice.
 
-```python
-from shuga.metrics.temporal import compute_extrema_table
+## Pack-ice and sea-ice metric names
 
-df = compute_extrema_table(
-    ds["FIA"],
-    sim_name=run.sim_name,
-    year_mode="antarctic",
-)
-```
+Pack-ice core metrics: `PIA`, `PIV`, `PIT`, `PIP`, `PIS`, `PITVR`, `PIMVR`, `PITAR`, `PIMAR`.
 
-## Persistence-stability metrics
+Sea-ice core metrics: `SIA`, `SIV`, `SIT`, `SIP`, `SIS`, `SITVR`, `SIMVR`, `SITAR`, `SIMAR`.
 
-These are derived from `FI_mask` and area fields.
+Spatial, regional, summary, stress, and diagnostic products follow the same naming pattern with `P` or `S` prefixes.
 
-Common outputs:
-
-- `FIPSI`
-- `persistent_winter_area`
-- `ever_winter_area`
-
-For short test periods, these may be `NaN`; that is expected if the requested period does not cover the required seasonal window.
-
-## Stress metrics
-
-Stress products are generated by `metrics/stress.py`.
-
-Examples:
-
-- `FIKuxE_mean`
-- `FIKuxE_abs_mean`
-- `FIKuxE_valid_area_m2`
-- `FIKuE_mag_mean`
-- `SIKuxE_mean`
-
-Stress variables require relevant CICE fields, for example:
-
-- `KuxE`
-- `KuyE`
-- `KuxN`
-- `KuyN`
-- `earea`
-- `narea`
-
-If source stress fields are not present, requested stress metrics are skipped and logged.
-
-## Internal flow
-
-The current metrics workflow is:
-
-```text
-CICEMetrics
-  ├── load CICE history
-  ├── load classified mask if needed
-  ├── build MetricDispatchContext
-  ├── MetricDispatcher computes primary metrics
-  ├── secondary.py computes seasonal/FIPSI/skill/attrs
-  ├── stress.py computes stress metrics
-  └── write or update mets.zarr
-```
-
-Important modules:
-
-| Module | Purpose |
-|---|---|
-| `cice.py` | Public workflow class. |
-| `registry.py` | Metric names and groups. |
-| `calculations.py` | Pure reusable calculations. |
-| `dispatch.py` | Primary metric dispatch and memoisation. |
-| `secondary.py` | Seasonal, FIPSI, skill, metadata helpers. |
-| `stress.py` | Stress products. |
-| `temporal.py` | Extrema/growth/retreat tables. |
-| `skill.py` | Bias/RMSE/MAE/correlation. |
-| `regional.py` | Region masks and spatial helper functions. |
-| `io.py` | Metrics-store helper functions. |
-
-## Loading metric stores
+## Usage
 
 ```python
-from shuga import load_metrics
+from shuga import RunSpec, ClassificationSpec, MetricsSpec, ShugaPaths, CICEMetrics
 
-ds = load_metrics(
-    run=run,
-    classify=classify,
-    paths=paths,
-    classification="binary-days",
-    variables=["FIA", "FIT", "FIP"],
-)
+run = RunSpec(sim_name="LD-blend-base", start_date="2000-04-01", end_date="2003-06-30", hemisphere="SH")
+classify = ClassificationSpec(ice_type="FI", grid_type="Tc", methods=("binary-days",), ispd_thresh=5.0e-4)
+metrics_spec = MetricsSpec(methods=("binary-days",))
+paths = ShugaPaths(run=run, classify=classify, metrics=metrics_spec)
+
+runner = CICEMetrics(run=run, classify=classify, metrics=metrics_spec, paths=paths)
+runner.compute_metrics("binary-days", metric_groups=["fi_core", "fi_spatial", "fi_regional"], update_missing_only=True)
 ```
-
-## Adding a metric
-
-1. Add the name to `metrics/registry.py`.
-2. Put the calculation in `metrics/calculations.py` or another focused helper module.
-3. Add primary dispatch in `metrics/dispatch.py` if it is a directly computed metric.
-4. Add secondary orchestration in `metrics/secondary.py` if it derives from another metric.
-5. Add tests or smoke checks.
-6. Avoid adding another large `if/elif` block to `metrics/cice.py`.
-
-## Smoke test
-
-```python
-requested = {
-    "FIA",
-    "FIT",
-    "FIP",
-    "SIA",
-    "SIT",
-    "FIA_by_region",
-    "FIT_by_region",
-}
-
-ds = metrics._compute_requested_metrics("binary-days", requested)
-print(ds)
-```
-
-`_compute_requested_metrics()` is internal, but it is useful for developer smoke tests.

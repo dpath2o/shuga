@@ -1,163 +1,86 @@
 # Developer guide
 
-This guide is for maintaining `shuga` after the refactor.
+This guide is for maintaining `shuga` during active research development.
 
-## Development principles
+## Principles
 
-1. Keep public workflow classes small enough to read.
-2. Prefer pure helper functions for reusable calculations.
-3. Avoid duplicate path logic.
-4. Avoid duplicate loader logic.
-5. Keep generated data and job outputs out of Git.
-6. Test with a small real-store smoke test before pushing workflow changes.
+1. Keep workflow classes readable.
+2. Keep path rules centralised in `ShugaPaths`.
+3. Keep store discovery centralised in `CICEStoreLocator`.
+4. Keep CICE history loading centralised in `IceHistoryLoader`.
+5. Prefer pure helper functions for reusable calculations.
+6. Keep scripts thin.
+7. Keep generated data out of Git.
+8. Run small real-store smoke tests before pushing workflow changes.
+9. Update documentation whenever a public workflow or store layout changes.
 
-## Where new code belongs
+## Where code belongs
 
-| New code | Location |
+| Task | Location |
 |---|---|
 | Path rules | `core/paths.py` |
-| Runtime configuration | `core/types.py` |
-| Method/path naming | `core/naming.py` |
-| Store discovery | `io/store_locator.py` |
+| Runtime dataclasses | `core/types.py` |
+| Naming/method normalisation | `core/naming.py` |
 | CICE history loading | `io/iceh_loading.py` |
-| Public loaders | `io/zarr_loading.py` |
+| Public load facade | `io/zarr_loading.py` |
+| Store discovery | `io/store_locator.py` |
 | Zarr write cleanup | `io/zarr_writing.py` |
-| Grid loading | `grid/cice.py` |
-| Static-grid store building | `grid/static.py` |
+| CICE grid loading | `grid/cice.py` |
+| Static-grid construction | `grid/static.py` |
 | Geometry/unit helpers | `grid/geometry.py` |
+| Classification | `classify/cice.py` |
 | Metric names/groups | `metrics/registry.py` |
-| Pure metric calculations | `metrics/calculations.py` |
-| Primary metric dispatch | `metrics/dispatch.py` |
-| Secondary metric orchestration | `metrics/secondary.py` |
+| Pure metrics | `metrics/calculations.py` |
+| Metric dispatch | `metrics/dispatch.py` |
+| Secondary summaries/skill | `metrics/secondary.py` |
 | Stress diagnostics | `metrics/stress.py` |
-| Extrema/growth/retreat tables | `metrics/temporal.py` |
-| Skill stats | `metrics/skill.py` |
+| Temporal summaries | `metrics/temporal.py` |
 | Regional masks | `metrics/regional.py` |
-| Metrics-store helpers | `metrics/io.py` |
+| Observations | `observations/<PRODUCT>.py` |
+| Plotting/data prep | `plotting/*.py` |
+| Regridding | `regridding/*.py` |
+| PBS/CLI entry points | `scripts/*` |
 
-## Adding a metric
+## Versioning
 
-1. Add the metric name to `metrics/registry.py`.
-2. Add calculation code to a pure helper module.
-3. Add primary dispatch in `metrics/dispatch.py` if the metric is directly computed.
-4. Add secondary orchestration in `metrics/secondary.py` if it derives from another metric.
-5. Add any required source fields to `_get_cice()` in `metrics/cice.py`.
-6. Add a smoke test using a small date range.
-7. Update `docs/metrics.md`.
+For this documentation update, use version `0.5.0` in both `shuga/__init__.py` and `pyproject.toml` when ready.
 
-Do not add another long `if/elif` chain to `CICEMetrics`.
-
-## Adding a classification method
-
-1. Add method normalisation in `core/naming.py` if needed.
-2. Add path construction to `ShugaPaths`.
-3. Add classification logic to `classify/cice.py` or a focused helper module.
-4. Update `CICEStoreLocator` if the store layout differs.
-5. Update scripts and wrappers.
-6. Update `docs/classification.md`.
-
-## Testing checks
-
-Always run:
+## Smoke tests
 
 ```bash
 python -m compileall shuga
 ```
 
-Then run one lightweight Python smoke test. For metrics:
+Static-grid test:
 
 ```bash
-PYTHONPATH=$PWD python - <<'PY'
-from shuga import RunSpec, ClassificationSpec, ShugaPaths, CICEMetrics
-
-run = RunSpec(
-    sim_name="LD-static-Cs2p5e-4",
-    start_date="1993-01-01",
-    end_date="1993-01-31",
-    hemisphere="SH",
-    project="gv90",
-    user="da1339",
-)
-
-cls = ClassificationSpec(grid_type="Tc", methods=("binary-days",))
-paths = ShugaPaths(run=run, classify=cls)
-
-m = CICEMetrics(run=run, classify=cls, paths=paths)
-
-ds = m._compute_requested_metrics(
-    "binary-days",
-    {"FIA", "FIT", "FIP", "SIA", "SIT"},
-)
-
-print(ds)
+python - <<'PY'
+from shuga.core.paths import ShugaPaths
+from shuga.grid.cice import CICEGridwork
+paths = ShugaPaths()
+print(paths.resolve_static_store())
+print(CICEGridwork(paths=paths).load_cice_static(variables=["TLON", "TLAT", "tarea"]))
 PY
 ```
 
-## Repo hygiene
+Loader test:
 
-Before committing:
+```bash
+python - <<'PY'
+from shuga import RunSpec, ClassificationSpec, ShugaPaths, load_cice
+run = RunSpec(sim_name="LD-blend-base", start_date="2000-04-01", end_date="2000-04-03", hemisphere="SH")
+cls = ClassificationSpec(ice_type="FI", grid_type="Tc")
+paths = ShugaPaths(run=run, classify=cls)
+print(load_cice(run=run, classify=cls, paths=paths, variables=["aice", "TLON", "TLAT", "tarea"]))
+PY
+```
+
+## Hygiene
 
 ```bash
 find shuga -type d -name "__pycache__" -prune -exec rm -rf {} +
 find shuga -type f \( -name "*.pyc" -o -name "*.pyo" -o -name ".#*" \) -delete
 find shuga -type d -name ".ipynb_checkpoints" -prune -exec rm -rf {} +
 find shuga/scripts -type f \( -name "*.o[0-9]*" -o -name "*.e[0-9]*" -o -name "*.log" -o -name "*.out" -o -name "*.err" \) -delete
+git status --short
 ```
-
-Then check for tracked detritus:
-
-```bash
-git ls-files \
-  '*/__pycache__/*' \
-  '*.pyc' \
-  '*.pyo' \
-  '*.o[0-9]*' \
-  '*.e[0-9]*' \
-  '*.log' \
-  '.#*' \
-  '*/.#*' \
-  '.ipynb_checkpoints/*' \
-  '*/.ipynb_checkpoints/*'
-```
-
-This should print nothing.
-
-## Version consistency
-
-Keep these in sync:
-
-- `shuga/pyproject.toml`
-- `shuga/__init__.py`
-
-Check:
-
-```bash
-grep -n "version" shuga/pyproject.toml
-grep -n "__version__" shuga/__init__.py
-```
-
-## Documentation checks
-
-Before writing or publishing docs:
-
-```bash
-grep -RIn "shugga\|ShuggaPaths" shuga/README.md shuga/docs || true
-```
-
-This should print nothing. Use:
-
-- `shuga`
-- `ShugaPaths`
-
-## Commit style
-
-Use small commits with a single purpose. Examples:
-
-```text
-Extract metrics stress helpers
-Add static-grid documentation
-Remove generated PBS output artifacts
-Synchronise package version
-```
-
-Avoid mixed commits that combine generated output deletion, refactors, and documentation.

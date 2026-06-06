@@ -1,173 +1,74 @@
-# Static grid products
+# Static grid
 
-CICE history files may be written without static grid fields to save disk space. In that case, `shuga` can build a separate `iceh_static.zarr` store from grid assets and merge it during loading.
+`shuga` uses a universal CICE 1/4-degree C-grid static-coordinate store:
 
-## Why `iceh_static.zarr` exists
+```text
+~/AFIM_archive/CICE_0p25_Cgrid_coords.zarr
+```
 
-Many diagnostics require static fields:
+This store is grid-level, not simulation-level. It is shared by classification, metrics, plotting, observation comparison, regridding, and NetCDF-to-Zarr conversion workflows.
 
-- `TLON`
-- `TLAT`
-- `ULON`
-- `ULAT`
-- `ELON`
-- `ELAT`
-- `NLON`
-- `NLAT`
-- `tarea`
-- `uarea`
-- `earea`
-- `narea`
-- `HTE`
-- `HTN`
-- `ANGLE`
-- `ANGLET`
-- `NCAT`
+## Why it exists
 
-If these are disabled in `ice_in`, the dynamic history files remain usable for time-dependent variables but are insufficient for metrics, plotting, and regional reductions.
+CICE history files can contain static grid variables such as `TLON`, `TLAT`, `tarea`, and `HTE`. Writing those repeatedly in every daily or hourly file wastes storage and slows analysis. `shuga` therefore stores dynamic fields in simulation-specific grouped Zarr stores and static fields once in the universal grid store.
 
-## Builder
+## Expected fields
 
-Use:
+| Field | Grid | Meaning |
+|---|---|---|
+| `TLON`, `TLAT` | T | T-cell longitude/latitude |
+| `ULON`, `ULAT` | U/corner | U/corner longitude/latitude |
+| `ELON`, `ELAT` | E | East-face longitude/latitude |
+| `NLON`, `NLAT` | N | North-face longitude/latitude |
+| `tarea`, `uarea`, `earea`, `narea` | area | grid-cell/face areas |
+| `dxt`, `dyt`, `dxu`, `dyu`, `dxe`, `dye`, `dxn`, `dyn` | metric | grid spacings |
+| `HTE`, `HTN` | metric | CICE grid metrics |
+| `ANGLE`, `ANGLET` | angle | grid orientation |
+| `tmask`, `umask`, `emask`, `nmask` | mask | grid masks |
+| `NCAT` | scalar | number of ice categories |
+
+## Loading
+
+```python
+from shuga.core.paths import ShugaPaths
+from shuga.grid.cice import CICEGridwork
+
+paths = ShugaPaths()
+static = CICEGridwork(paths=paths).load_cice_static(
+    variables=["TLON", "TLAT", "tarea", "uarea", "earea", "narea"],
+    require=("TLON", "TLAT"),
+)
+print(static)
+```
+
+The loader supports both proper xarray Zarr Dataset stores and existing loose per-variable Zarr-array directories.
+
+## Building
+
+Static-grid construction belongs in `shuga/grid/static.py`.
 
 ```python
 from shuga import RunSpec, ClassificationSpec, CICEGridSpec, ShugaPaths
 from shuga.grid.static import CICEStaticBuilder
 
-run = RunSpec(
-    sim_name="LD-static-Cs2p5e-4",
-    start_date="1993-01-01",
-    end_date="1993-01-31",
-    hemisphere="SH",
-    project="gv90",
-    user="da1339",
-)
-
+run = RunSpec(sim_name="LD-blend-base", start_date="2000-01-01", end_date="2000-12-31", hemisphere="SH")
 classify = ClassificationSpec(grid_type="Tc")
-
-grid = CICEGridSpec(
-    grid_file="/home/581/da1339/grids/ACCESS-OM3-025_ocean_hgrid.nc",
-    kmt_file="/home/581/da1339/grids/ACCESS-OM3-025_kmt_super.nc",
-    bathymetry_file="/g/data/gv90/da1339/grids/ACCESS-OM3-025_topog.nc",
-)
-
-paths = ShugaPaths(run=run, classify=classify, cice_grid=grid)
+grid_spec = CICEGridSpec(grid_file="/path/to/CICE_grid.nc", kmt_file="/path/to/kmt.nc")
+paths = ShugaPaths(run=run, classify=classify, cice_grid=grid_spec)
 
 builder = CICEStaticBuilder(paths)
-ds_static = builder.build_dataset_from_resolved_assets(require_metadata=False)
-print(ds_static)
+builder.write_zarr_from_resolved_assets(overwrite=False, require_metadata=False)
 ```
 
-To write:
-
-```python
-builder.write_zarr_from_resolved_assets(
-    overwrite=False,
-    require_metadata=True,
-)
-```
-
-The default target is:
-
-```text
-/g/data/<PROJECT>/<USER>/afim_output/<SIM_NAME>/zarr/iceh_static.zarr
-```
-
-## Metadata inputs
-
-The static builder prefers run metadata files when available:
-
-1. `ice_in`
-2. `ice_diag.d`
-
-These are used for provenance and fields such as `NCAT`.
-
-If neither exists and `require_metadata=True`, the builder will not write the static store. For testing grid geometry only, use:
-
-```python
-require_metadata=False
-```
+The default target is `paths.resolve_static_store_target()`.
 
 ## Shape safety
 
-The builder does not crop or reshape masks to fit.
+The static builder should not silently crop or reshape grid masks. A source mask with shape `(1152, 1440)` is not equivalent to a target CICE grid with shape `(1080, 1440)`. Silent cropping can corrupt spatial alignment.
 
-Example warning:
+## Development rules
 
-```text
-Skipping /home/581/da1339/grids/ACCESS-OM3-025_kmt_super.nc mask because shape
-(1152, 1440) does not match target T-grid shape (1080, 1440).
-```
-
-This is deliberate. A 1152-row supergrid mask is not equivalent to a 1080-row CICE T-grid mask. Silently cropping it would corrupt spatial alignment.
-
-If an incompatible mask is skipped, the static store can still contain geometry fields such as `TLON`, `TLAT`, `tarea`, `HTE`, and `HTN`. Metrics that require area and coordinates can still work.
-
-## Expected dataset structure
-
-A successful static dataset may look like:
-
-```text
-Dimensions:
-  nj:   1080
-  ni:   1440
-  nj_b: 1081
-  ni_b: 1441
-
-Coordinates:
-  TLON(nj, ni)
-  TLAT(nj, ni)
-  ULON(nj_b, ni_b)
-  ULAT(nj_b, ni_b)
-  ELON(nj, ni_b)
-  ELAT(nj, ni_b)
-  NLON(nj_b, ni)
-  NLAT(nj_b, ni)
-
-Data variables:
-  ANGLET(nj, ni)
-  ANGLE(nj, ni)
-  HTE(nj, ni)
-  HTN(nj, ni)
-  tarea(nj, ni)
-  uarea(nj, ni)
-  earea(nj, ni)
-  narea(nj, ni)
-  dxt/dyt/dxu/dyu/dxe/dye/dxn/dyn
-  NCAT
-```
-
-`tmask` may be absent if no compatible mask was found.
-
-## Loading with static fields
-
-Once written, load normally:
-
-```python
-from shuga import load_cice
-
-ds = load_cice(
-    run=run,
-    classify=classify,
-    paths=paths,
-    variables=["aice", "hi", "tarea", "TLON", "TLAT"],
-)
-```
-
-`load_cice()` will merge static fields automatically.
-
-## Development notes
-
-Static-grid construction belongs in:
-
-```text
-shuga/grid/static.py
-```
-
-Pure coordinate and unit helpers belong in:
-
-```text
-shuga/grid/geometry.py
-```
-
-Do not add static-grid reconstruction logic to conversion scripts, loaders, classifier code, or metrics code.
+- Static-grid construction belongs in `grid/static.py`.
+- Static-grid loading belongs in `grid/cice.py`.
+- Automatic static/dynamic merging belongs in `io/iceh_loading.py`.
+- Do not add static-grid reconstruction logic to classification, metrics, plotting, or notebooks.

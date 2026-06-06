@@ -467,23 +467,23 @@ class CICEPlotter:
 
     def _load_static_lonlat(self, sim_name: str | None = None) -> xr.Dataset:
         """
-        Load only the static grid dataset needed for lon/lat detection.
-        This avoids calling load_cice() just to get TLON/TLAT.
+        Load lon/lat fields from the universal CICE static-coordinate store.
+
+        This avoids relying on simulation-local zarr/iceh_static.zarr. The
+        universal default is:
+
+            ~/AFIM_archive/CICE_0p25_Cgrid_coords.zarr
         """
-        target_sim = sim_name or self.run.sim_name
-        # Prefer a dedicated paths helper if you already have one.
-        if hasattr(self.paths, "iceh_static_path"):
-            static_path = Path(self.paths.iceh_static_path(sim_name=target_sim)).expanduser()
-        else:
-            # Fallback path pattern; adjust if your ShugaPaths API differs.
-            static_path = Path(self.paths.output_root).expanduser() / "zarr" / "iceh_static.zarr"
-        if not static_path.exists():
-            raise FileNotFoundError(f"Could not find static grid store: {static_path}")
-        ds = xr.open_zarr(static_path, chunks=self.chunks, consolidated=False)
-        wanted = [v for v in ("TLON", "TLAT", "ULON", "ULAT") if v in ds.variables]
+        from shuga.grid.cice import CICEGridwork
+        gridwork = CICEGridwork(paths = self.paths, logger = self.logger)
+        ds = gridwork.load_cice_static(variables   = ["TLON", "TLAT", "ULON", "ULAT", "ELON", "ELAT", "NLON", "NLAT"],
+                                       require     = ("TLON", "TLAT"),
+                                       chunks      = self.chunks,
+                                       add_aliases = True)
+        wanted = [v for v in ("TLON", "TLAT", "ULON", "ULAT", "ELON", "ELAT", "NLON", "NLAT") if v in ds]
         if not wanted:
-            raise KeyError(f"No recognised lon/lat variables found in {static_path}. "
-                           "Expected one or more of TLON, TLAT, ULON, ULAT.")
+            raise KeyError("No recognised lon/lat variables found in universal CICE static store. "
+                           "Expected one or more of TLON, TLAT, ULON, ULAT, ELON, ELAT, NLON, NLAT.")
         return ds[wanted]
 
     # ------------------------------------------------------------

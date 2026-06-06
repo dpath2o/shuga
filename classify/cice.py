@@ -194,7 +194,6 @@ class CICEClassifier:
         if self._ds_cache is None:
             vars_keep    = [self.classify.aice_var, *self._required_velocity_vars(), "TLON", "TLAT"]
             self.logger.info("Resolved CICE store: %s", self.paths.resolve_cice_store())
-            static_store = self.paths.resolve_static_store()
             if static_store is not None:
                 self.logger.info("Resolved static store: %s", static_store)
             dt0            = (pd.to_datetime(self.run.start_date) - pd.Timedelta(days=int(extend_days))).strftime("%Y-%m-%d")
