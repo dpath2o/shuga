@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 import numpy as np
 import xarray as xr
 from shuga.core.paths import ShugaPaths
@@ -351,3 +351,125 @@ class CICEGridwork:
         if P_grid is None and P_mask_org is None and P_mask_mod is None and not slice_hem and build_faces:
             self._grid_bundle = bundle
         return bundle
+
+    def load_cice_static(self, P_cice_static_store: str | Path | None = None, *,
+                         variables    : Iterable[str] | None = None,
+                         require      : Iterable[str] = ("TLON", "TLAT"),
+                         hemisphere   : str | None = None,
+                         south_lat_max: float | None = None,
+                         lon_type     : str | None = None,
+                         chunks       : dict | None = None,
+                         consolidated : bool = False,
+                         add_aliases  : bool = True) -> xr.Dataset:
+        """
+        Load the persistent CICE static-coordinate zarr store.
+
+        Default store:
+            ~/AFIM_archive/CICE_0p25_Cgrid_coords.zarr
+
+        Parameters
+        ----------
+        P_cice_static_store
+            Optional explicit zarr path. If omitted, use
+            ``self.paths.resolve_static_store()``.
+        variables
+            Optional variable list to return. If omitted, all variables in the
+            static store are returned.
+        require
+            Variables that must be present before optional subsetting. By default
+            TLON and TLAT are required.
+        hemisphere
+            Optional hemisphere subset. Use "SH" or "NH". This is a latitude-sign
+            subset and is intentionally conservative.
+        south_lat_max
+            Optional southern-latitude row subset, e.g. -45.0 for Antarctic
+            comparison workflows. If supplied, rows are kept where any TLAT in the
+            row is <= south_lat_max.
+        lon_type
+            Optional longitude convention for longitude variables:
+            "0-360" or "-180-180". If None, leave stored values unchanged.
+        chunks
+            Optional xarray chunks passed to ``xr.open_zarr``.
+        consolidated
+            Whether to use consolidated zarr metadata.
+        add_aliases
+            If True, add uppercase aliases such as TAREA from tarea when useful.
+            Existing variables are not overwritten.
+
+        Returns
+        -------
+        xr.Dataset
+            Static CICE coordinate/metric/mask dataset.
+        """
+        if P_cice_static_store is None:
+            P_ = self.paths.resolve_static_store()
+            if P_ is None:
+                raise FileNotFoundError("Could not find CICE static-coordinate zarr store. "
+                                        f"Default expected at {self.paths.default_cice_static_store_path}")
+        else:
+            P_ = Path(P_cice_static_store).expanduser()
+        P_ = Path(P_).expanduser()
+        if not P_.exists():
+            raise FileNotFoundError(P_)
+        self._log(f"Opening CICE static-coordinate store: {P_}")
+        ds = xr.open_zarr(P_, consolidated=consolidated, chunks=chunks)
+        missing_required = [v for v in require if v not in ds]
+        if missing_required:
+            raise KeyError(f"Required CICE static variable(s) missing from {P_}: "
+                           f"{missing_required}. Available variables: {list(ds.data_vars)}")
+        if add_aliases:
+            alias_pairs = {"tarea": "TAREA",
+                           "uarea": "UAREA",
+                           "earea": "EAREA",
+                           "narea": "NAREA",
+                           "tmask": "TMASK",
+                           "umask": "UMASK",
+                           "emask": "EMASK",
+                           "nmask": "NMASK",
+                           "dxt": "DXT",
+                           "dyt": "DYT",
+                           "dxu": "DXU",
+                           "dyu": "DYU",
+                           "dxe": "DXE",
+                           "dye": "DYE",
+                           "dxn": "DXN",
+                           "dyn": "DYN"}
+            for src, dst in alias_pairs.items():
+                if src in ds and dst not in ds:
+                    ds[dst] = ds[src]
+        if lon_type is not None:
+            if lon_type not in {"0-360", "-180-180"}:
+                raise ValueError("lon_type must be None, '0-360', or '-180-180'.")
+            for lon_name in ("TLON", "ULON", "ELON", "NLON"):
+                if lon_name in ds:
+                    ds[lon_name] = self.normalise_longitudes(ds[lon_name], to=lon_type)
+        # Optional latitude/hemisphere subsetting. This is row-based so it remains
+        # cheap and preserves the full circumpolar x direction.
+        if hemisphere is not None or south_lat_max is not None:
+            if "TLAT" not in ds:
+                raise KeyError("TLAT is required for hemisphere/south_lat_max subsetting.")
+            tlat = ds["TLAT"]
+            if tlat.ndim != 2:
+                raise ValueError(f"Expected TLAT to be 2-D, got dims={tlat.dims}")
+            ydim, xdim = tlat.dims
+            if south_lat_max is not None:
+                row_mask = (tlat <= float(south_lat_max)).any(dim=xdim).compute()
+            else:
+                hemi = self.paths.canonical_hemisphere(hemisphere or self.paths.hemisphere)
+                if hemi == "SH":
+                    row_mask = (tlat <= 0.0).any(dim=xdim).compute()
+                else:
+                    row_mask = (tlat >= 0.0).any(dim=xdim).compute()
+            rows = np.where(row_mask.values)[0]
+            if rows.size == 0:
+                raise ValueError(f"No CICE static rows matched hemisphere={hemisphere!r}, south_lat_max={south_lat_max!r}.")
+            ds = ds.isel({ydim: slice(int(rows.min()), int(rows.max()) + 1)})
+        if variables is not None:
+            requested = list(dict.fromkeys([*require, *variables]))
+            present = [v for v in requested if v in ds]
+            missing = [v for v in requested if v not in ds]
+            if missing:
+                self._warn(f"Requested static variable(s) missing from {P_}: {missing}")
+            ds = ds[present]
+        ds.attrs.update(source_path = str(P_), grid_kind = "cice_static_zarr", loader = "CICEGridwork.load_cice_static")
+        return ds

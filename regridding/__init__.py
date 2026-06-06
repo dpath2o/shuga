@@ -22,4 +22,10 @@ __all__ = ["parse_grid_selection",
            "XESMFRegridSpec",
            "build_xesmf_regridder",
            "regrid_dataarray_to_cice_tgrid",
-           "format_era5_to_cice_weight_filename"]
+           "format_era5_to_cice_weight_filename",
+           "PyresampleSpec",
+           "fip_difference_dataset",
+           "add_lonlat_from_epsg3031",
+           "area_definition_from_lonlat_pairs",
+           "resample_dataarray_to_area",
+           "resample_swath_to_area"]

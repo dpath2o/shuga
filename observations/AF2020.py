@@ -10,13 +10,16 @@ from shuga.core.paths import ShugaPaths
 from shuga.core.types import ObservationSpec, RunSpec
 
 @dataclass(slots=True)
-class AF2020Naming:
+class AF2020Spec:
     """Variable and coordinate names used by the raw AF2020 gridded product."""
     variable : str = "Fast_Ice_Time_series"
     lon      : str = "longitude"
     lat      : str = "latitude"
     area     : str = "area"
     time     : str = "time"
+    D_org_nc : str | Path | None = "/g/data/jk72/af1544/fraser2020_data"
+    D_reG    : str | Path | None = Path("/g/data/gv90/da1339/SeaIce/FI_obs")
+    F_reG    : str = "AF-FI-2020db_common-5km_pyresample.zarr"
     threshold: float = 4.0
 
 class AF2020Observations:
@@ -36,16 +39,18 @@ class AF2020Observations:
     15-day sampling unless the caller explicitly requests daily sampling.
     """
     def __init__(self, run: RunSpec | None = None, observations: ObservationSpec | None = None, paths: ShugaPaths | None = None, *,
-                 raw_root: str | Path | None = None,
+                 D_org_nc: str | Path | None = None,
+                 D_reG   : str | Path | None = None,
                  chunks  : dict | None = None,
-                 naming  : AF2020Naming | None = None,
+                 af20_cfg: AF2020Spec | None = None,
                  logger = None) -> None:
-        self.run          = run or RunSpec(sim_name="AF2020", start_date="2000-01-01", end_date="2018-12-31")
+        self.af20_cfg     = af20_cfg or AF2020Spec()
+        self.run          = run or RunSpec(sim_name = "AF2020", start_date = "2000-01-01", end_date = "2018-12-31")
         self.observations = observations or ObservationSpec()
-        self.paths        = paths or ShugaPaths(run=self.run, classify=None, observations=self.observations)  # type: ignore[arg-type]
-        self.raw_root     = Path(raw_root).expanduser() if raw_root is not None else self.paths.fi_obs_root_path / "org"
+        self.paths        = paths or ShugaPaths(run = self.run, classify = None, observations = self.observations)  # type: ignore[arg-type]
+        self.D_org_nc     = Path(D_org_nc).expanduser() if D_org_nc is not None else self.af20_cfg.D_org_nc
+        self.D_reG        = Path(D_reG).expanduser() if D_reG is not None else self.af20_cfg.D_reG
         self.chunks       = chunks or {"time": "auto"}
-        self.naming       = naming or AF2020Naming()
         self.logger       = logger or build_file_logger("shuga.observations.AF2020", Path.home() / "logs" / "observations" / "shuga_AF2020.log")
         self._raw_cache: xr.Dataset | None = None
         self._fia_daily_cache: xr.Dataset | None = None
@@ -53,31 +58,31 @@ class AF2020Observations:
     # ---------------------------------------------------------------------
     # file discovery and loading
     # ---------------------------------------------------------------------
-    def raw_files(self, start_date: str | None = None, end_date: str | None = None) -> list[Path]:
-        """Return raw AF2020 ``FastIce_70_YYYY.nc`` files covering a date range."""
+    def org_files(self, start_date: str | None = None, end_date: str | None = None) -> list[Path]:
+        """Return origin AF2020 ``FastIce_70_YYYY.nc`` files covering a date range."""
         start = pd.Timestamp(start_date or self.run.start_date)
         end   = pd.Timestamp(end_date or self.run.end_date)
         years = range(int(start.year), int(end.year) + 1)
-        files = [self.raw_root / f"FastIce_70_{year:04d}.nc" for year in years]
+        files = [self.D_org_nc / f"FastIce_70_{year:04d}.nc" for year in years]
         files = [p for p in files if p.exists()]
         if not files:
-            raise FileNotFoundError(f"No AF2020 FastIce_70_YYYY.nc files found in {self.raw_root} for {start:%Y-%m-%d}..{end:%Y-%m-%d}.")
+            raise FileNotFoundError(f"No AF2020 origin FastIce_70_YYYY.nc files found in {self.D_org_nc} for {start:%Y-%m-%d}..{end:%Y-%m-%d}.")
         return files
 
-    def open_raw(self, start_date: str | None = None, end_date: str | None = None) -> xr.Dataset:
-        """Open raw AF2020 native 15-day rasters and subset them to the requested dates."""
-        files = self.raw_files(start_date, end_date)
-        self.logger.info("Opening %s AF2020 raw files from %s", len(files), self.raw_root)
+    def open_org(self, start_date: str | None = None, end_date: str | None = None) -> xr.Dataset:
+        """Open origin AF2020 native 15-day rasters and subset them to the requested dates."""
+        files = self.org_files(start_date, end_date)
+        self.logger.info("Opening %s AF2020 orgin files from %s", len(files), self.D_org_nc)
         ds = xr.open_mfdataset(files, engine = "netcdf4", combine = "by_coords", chunks = self.chunks, data_vars = "minimal", coords = "minimal", compat = "override")
-        ds = self._normalise_raw(ds)
+        ds = self._normalise_org(ds)
         if start_date is not None or end_date is not None:
             ds = ds.sel(time=slice(start_date, end_date))
-        self._raw_cache = ds
+        self._org_cache = ds
         return ds
 
-    def _normalise_raw(self, ds: xr.Dataset) -> xr.Dataset:
-        """Standardise raw AF2020 names while preserving the native grid."""
-        n = self.naming
+    def _normalise_org(self, ds: xr.Dataset) -> xr.Dataset:
+        """Standardise origin AF2020 names while preserving the native grid."""
+        n = self.af20_cfg
         rename: dict[str, str] = {}
         if n.time in ds and n.time != "time":
             rename[n.time] = "time"
@@ -113,9 +118,9 @@ class AF2020Observations:
         The default threshold is ``Fast_Ice_Time_series >= 4``. Values outside the
         threshold are zero rather than NaN so persistence is a true occupancy fraction.
         """
-        ds     = ds if ds is not None else (self._raw_cache or self.open_raw())
-        n      = self.naming
-        thresh = float(self.naming.threshold if threshold is None else threshold)
+        ds     = ds if ds is not None else (self._org_cache or self.open_org())
+        n      = self.af20_cfg
+        thresh = float(self.af20_cfg.threshold if threshold is None else threshold)
         mask   = xr.where(ds[n.variable] >= thresh, 1.0, 0.0).astype("float32")
         mask   = self._with_standard_spatial_dims(mask).rename(name)
         # Attach AF2020 lon/lat using the same spatial dims as mask.
@@ -136,8 +141,8 @@ class AF2020Observations:
 
     def native_area(self, ds: xr.Dataset | None = None) -> xr.DataArray | None:
         """Return native AF2020 cell area in m2 when present."""
-        ds = ds if ds is not None else (self._raw_cache or self.open_raw())
-        n  = self.naming
+        ds = ds if ds is not None else (self._org_cache or self.open_org())
+        n  = self.af20_cfg
         if n.area not in ds:
             return None
         area = ds[n.area]
@@ -163,7 +168,7 @@ class AF2020Observations:
         if method not in {"linear", "nearest"}:
             raise ValueError("method must be 'linear' or 'nearest'.")
         if mask is None:
-            ds = self.open_raw(start_date, end_date)
+            ds = self.open_org(start_date, end_date)
             mask = self.native_mask(ds)
         start       = pd.Timestamp(start_date or str(pd.to_datetime(mask.time.values[0]).date()))
         end         = pd.Timestamp(end_date or str(pd.to_datetime(mask.time.values[-1]).date()))
@@ -199,7 +204,7 @@ class AF2020Observations:
                    threshold : float | None = None,
                    name      : str = "AF_FIP_native") -> xr.DataArray:
         """Compute AF2020 FIP on the native 15-day AF2020 grid."""
-        ds = ds if ds is not None else self.open_raw(start_date, end_date)
+        ds = ds if ds is not None else self.open_org(start_date, end_date)
         mask = self.native_mask(ds, threshold=threshold)
         return self.persistence(mask, start_date=start_date, end_date=end_date, name=name)
 

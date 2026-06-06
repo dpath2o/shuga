@@ -22,6 +22,10 @@ class ShugaPaths:
     wave_forcing       : WaveForcingSpec    | None = None
     cice_grid          : CICEGridSpec       | None = None
     lateral_drag       : LateralDragSpec    | None = None
+    default_project    : str = "gv90"
+    default_user       : str = "da1339"
+    default_hemisphere : str = "SH"
+    gdata_root         : str | Path | None = None
     afim_output_root   : str | Path | None = None
     graphics_root      : str | Path | None = None
     logs_root          : str | Path | None = None
@@ -29,9 +33,40 @@ class ShugaPaths:
     static_store       : str | Path | None = None
     classification_root: str | Path | None = None
     archive_root       : str | Path | None = None
-    default_project    : str = "gv90"
-    default_user       : str = "da1339"
-    default_hemisphere : str = "SH"
+
+    def __post_init__(self) -> None:
+        project = self.run.project if self.run is not None else self.default_project
+        user    = self.run.user    if self.run is not None else self.default_user
+        if self.gdata_root is None:
+            self.gdata_root = Path("/g/data") / project / user
+        else:
+            self.gdata_root = Path(self.gdata_root).expanduser()
+        if self.afim_output_root is None:
+            self.afim_output_root = self.gdata_root / "afim_output"
+        else:
+            self.afim_output_root = Path(self.afim_output_root).expanduser()
+        if self.graphics_root is None:
+            self.graphics_root = self.gdata_root / "GRAPHICAL"
+        else:
+            self.graphics_root = Path(self.graphics_root).expanduser()
+        if self.logs_root is None:
+            self.logs_root = self.gdata_root / "logs"
+        else:
+            self.logs_root = Path(self.logs_root).expanduser()
+        if self.archive_root is None:
+            self.archive_root = Path.home() / "AFIM_archive"
+        else:
+            self.archive_root = Path(self.archive_root).expanduser()
+        if self.static_store is None:
+            self.static_store = self.afim_output_root / "CICE_0p25_Cgrid_coords.zarr"
+        else:
+            self.static_store = Path(self.static_store).expanduser()
+        if self.classification_root is None:
+            self.classification_root = self.archive_root
+        else:
+            self.classification_root = Path(self.classification_root).expanduser()
+        if self.cice_store is not None:
+            self.cice_store = Path(self.cice_store).expanduser()
 
     #--------------------------------------------------------------------------------------------------
     # class properties
@@ -114,6 +149,33 @@ class ShugaPaths:
             return Path(self.archive_root).expanduser()
         run = self._require_run("archive_root_path")
         return Path.home() / "AFIM_archive" / run.sim_name
+
+    @property
+    def default_cice_static_store_path(self) -> Path:
+        """
+        Default persistent CICE static-coordinate store.
+
+        This store is grid-level, not simulation-level, and is intended to be shared
+        by AF2020 comparison, plotting, regridding, and other workflows.
+
+        Expected default:
+            ~/AFIM_archive/CICE_0p25_Cgrid_coords.zarr
+        """
+        return Path.home() / "AFIM_archive" / "CICE_0p25_Cgrid_coords.zarr"
+
+
+    @property
+    def cice_static_store_path(self) -> Path:
+        """
+        Return an existing CICE static-coordinate store, or raise if none exists.
+        """
+        path = self.resolve_static_store()
+        if path is None:
+            raise FileNotFoundError("Could not find a CICE static-coordinate zarr store. "
+                                    f"Tried default={self.default_cice_static_store_path}, "
+                                    f"static_store={self.static_store}, "
+                                    f"zarr_root={self.zarr_root / 'iceh_static.zarr'}")
+        return path
 
     @property
     def graphics_root_path(self) -> Path:
@@ -450,18 +512,44 @@ class ShugaPaths:
         return self.default_cice_grid_file_path
 
     def resolve_static_store_target(self) -> Path:
+        """
+        Return the target path for writing a persistent CICE static-coordinate store.
+        """
         if self.static_store is not None:
             return Path(self.static_store).expanduser()
-        return self.zarr_root / "iceh_static.zarr"
+        return self.default_cice_static_store_path
+
 
     def resolve_static_store(self) -> Path | None:
-        candidates = []
+        """
+        Resolve an existing CICE static-coordinate zarr store.
+
+        Search order:
+          1. explicit/default self.static_store,
+          2. shared archive static store,
+          3. legacy /g/data afim_output shared store,
+          4. simulation-local iceh_static.zarr fallbacks.
+        """
+        candidates: list[Path] = []
         if self.static_store is not None:
             candidates.append(Path(self.static_store).expanduser())
-        else:
-            candidates.extend([self.zarr_root / "iceh_static.zarr",
-                               self.zarr_root / "static" / "iceh_static.zarr"])
+        candidates.extend([self.default_cice_static_store_path,
+                           Path.home() / "AFIM_archive" / "CICE_0p25_Cgrid_coords.zarr",
+                           self.afim_output_root / "CICE_0p25_Cgrid_coords.zarr",
+                           self.zarr_root / "iceh_static.zarr",
+                           self.zarr_root / "static" / "iceh_static.zarr",
+                           self.archive_zarr_root_path / "iceh_static.zarr",
+                           self.archive_zarr_root_path / "static" / "iceh_static.zarr"])
+        # De-duplicate while preserving order.
+        seen: set[str] = set()
+        unique: list[Path] = []
         for candidate in candidates:
+            p = Path(candidate).expanduser()
+            key = str(p)
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
+        for candidate in unique:
             if candidate.exists():
                 return candidate
         return None
