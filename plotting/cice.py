@@ -525,135 +525,246 @@ class CICEPlotter:
                   land       = land       or self.plotting.land,
                   water      = water      or self.plotting.water)
 
-    def plot_fip(self, method: str,
-                 sim_name          : str | None                           = None,
-                 dt0_str           : str | None                           = None,
-                 dtN_str           : str | None                           = None,
-                 grid_type         : str | None                           = None,
-                 FIP_plot_thresh   : float                                = 0.05,
-                 output_path       : str | None                           = None,
-                 output_root       : str | Path | None                    = None,
-                 region_name       : str | None                           = None,
-                 region            : Sequence[float] | None               = None,
+    def plot_fip(self,
+                 method            : str = "binary-days", *,
+                 source            : str = "sim",
+                 field             : str = "FIP",
+                 sim_name          : str | None = None,
+                 grid_type         : str | None = None,
+                 af2020_store      : str | Path | None = None,
+                 dataset           : xr.Dataset | xr.DataArray | str | Path | None = None,
+                 af2020_start      : str | None = None,
+                 af2020_end        : str | None = None,
+                 FIP_plot_thresh   : float | None = 0.05,
+                 output_path       : str | Path | None = None,
+                 output_root       : str | Path | None = None,
+                 region_name       : str | None = None,
+                 region            : Sequence[float] | None = None,
                  regions           : Mapping[str, Sequence[float]] | None = None,
-                 fig_size          : float | None                         = None,
-                 cmap              : str | Path | None                    = None,
-                 title             : str | None                           = None,
-                 shorelines        : str | None                           = None,
-                 land              : str | None                           = None,
-                 water             : str | None                           = None,
-                 grid_style        : str | None                           = None,
-                 colorbar_position : str | None                           = "JMB+w8c/0.4c+o0.8c/0c",
-                 colorbar_xlabel   : str | None                           = "Fast Ice Persistence",
-                 colorbar_ylabel   : str | None                           = None,
-                 show              : bool                                 = False) -> str | dict[str, str]:
+                 fig_size          : float | None = None,
+                 cmap              : str | Path | None = None,
+                 series            : Sequence[float] | None = None,
+                 title             : str | None = None,
+                 shorelines        : str | None = None,
+                 land              : str | None = None,
+                 water             : str | None = None,
+                 grid_style        : str | None = None,
+                 colorbar_position : str | None = "JMB+w8c/0.4c+o0.8c/0c",
+                 colorbar_frame    : Sequence[str] | None = None,
+                 categorical_labels: Sequence[str] = ("agreement", "model-dominant", "obs-dominant"),
+                 categorical_colors: Sequence[str] = ("#FDAE61", "#2CA25F", "#2171B5"),
+                 show              : bool = False) -> str | dict[str, str]:
         """
-        Plot fast-ice persistence (FIP).
+        Plot precomputed fast-ice persistence products.
 
-        Two modes are supported:
+        This method deliberately does *not* recompute simulation FIP. Simulation
+        FIP is loaded from the shuga metrics store:
 
-        1) Default mode:
-           Uses self.run/self.classify and attempts to load metrics["FIP"].
+            [SIM_NAME]/zarr/SH/ispd_thresh_<VAL>/FI/[GRID]/[BIN-DAYS]/mets.zarr/FIP
 
-        2) Alternate mode:
-           If sim_name, dt0_str, and dtN_str are all provided, loads the
-           classification dataset for that simulation/date window, subsets
-           the requested dates, computes FIP from FI_mask, and plots that.
+        Supported sources
+        -----------------
+        source="sim"
+            Plot simulation FIP from the metrics store. Dates are not accepted,
+            because the stored metric already represents the analysis window used
+            when metrics were generated.
+
+        source="af2020"
+            Plot AF2020 FIP from a persistent AF2020 common-grid zarr store.
+            If af2020_start/af2020_end are supplied, FIP is computed from the
+            stored native-15-day AF2020 FIC variable over that period. Otherwise
+            the stored FIP variable is used.
+
+        source="dataset"
+            Plot an explicitly supplied dataset/dataarray/path. Use this for
+            FIP['diff'] or FIP['diff_cat'] generated by FIP_differencing.py.
+
+        field
+        -----
+        "FIP", "diff", or "diff_cat" are the intended values, but any variable
+        present in the supplied dataset can be plotted.
         """
-        pygmt         = self._require_pygmt()
-        norm          = normalize_method(method)
-        explicit_mode = _any_not_none(sim_name, dt0_str, dtN_str)
-        if explicit_mode and not all(v is not None for v in (sim_name, dt0_str, dtN_str)):
-            raise ValueError("For alternate plot_fip mode, provide sim_name, dt0_str, and dtN_str together.")
-        target_sim  = sim_name or self.run.sim_name
-        target_dt0  = dt0_str or self.run.start_date
-        target_dtN  = dtN_str or self.run.end_date
+        pygmt = self._require_pygmt()
+        norm = normalize_method(method)
+        source_l = str(source).strip().lower()
+        field_l = str(field).strip()
+        target_sim = sim_name or self.run.sim_name
         target_grid = grid_type or self.classify.grid_type
-        # --- branch 1: use precomputed metrics['FIP'] from the plotter's own run
-        if not explicit_mode:
-            self.logger.info(f"plot_fip: loading precomputed FIP from metrics store for "
-                             f"{self.run.sim_name} ({norm})")
-            ds = load_metrics(run            = self.run,
-                              classify       = self.classify,
-                              metrics        = self.metrics,
-                              classification = norm,
-                              hemisphere     = self.run.hemisphere,
-                              chunks         = self.chunks)
+
+        lon = lat = None
+        label = target_sim
+
+        if source_l == "sim":
+            if af2020_start is not None or af2020_end is not None:
+                raise ValueError(
+                    "Do not pass af2020_start/af2020_end when source='sim'. "
+                    "Simulation FIP is loaded from the precomputed metrics store."
+                )
+
+            ds = load_metrics(
+                run=self.run,
+                classify=self.classify,
+                metrics=self.metrics,
+                plotting=self.plotting,
+                observations=self.observations,
+                paths=self.paths,
+                classification=norm,
+                sim_name=target_sim,
+                variables=["FIP"],
+                hemisphere=self.run.hemisphere,
+                grid_type=target_grid,
+                chunks=self.chunks,
+            )
             if "FIP" not in ds:
-                raise KeyError(f"metrics store does not contain 'FIP' for "
-                               f"{self.run.sim_name} / {norm}")
-            static_ds = self._load_static_lonlat(sim_name=self.run.sim_name)
-            lon, lat  = self._detect_lonlat(static_ds)
-            fip       = ds["FIP"]
-        # --- branch 2: load classification for requested sim/date range and compute FIP
-        else:
-            self.logger.info(f"plot_fip: computing FIP from classification for "
-                             f"{target_sim} ({target_dt0} to {target_dtN}, {norm}, grid={target_grid})")
-            run      = replace(self.run, sim_name=target_sim)
-            classify = replace(self.classify, grid_type=target_grid)
-            cls      = load_classified(run            = run,
-                                       classify       = classify,
-                                       classification = norm,
-                                       hemisphere     = run.hemisphere,
-                                       chunks         = self.chunks)
-            if "FI_mask" not in cls:
-                raise KeyError(f"classification store does not contain 'FI_mask' for "
-                               f"{target_sim} / {norm} / {target_grid}")
-            if "time" not in cls["FI_mask"].dims:
-                raise ValueError("FI_mask must have a 'time' dimension to compute FIP.")
-            fi_mask = cls["FI_mask"].sel(time=slice(target_dt0, target_dtN))
-            if fi_mask.sizes.get("time", 0) == 0:
-                raise ValueError(f"No classification data found for {target_sim} between "
-                                 f"{target_dt0} and {target_dtN}.")
-            fip       = compute_fip(fi_mask)
+                raise KeyError(f"Could not find FIP in metrics store for {target_sim}/{norm}/{target_grid}.")
+            da = ds["FIP"].squeeze(drop=True)
             static_ds = self._load_static_lonlat(sim_name=target_sim)
-            lon, lat  = self._detect_lonlat(static_ds)
-        region_map            = self._resolve_regions(region_name = region_name,
-                                                      region      = region,
-                                                      regions     = regions)
+            lon, lat = self._detect_lonlat(static_ds)
+            label = target_sim
+
+        elif source_l == "af2020":
+            if af2020_store is None:
+                raise ValueError("source='af2020' requires af2020_store=...")
+
+            ods = xr.open_zarr(Path(af2020_store).expanduser(), consolidated=False, chunks=self.chunks)
+            if af2020_start is not None or af2020_end is not None:
+                if "FIC" not in ods:
+                    raise KeyError("AF2020 store does not contain FIC; cannot compute period-specific AF2020 FIP.")
+                da = ods["FIC"].sel(time=slice(af2020_start, af2020_end)).mean("time", skipna=True).rename("FIP")
+                da.attrs.update(
+                    long_name="AF2020 fast ice persistence",
+                    units="1",
+                    time_start=str(pd.Timestamp(af2020_start).date()) if af2020_start else str(pd.Timestamp(ods.time.values[0]).date()),
+                    time_end=str(pd.Timestamp(af2020_end).date()) if af2020_end else str(pd.Timestamp(ods.time.values[-1]).date()),
+                )
+            else:
+                if "FIP" not in ods:
+                    raise KeyError("AF2020 store does not contain FIP.")
+                da = ods["FIP"].squeeze(drop=True)
+            lon = ods["lon"] if "lon" in ods else da.coords.get("lon")
+            lat = ods["lat"] if "lat" in ods else da.coords.get("lat")
+            label = "AF2020"
+
+        elif source_l == "dataset":
+            if dataset is None:
+                raise ValueError("source='dataset' requires dataset=...")
+
+            if isinstance(dataset, xr.DataArray):
+                da = dataset
+            else:
+                if isinstance(dataset, xr.Dataset):
+                    ds = dataset
+                else:
+                    p = Path(dataset).expanduser()
+                    ds = xr.open_zarr(p, consolidated=False, chunks=self.chunks) if p.suffix == ".zarr" or p.is_dir() else xr.open_dataset(p, chunks=self.chunks)
+                if field_l not in ds:
+                    raise KeyError(f"{field_l!r} not found in supplied dataset. Available variables: {list(ds.data_vars)}")
+                da = ds[field_l]
+                lon = ds["lon"] if "lon" in ds else da.coords.get("lon")
+                lat = ds["lat"] if "lat" in ds else da.coords.get("lat")
+            label = field_l
+
+        else:
+            raise ValueError("source must be one of: 'sim', 'af2020', 'dataset'.")
+
+        if "time" in da.dims:
+            if da.sizes.get("time", 0) != 1:
+                raise ValueError("plot_fip expects a 2-D field. Select a single time or compute persistence before plotting.")
+            da = da.isel(time=0, drop=True)
+
+        if lon is None or lat is None:
+            if "lon" in da.coords and "lat" in da.coords:
+                lon, lat = da["lon"], da["lat"]
+            else:
+                raise ValueError("Could not determine lon/lat for plot_fip.")
+
+        is_diff = field_l.lower() in {"diff", "fip_diff"}
+        is_cat = field_l.lower() in {"diff_cat", "fip_diff_cat"}
+
+        if FIP_plot_thresh is not None and not is_diff and not is_cat:
+            da_plot = da.where(da > float(FIP_plot_thresh))
+        else:
+            da_plot = da
+
+        if series is None:
+            if is_diff:
+                series = [-1.0, 1.0, 0.02]
+            elif is_cat:
+                series = [0, 2, 1]
+            else:
+                series = [0.0, 1.0, 0.05]
+
+        if cmap is None:
+            if is_diff:
+                cmap = "vik"
+            elif is_cat:
+                cpt = Path(self.paths.logs_root_path).expanduser() / "plotting" / "FIP_diff_cat.cpt"
+                cpt.parent.mkdir(parents=True, exist_ok=True)
+                pygmt.makecpt(
+                    cmap=",".join(categorical_colors),
+                    series=[0, 2, 1],
+                    categorical=True,
+                    color_model="R+c" + ",".join(categorical_labels),
+                    output=str(cpt),
+                )
+                cmap = str(cpt)
+            else:
+                cmap = self._default_fip_cmap()
+
+        region_map = self._resolve_regions(region_name=region_name, region=region, regions=regions)
         saved: dict[str, str] = {}
-        fip_plot = fip.where(fip > FIP_plot_thresh)   # choose your threshold
+
         for name, reg in region_map.items():
-            data = self.pygmt_da_prep(fip_plot, lon=lon, lat=lat, mask_zero=False, region=reg)
+            data = self.pygmt_da_prep(da_plot, lon=lon, lat=lat, mask_zero=False, region=reg)
+
             if output_path and len(region_map) == 1:
                 path = Path(output_path).expanduser()
-            elif output_root:
-                path = (Path(output_root).expanduser() / target_sim / name / "FIP"
-                        / f"{target_dt0}_{target_dtN}_{target_sim}_FIP_{norm.replace('-', '_')}.png")
             else:
-                try:
-                    path = self.paths.fip_plot_path(norm,
-                                                    region     = name,
-                                                    sim_name   = target_sim,
-                                                    start_date = target_dt0,
-                                                    end_date   = target_dtN)
-                except TypeError:
-                    # Backward-compatible fallback for existing helper.
-                    if (target_sim == self.run.sim_name and target_dt0 == self.run.start_date and target_dtN == self.run.end_date):
-                        path = self.paths.fip_plot_path(norm, region=name)
-                    else:
-                        raise TypeError("paths.fip_plot_path() does not accept sim/date overrides. "
-                                        "Either provide output_root/output_path here, or extend "
-                                        "fip_plot_path() to accept sim_name/start_date/end_date.")
-            path = Path(path).expanduser()
+                if output_root is not None:
+                    root = Path(output_root).expanduser()
+                else:
+                    root = self.paths.figure_root() / "FIP"
+                safe_label = str(label).replace("/", "_")
+                safe_field = field_l.replace("/", "_")
+                path = root / safe_label / name / f"{safe_label}_{safe_field}_{norm}.png"
+
             path.parent.mkdir(parents=True, exist_ok=True)
-            self.logger.info(f"creating figure: {path}")
-            fig  = pygmt.Figure()
+            fig = pygmt.Figure()
             proj = self.projection_from_region(reg, fig_size=fig_size or self.plotting.fip_fig_size)
-            pygmt.makecpt(cmap=str(cmap or self._default_fip_cmap()), series=[0, 1, 0.05], continuous=True)
-            plot_title = title or f"{sim} {name} FIP ({norm})"
+
+            if is_cat:
+                # CPT has already been written above.
+                pass
+            else:
+                pygmt.makecpt(cmap=str(cmap), series=list(series), continuous=True)
+
+            plot_title = title or f"{label} {name} {field_l}"
             self.pygmt_base_layer(fig, reg, proj, title=plot_title, shorelines=shorelines, land=land, water=water)
-            fig.plot(x=data["lon"], y=data["lat"], style=grid_style or self.plotting.grid_style, fill=data["z"], cmap=True)
-            frames = [f'xaf+l{colorbar_xlabel or self.plotting.colorbar_xlabel}']
-            ylabel = (colorbar_ylabel if colorbar_ylabel is not None else self.plotting.colorbar_ylabel)
-            if ylabel:
-                frames.append(f'y+l{ylabel}')
-            fig.colorbar(position=colorbar_position or self.plotting.colorbar_position, frame=frames)
+            fig.plot(
+                x=data["lon"],
+                y=data["lat"],
+                style=grid_style or self.plotting.grid_style,
+                fill=data["z"],
+                cmap=True if not is_cat else str(cmap),
+            )
+            fig.coast(region=reg, projection=proj, shorelines=shorelines or self.plotting.shorelines)
+
+            if colorbar_position:
+                if colorbar_frame is not None:
+                    frame = list(colorbar_frame)
+                elif is_diff:
+                    frame = ['xaf+l"FIP difference (model - AF2020)"']
+                elif is_cat:
+                    frame = ['+l"FIP difference category"']
+                else:
+                    frame = ['xaf+l"Fast ice persistence"']
+                fig.colorbar(position=colorbar_position, frame=frame, cmap=str(cmap) if is_cat else None)
+
             fig.savefig(path)
-            self.logger.info("\tsaved")
             if show:
                 fig.show()
             saved[name] = str(path)
+
         return next(iter(saved.values())) if len(saved) == 1 else saved
 
     def plot_timeseries(self, variable: str, method: str,

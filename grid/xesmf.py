@@ -19,13 +19,13 @@ def load_cice_tgrid_for_xesmf(cice_grid_file: str | Path | None = None, *, lon_t
     -------
     xr.Dataset
         Dataset with 2-D xESMF destination coordinates:
-            lon(nj, ni)
-            lat(nj, ni)
+            lon(ny, nx)
+            lat(ny, nx)
 
     Notes
     -----
-    CICEGridwork handles CICE/MOM6 grid naming conventions and radians/degrees
-    conversion. This function is only an xESMF-facing adapter.
+    The returned dimension names intentionally match the legacy CICE forcing
+    file convention used by the existing annual ERA5 products.
     """
     paths     = ShugaPaths()
     grid_path = paths.resolve_cice_grid_file(cice_grid_file)

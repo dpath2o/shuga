@@ -40,15 +40,12 @@ def format_era5_to_cice_weight_filename(cice_grid_file: str | Path,
 
 def normalise_cice_forcing_dims(da: xr.DataArray) -> xr.DataArray:
     """
-    Normalise xESMF output dimensions to the legacy CICE forcing convention.
+    Normalise xESMF output dimensions to the legacy CICE forcing convention:
 
-    CICE forcing files historically use:
         variable(time, ny, nx)
 
-    xESMF may return:
-        variable(time, nj, ni)
-
-    This function renames nj/ni -> ny/nx and keeps time first.
+    CICE's Fortran NetCDF forcing reader uses positional start/count indexing,
+    so these monthly products should mimic the existing annual ERA5 products.
     """
     rename = {}
     if "nj" in da.dims:
@@ -58,8 +55,15 @@ def normalise_cice_forcing_dims(da: xr.DataArray) -> xr.DataArray:
     if rename:
         da = da.rename(rename)
     if "time" in da.dims:
-        spatial_dims = [d for d in da.dims if d != "time"]
-        da = da.transpose("time", *spatial_dims)
+        missing = [d for d in ("ny", "nx") if d not in da.dims]
+        if missing:
+            raise ValueError(f"Cannot normalise {da.name!r} to CICE forcing dims; "
+                             f"missing dimensions {missing}; dims={da.dims}")
+        da = da.transpose("time", "ny", "nx")
+    else:
+        missing = [d for d in ("ny", "nx") if d not in da.dims]
+        if not missing:
+            da = da.transpose("ny", "nx")
     return da
 
 @dataclass(frozen=True)

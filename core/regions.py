@@ -23,3 +23,4 @@ ANTARCTIC_8_REGIONS: dict[str, dict[str, list[float] | str]] = {"DML": {"geo_reg
                                                                 "WS" : {"geo_region" : [-60, -27, -80, -60],
                                                                         "plot_region": [-75, -30, -78, -62],
                                                                         "projection" : projection_fmt_str}}
+

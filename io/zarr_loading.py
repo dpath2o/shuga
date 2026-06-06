@@ -37,16 +37,13 @@ def _with_current_context(run, classify, metrics, plotting, observations, paths,
     Explicit arguments passed to the loader always win over the context.
     """
     ctx = get_current_context()
-    return (
-        run if run is not None else ctx.run,
-        classify if classify is not None else ctx.classify,
-        metrics if metrics is not None else ctx.metrics,
-        plotting if plotting is not None else ctx.plotting,
-        observations if observations is not None else ctx.observations,
-        paths if paths is not None else ctx.paths,
-        chunks if chunks is not None else ctx.chunks,
-    )
-
+    return (run          if run          is not None else ctx.run,
+            classify     if classify     is not None else ctx.classify,
+            metrics      if metrics      is not None else ctx.metrics,
+            plotting     if plotting     is not None else ctx.plotting,
+            observations if observations is not None else ctx.observations,
+            paths        if paths        is not None else ctx.paths,
+            chunks       if chunks       is not None else ctx.chunks)
 
 def _maybe_listify_variables(variables) -> list[str] | None:
     if variables is None:
@@ -77,13 +74,7 @@ def _slice_time_overlap(ds: xr.Dataset, dt0_str: str | None, dtN_str: str | None
     t0_use = max(t0_req, t0_avail)
     tN_use = min(tN_req, tN_avail)
     if t0_use > tN_use:
-        LOGGER.warning(
-            "Requested time range %s -> %s has no overlap with metrics store %s -> %s",
-            dt0_str,
-            dtN_str,
-            str(t0_avail),
-            str(tN_avail),
-        )
+        LOGGER.warning("Requested time range %s -> %s has no overlap with metrics store %s -> %s", dt0_str, dtN_str, str(t0_avail), str(tN_avail))
         return ds.isel(time=slice(0, 0))
     return ds.sel(time=slice(t0_use, tN_use))
 
@@ -272,66 +263,62 @@ def load_cice(run: RunSpec | None = None, classify: ClassificationSpec | None = 
     loading, static/dynamic variable splitting, static-store merging, and final
     CICE-history variable subsetting are owned by IceHistoryLoader.
     """
-    run, classify, metrics, plotting, observations, paths, chunks = _with_current_context(
-        run,
-        classify,
-        metrics,
-        plotting,
-        observations,
-        paths,
-        chunks,
-    )
+    run, classify, metrics, plotting, observations, paths, chunks = _with_current_context(run, classify, metrics, plotting, observations, paths, chunks)
     variables_list = _maybe_listify_variables(variables)
     if variables_list is None:
         LOGGER.warning("load_cice() called with variables=None; this can be expensive for long periods.")
     run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run,
-                                                                     sim_name=sim_name,
-                                                                     dt0_str=dt0_str,
-                                                                     dtN_str=dtN_str,
-                                                                     hemisphere=hemisphere,
-                                                                     iceh_frequency=iceh_frequency,
-                                                                     project=project,
-                                                                     user=user)
+                                                                     sim_name       = sim_name,
+                                                                     dt0_str        = dt0_str,
+                                                                     dtN_str        = dtN_str,
+                                                                     hemisphere     = hemisphere,
+                                                                     iceh_frequency = iceh_frequency,
+                                                                     project        = project,
+                                                                     user           = user)
     classify_eff = classify or (paths.classify if paths is not None else ClassificationSpec())
-    paths_eff = _build_paths(run=run_eff,
-                             classify=classify_eff,
-                             metrics=metrics,
-                             plotting=plotting,
-                             observations=observations,
-                             paths=paths,
-                             afim_output_root=afim_output_root,
-                             cice_store=cice_store,
-                             static_store=static_store)
+    paths_eff = _build_paths(run              = run_eff,
+                             classify         = classify_eff,
+                             metrics          = metrics,
+                             plotting         = plotting,
+                             observations     = observations,
+                             paths            = paths,
+                             afim_output_root = afim_output_root,
+                             cice_store       = cice_store,
+                             static_store     = static_store)
     loader = IceHistoryLoader(paths_eff, logger=LOGGER)
-    return loader.load(dt0_str=dt0_eff,
-                       dtN_str=dtN_eff,
-                       variables=variables_list,
-                       hemisphere=hemisphere_eff,
-                       cice_store=cice_store,
-                       static_store=static_store,
-                       chunks=chunks)
+    return loader.load(dt0_str      = dt0_eff,
+                       dtN_str      = dtN_eff,
+                       variables    = variables_list,
+                       hemisphere   = hemisphere_eff,
+                       cice_store   = cice_store,
+                       static_store = static_store,
+                       chunks       = chunks)
 
-def load_classified(run: RunSpec | None = None, classify: ClassificationSpec | None = None, metrics: MetricsSpec | None = None,
-                    plotting: PlottingSpec | None = None, observations: ObservationSpec | None = None, paths: ShugaPaths | None = None, *,
-                    classification: str | None = None,
-                    sim_name: str | None = None,
-                    dt0_str: str | None = None,
-                    dtN_str: str | None = None,
-                    variables=None,
-                    hemisphere: str | None = None,
-                    project: str | None = None,
-                    user: str | None = None,
-                    grid_type: str | None = None,
-                    grid_type_map: dict[str, str] | None = None,
-                    ice_type: str | None = None,
-                    ispd_thresh: float | None = None,
-                    bin_window: int | None = None,
-                    bin_min_days: int | None = None,
-                    roll_window: int | None = None,
-                    afim_output_root: str | Path | None = None,
+def load_classified(run                : RunSpec | None = None,
+                    classify           : ClassificationSpec | None = None,
+                    metrics            : MetricsSpec | None = None,
+                    plotting           : PlottingSpec | None = None,
+                    observations       : ObservationSpec | None = None,
+                    paths              : ShugaPaths | None = None, *,
+                    classification     : str | None = None,
+                    sim_name           : str | None = None,
+                    dt0_str            : str | None = None,
+                    dtN_str            : str | None = None,
+                    variables = None,
+                    hemisphere         : str | None = None,
+                    project            : str | None = None,
+                    user               : str | None = None,
+                    grid_type          : str | None = None,
+                    grid_type_map      : dict[str, str] | None = None,
+                    ice_type           : str | None = None,
+                    ispd_thresh        : float | None = None,
+                    bin_window         : int | None = None,
+                    bin_min_days       : int | None = None,
+                    roll_window        : int | None = None,
+                    afim_output_root   : str | Path | None = None,
                     classification_root: str | Path | None = None,
-                    chunks: dict | None = None,
-                    return_resolved: bool = False):
+                    chunks             : dict | None = None,
+                    return_resolved    : bool = False):
     """
     Load classified CICE fast-ice output from data.zarr.
 
@@ -380,11 +367,6 @@ def load_classified(run: RunSpec | None = None, classify: ClassificationSpec | N
                                                      user=user)
     LOGGER.info("Opening classified store for %s [%s/%s]: %s", run_eff.sim_name, resolved.grid_type, resolved.method, resolved.path)
     ds = xr.open_zarr(resolved.path, consolidated=False, chunks=chunks)
-    # if "FI_mask" not in ds.data_vars and len(ds.data_vars) == 1:
-    #     only = next(iter(ds.data_vars))
-    #     ds = ds.rename({only: "FI_mask"})
-    # if "FI_mask" not in ds.data_vars:
-    #     raise KeyError(f"Could not find FI_mask in {resolved.path}. Data variables: {list(ds.data_vars)}")
     domain = str(classify_eff.ice_type).strip().upper()
     expected_mask = f"{domain}_mask"
     # Backward-compatible rename only when there is a single anonymous/legacy var.
@@ -410,34 +392,31 @@ def load_classified(run: RunSpec | None = None, classify: ClassificationSpec | N
         return ds, _resolved_store_to_dict(resolved)
     return ds
 
-def load_metrics(
-    run: RunSpec | None = None,
-    classify: ClassificationSpec | None = None,
-    metrics: MetricsSpec | None = None,
-    plotting: PlottingSpec | None = None,
-    observations: ObservationSpec | None = None,
-    paths: ShugaPaths | None = None,
-    *,
-    classification: str | None = None,
-    sim_name: str | None = None,
-    dt0_str: str | None = None,
-    dtN_str: str | None = None,
-    variables=None,
-    hemisphere: str | None = None,
-    project: str | None = None,
-    user: str | None = None,
-    grid_type: str | None = None,
-    grid_type_map: dict[str, str] | None = None,
-    ice_type: str | None = None,
-    ispd_thresh: float | None = None,
-    bin_window: int | None = None,
-    bin_min_days: int | None = None,
-    roll_window: int | None = None,
-    afim_output_root: str | Path | None = None,
-    classification_root: str | Path | None = None,
-    chunks: dict | None = None,
-    return_resolved: bool = False,
-):
+def load_metrics(run: RunSpec | None = None,
+                 classify: ClassificationSpec | None = None,
+                 metrics: MetricsSpec | None = None,
+                 plotting: PlottingSpec | None = None,
+                 observations: ObservationSpec | None = None,
+                 paths: ShugaPaths | None = None, *,
+                 classification: str | None = None,
+                 sim_name: str | None = None,
+                 dt0_str: str | None = None,
+                 dtN_str: str | None = None,
+                 variables=None,
+                 hemisphere: str | None = None,
+                 project: str | None = None,
+                 user: str | None = None,
+                 grid_type: str | None = None,
+                 grid_type_map: dict[str, str] | None = None,
+                 ice_type: str | None = None,
+                 ispd_thresh: float | None = None,
+                 bin_window: int | None = None,
+                 bin_min_days: int | None = None,
+                 roll_window: int | None = None,
+                 afim_output_root: str | Path | None = None,
+                 classification_root: str | Path | None = None,
+                 chunks: dict | None = None,
+                 return_resolved: bool = False):
     """
     Load method-specific metrics from mets.zarr.
 

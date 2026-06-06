@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+#PBS -P gv90
+#PBS -q normalbw
+#PBS -l walltime=08:00:00
+#PBS -l ncpus=8
+#PBS -l mem=64GB
+#PBS -l storage=gdata/gv90+scratch/gv90+gdata/xp65
+#PBS -j oe
+#PBS -N AF2020_FIP_FIC
+
+set -euo pipefail
+
+cd "${PBS_O_WORKDIR:-$PWD}"
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-25.12
+
+: "${SIM_NAME:=LD-static-Cs1e-3}"
+: "${AF2020_RAW_ROOT:=/g/data/gv90/da1339/SeaIce/FI_obs/org}"
+: "${OUT_STORE:=/g/data/gv90/da1339/SeaIce/FI_obs/AF-FI-2020db_common-5km_pyresample.zarr}"
+: "${CICE_STATIC_STORE:=}"
+: "${OVERWRITE:=0}"
+
+args=(--sim-name "${SIM_NAME}" --af2020-raw-root "${AF2020_RAW_ROOT}" --out-store "${OUT_STORE}"
+      --pixel-size-m "${PIXEL_SIZE_M:-5000}" --radius-of-influence-m "${ROI_M:-10000}" --buffer-m "${BUFFER_M:-20000}"
+      --cice-lon-shift-deg "${CICE_LON_SHIFT_DEG:-0.25}" --time-batch "${TIME_BATCH:-8}" --chunks-time "${CHUNKS_TIME:-16}")
+
+if [[ -n "${CICE_STATIC_STORE}" ]]; then
+  args+=(--cice-static-store "${CICE_STATIC_STORE}")
+fi
+
+if [[ "${OVERWRITE}" == "1" ]]; then
+  args+=(--overwrite)
+fi
+
+python ./build_af2020_fip_fic_common_grid.py "${args[@]}"

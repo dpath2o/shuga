@@ -7,10 +7,15 @@
 #PBS -l jobfs=5GB
 #PBS -j oe
 #PBS -l storage=gdata/xp65+gdata/gv90+gdata/ik11+scratch/gv90
+
 set -euo pipefail
+
 module purge
 module use /g/data/xp65/public/modules
 module load conda/analysis3-25.12
+
+#------------------------------------------------------------------------
+# DEFAULTS
 PROJECT="${PROJECT:-gv90}"
 RUN_USER="${RUN_USER:-da1339}"
 ICEH_FREQUENCY="${ICEH_FREQUENCY:-daily}"
@@ -45,10 +50,15 @@ LOG_LEVEL="${LOG_LEVEL:-INFO}"
 METHODS="${METHODS//|/,}"
 REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest}"
 PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/shuga/scripts/classification/classify.py}"
+
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 export DASK_TEMPORARY_DIRECTORY="/scratch/${PROJECT}/${RUN_USER}/dask_tmp/${PBS_JOBID}"
 export TMPDIR="/scratch/${PROJECT}/${RUN_USER}/tmp/${PBS_JOBID}"
+
+#-------------------------------------------------------------------
 mkdir -p "$DASK_TEMPORARY_DIRECTORY" "$TMPDIR"
+
+#-------------------------------------------------------------------
 CMD=(python "$PY_SCRIPT"
      --sim-name "$SIM_NAME"
      --start-date "$START_DATE"
@@ -66,6 +76,7 @@ CMD=(python "$PY_SCRIPT"
      --iceh-frequency "$ICEH_FREQUENCY"
      --netcdf-engine "$NETCDF_ENGINE"
      --log-level "$LOG_LEVEL")
+
 [[ -n "${CICE_STORE:-}" ]] && CMD+=(--cice-store "$CICE_STORE")
 [[ -n "${STATIC_STORE:-}" ]] && CMD+=(--static-store "$STATIC_STORE")
 [[ -n "${CLASSIFICATION_ROOT:-}" ]] && CMD+=(--classification-root "$CLASSIFICATION_ROOT")
@@ -86,5 +97,8 @@ CMD=(python "$PY_SCRIPT"
 [[ "${PERSIST_GRID_ASSETS:-false}" == "true" ]] && CMD+=(--persist-grid-assets)
 [[ -n "${LOGS_ROOT:-}" ]] && CMD+=(--logs-root "$LOGS_ROOT")
 [[ "${OVERWRITE:-false}" == "true" ]] && CMD+=(--overwrite)
+
+#-----------------------------------------------------------------
 echo "Running: ${CMD[*]}"
+
 "${CMD[@]}"

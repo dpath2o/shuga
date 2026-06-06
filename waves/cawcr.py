@@ -18,28 +18,27 @@ EARTH_RADIUS_KM = 6371.0
 @dataclass(slots=True)
 class CAWCRRegridConfig:
     """Configuration for monthly CAWCR -> CICE spectral forcing generation."""
-
-    output_path: str | Path | None = None
-    source_var: str = "Efth"
-    station_lon_name: str = "longitude"
-    station_lat_name: str = "latitude"
-    time_dim: str = "time"
-    station_dim: str = "station"
-    frequency_dim: str = "frequency"
-    direction_dim: str = "direction"
+    output_path      : str | Path | None = None
+    source_var       : str = "Efth"
+    station_lon_name : str = "longitude"
+    station_lat_name : str = "latitude"
+    time_dim         : str = "time"
+    station_dim      : str = "station"
+    frequency_dim    : str = "frequency"
+    direction_dim    : str = "direction"
     frequency_lo_name: str = "frequency1"
     frequency_hi_name: str = "frequency2"
-    k_nearest: int = 5
-    idw_power: float = 2.5
-    radius_km: float = 1000.0
-    sic_threshold: float = 0.15
-    hemisphere: str = "SH"
-    target_lat_max: float = -35.0
-    target_lat_min: float = 35.0
-    fill_value: float = 0.0
-    weights_path: str | Path | None = None
-    sic_weights_path: str | Path | None = None
-    target_lon_type: str = "-180-180"
+    k_nearest        : int = 5
+    idw_power        : float = 2.5
+    radius_km        : float = 1000.0
+    sic_threshold    : float = 0.15
+    hemisphere       : str = "SH"
+    target_lat_max   : float = -35.0
+    target_lat_min   : float = 35.0
+    fill_value       : float = 0.0
+    weights_path     : str | Path | None = None
+    sic_weights_path : str | Path | None = None
+    target_lon_type  : str = "-180-180"
 
     def __post_init__(self) -> None:
         if self.output_path is not None:

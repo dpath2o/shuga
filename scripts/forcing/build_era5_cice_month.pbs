@@ -3,9 +3,9 @@
 #PBS -P jk72
 #PBS -q normal
 #PBS -l ncpus=16
-#PBS -l mem=130GB
+#PBS -l mem=190GB
 #PBS -l jobfs=1GB
-#PBS -l walltime=00:30:00
+#PBS -l walltime=2:00:00
 #PBS -l storage=gdata/gv90+gdata/rt52+scratch/gv90+gdata/xp65
 #PBS -j oe
 #PBS -M daniel.atwater@utas.edu.au
@@ -26,6 +26,7 @@ REGRID_METHOD="${REGRID_METHOD:-bilinear}"
 EXTRAP_METHOD="${EXTRAP_METHOD:-nearest_s2d}"
 REBUILD_WEIGHTS="${REBUILD_WEIGHTS:-0}"
 CICE_GRID_FILE="${CICE_GRID_FILE:-}"
+SKIP_COMPRESS="${SKIP_COMPRESS:-0}"
 WEIGHT_FILE="${WEIGHT_FILE:-}"
 LOG_DIR="${LOG_DIR:-/home/581/da1339/logs/forcing}"
 LOG_FILE="${LOG_FILE:-${LOG_DIR}/build_era5_cice_month_${YEAR}_${MONTH}.${PBS_JOBID:-nojobid}.log}"
@@ -48,9 +49,9 @@ echo "Host        : $(hostname)"
 echo "Date        : $(date)"
 echo "PBS job id  : ${PBS_JOBID:-unknown}"
 echo "Project     : ${PROJECT:-jk72}"
-echo "Queue       : hugemembw"
-echo "NCPUS       : ${PBS_NCPUS:-28}"
-echo "MEM         : 1020GB"
+echo "Queue       : ${PBS_QUEUE:-normal}"
+echo "NCPUS       : ${PBS_NCPUS:-16}"
+echo "MEM         : 130GB"
 echo "JOBFS       : ${PBS_JOBFS:-unset}"
 echo "YEAR        : ${YEAR}"
 echo "MONTH       : ${MONTH}"
@@ -86,74 +87,140 @@ if [[ "${REBUILD_WEIGHTS}" == "1" ]]; then
     args+=(--rebuild-weights)
 fi
 
-python ./build_era5_cice_month.py "${args[@]}"
+PYOUT="$(python ./build_era5_cice_month.py "${args[@]}")"
+echo "${PYOUT}"
 
-FILE=$(python ./build_era5_cice_month.py "${args[@]}")
-echo "completed python regrid and monthly building of forcing file: $(date)"
-echo "Output file : ${FILE}"
+FILE="$(printf "%s\n" "${PYOUT}" | tail -n 1)"
 
-FILE=$(python ./build_era5_cice_month.py "${args[@]}")
 echo "completed python regrid and monthly building of forcing file: $(date)"
 echo "Output file : ${FILE}"
 
 [[ -n "${FILE}" ]] || { echo "ERROR: python script returned no output path" >&2; exit 1; }
 
 ###########################################################
-# compress file
+# rewrite ERA5 monthly file into CICE-runtime layout
 ###########################################################
-echo "using NCO tools now to compress file"
-module load nco
+if [[ "${SKIP_COMPRESS}" == "1" ]]; then
+    echo "SKIP_COMPRESS=1; leaving file as written by python: ${FILE}"
+    exit 0
+fi
 
+echo "using nccopy to rewrite ERA5 -> CICE monthly forcing file"
+
+# nccopy is usually available in analysis3, but keep this if needed.
+module load nco || true
+
+# ------------------------------------------------------------------
+# Runtime-layout defaults
+#
+# Default is CICE-fast:
+#   - NetCDF-4 classic model
+#   - no compression
+#   - convert unlimited time to fixed-size
+#   - no explicit chunking, so NetCDF/HDF5 can use a more contiguous layout
+#
+# If you explicitly want compressed runtime files:
+#   NCCOPY_PROFILE=compressed
+# uses:
+#   -d ${DEFLATE}
+#   -s
+#   -c time/1,ny/108,nx/144
+#
+# Avoid time/24 for CICE runtime because CICE reads one 2-D hourly
+# record at a time.
+# ------------------------------------------------------------------
+NCCOPY_PROFILE="${NCCOPY_PROFILE:-runtime}"   # runtime | compressed | none
 DEFLATE="${DEFLATE:-1}"
-CHUNKSPEC="${CHUNKSPEC:-time/1}"
-KEEP_RAW="${KEEP_RAW:-1}"
+CHUNKSPEC="${CHUNKSPEC:-time/1,ny/108,nx/144}"
+KEEP_RAW="${KEEP_RAW:-0}"
 
 indir="$(dirname "${FILE}")"
 base="$(basename "${FILE}" .nc)"
+
 raw="${indir}/${base}.raw.nc"
-tmp="${indir}/${base}.comp.tmp.nc"
-comp="${indir}/${base}.comp.nc"
+tmp="${indir}/.${base}.nccopy.tmp.nc"
 
 echo "============================================================"
-echo "Compress ERA5 -> CICE monthly forcing"
-echo "Date      : $(date)"
-echo "Host      : $(hostname)"
-echo "Job ID    : ${PBS_JOBID:-unknown}"
-echo "Input     : ${FILE}"
-echo "Raw backup: ${raw}"
-echo "Temp      : ${tmp}"
-echo "Compressed: ${comp}"
-echo "Deflate   : ${DEFLATE}"
-echo "Chunkspec : ${CHUNKSPEC}"
-echo "Keep raw  : ${KEEP_RAW}"
+echo "Rewrite ERA5 -> CICE monthly forcing"
+echo "Date          : $(date)"
+echo "Host          : $(hostname)"
+echo "Job ID        : ${PBS_JOBID:-unknown}"
+echo "Input         : ${FILE}"
+echo "Raw backup    : ${raw}"
+echo "Temp          : ${tmp}"
+echo "Profile       : ${NCCOPY_PROFILE}"
+echo "Deflate       : ${DEFLATE}"
+echo "Chunkspec     : ${CHUNKSPEC}"
+echo "Keep raw      : ${KEEP_RAW}"
 echo "============================================================"
 
 [[ -f "${FILE}" ]] || { echo "Input file not found: ${FILE}" >&2; exit 1; }
 
-rm -f "${tmp}" "${comp}"
-echo "Input size:"
+rm -f "${tmp}"
+
+echo "Input size/layout:"
 ls -lh "${FILE}"
+ncdump -k "${FILE}" || true
+ncdump -h "${FILE}" | sed -n '/dimensions:/,/variables:/p' | head -30
 
-nccopy -k nc7 -d "${DEFLATE}" -s -c "${CHUNKSPEC}" -w "${FILE}" "${tmp}"
-mv "${tmp}" "${comp}"
+case "${NCCOPY_PROFILE}" in
 
-echo "Compressed size:"
-ls -lh "${comp}"
-echo "Inspecting compressed file:"
-ncdump -k "${comp}"
-ncdump -h -s "${comp}" | head -80
+    runtime)
+        echo "Running CICE-fast nccopy:"
+        echo "  nccopy -k nc7 -d 0 -u ${FILE} ${tmp}"
 
+        nccopy -k nc7 -d 0 -u "${FILE}" "${tmp}"
+        ;;
+
+    compressed)
+        echo "Running compressed CICE-runtime nccopy:"
+        echo "  nccopy -k nc7 -d ${DEFLATE} -s -c ${CHUNKSPEC} -u ${FILE} ${tmp}"
+
+        nccopy -k nc7 -d "${DEFLATE}" -s -c "${CHUNKSPEC}" -u "${FILE}" "${tmp}"
+        ;;
+
+    none)
+        echo "NCCOPY_PROFILE=none; leaving file unchanged."
+        exit 0
+        ;;
+
+    *)
+        echo "ERROR: unknown NCCOPY_PROFILE=${NCCOPY_PROFILE}" >&2
+        echo "Valid options: runtime, compressed, none" >&2
+        exit 1
+        ;;
+esac
+
+echo "Checking rewritten temporary file..."
+[[ -s "${tmp}" ]] || { echo "ERROR: nccopy output missing/empty: ${tmp}" >&2; exit 1; }
+
+ncdump -k "${tmp}" || true
+
+header="${tmp}.header.txt"
+ncdump -h -s "${tmp}" > "${header}"
+
+echo "Temporary file header:"
+head -100 "${header}"
+rm -f "${header}"
+
+echo "Temporary size:"
+ls -lh "${tmp}"
+
+# Replace original only after successful nccopy and header inspection.
 if [[ "${KEEP_RAW}" == "1" ]]; then
-  mv "${FILE}" "${raw}"
-  mv "${comp}" "${FILE}"
-  echo "Raw file moved to   : ${raw}"
-  echo "Compressed file installed as: ${FILE}"
+    mv -f "${FILE}" "${raw}"
+    mv -f "${tmp}" "${FILE}"
+    echo "Raw file moved to          : ${raw}"
+    echo "Rewritten file installed as: ${FILE}"
 else
-  mv "${comp}" "${FILE}"
-  echo "Compressed file installed as: ${FILE}"
-  echo "Raw file overwritten."
+    mv -f "${tmp}" "${FILE}"
+    echo "Rewritten file installed as: ${FILE}"
+    echo "No raw copy retained."
 fi
 
-echo "Final size:"
+echo "Final size/layout:"
 ls -lh "${FILE}"
+ncdump -k "${FILE}" || true
+ncdump -h -s "${FILE}" | egrep "_ChunkSizes|_DeflateLevel|airtmp|snowfall|rainfall|time =" -A4 || true
+
 echo "Finished at $(date)"
