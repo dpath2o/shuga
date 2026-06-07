@@ -116,12 +116,12 @@ class CICEPlotter:
     """PyGMT plotting helpers for shuga classification, metrics, and observations."""
 
     def __init__(self,
-                 run           : RunSpec            | None = None,
-                 classify      : ClassificationSpec | None = None,
-                 metrics       : MetricsSpec        | None = None,
-                 plotting      : PlottingSpec       | None = None,
-                 observations  : ObservationSpec    | None = None,
-                 paths         : ShugaPaths         | None = None, *,
+                 run_cfg       : RunSpec            | None = None,
+                 cls_cfg       : ClassificationSpec | None = None,
+                 met_cfg       : MetricsSpec        | None = None,
+                 plt_cfg       : PlottingSpec       | None = None,
+                 obs_cfg       : ObservationSpec    | None = None,
+                 pth_cfg       : ShugaPaths         | None = None, *,
                  sim_name      : str | None = None,
                  start_date    : str | None = None,
                  end_date      : str | None = None,
@@ -142,11 +142,11 @@ class CICEPlotter:
         ------------------
         Full configuration mode:
 
-            CICEPlotter(run          = RunSpec(...),
-                        classify     = ClassificationSpec(...),
-                        metrics      = MetricsSpec(...),
-                        plotting     = PlottingSpec(...),
-                        observations = ObservationSpec(...))
+            CICEPlotter(run_cfg          = RunSpec(...),
+                        cls_cfg     = ClassificationSpec(...),
+                        met_cfg      = MetricsSpec(...),
+                        plt_cfg     = PlottingSpec(...),
+                        obs_cfg = ObservationSpec(...))
 
         Lightweight mode:
 
@@ -157,23 +157,23 @@ class CICEPlotter:
                         method     = "binary-days")
         """
         method_tuple = _method_tuple(method=method, methods=methods)
-        if run is None:
+        if run_cfg is None:
             missing = [name for name, value in {"sim_name": sim_name,
                                                 "start_date": start_date,
                                                 "end_date": end_date}.items() if value is None]
             if missing:
-                raise ValueError("CICEPlotter requires either run=RunSpec(...) or the scalar "
+                raise ValueError("CICEPlotter requires either run_cfg=RunSpec(...) or the scalar "
                                  f"arguments sim_name=..., start_date=..., end_date=.... "
                                  f"Missing: {', '.join(missing)}")
-            run = RunSpec(sim_name       = sim_name,
-                          start_date     = start_date,
-                          end_date       = end_date,
-                          hemisphere     = hemisphere,
-                          project        = project,
-                          user           = user,
-                          iceh_frequency = iceh_frequency)
+            run_cfg = RunSpec(sim_name       = sim_name,
+                              start_date     = start_date,
+                              end_date       = end_date,
+                              hemisphere     = hemisphere,
+                              project        = project,
+                              user           = user,
+                              iceh_frequency = iceh_frequency)
         else:
-            # Optional scalar overrides when a RunSpec is supplied.
+            # Optional scalar overrides when a Run_CfgSpec is supplied.
             updates = {}
             if sim_name is not None:
                 updates["sim_name"] = sim_name
@@ -190,12 +190,12 @@ class CICEPlotter:
             if iceh_frequency is not None:
                 updates["iceh_frequency"] = iceh_frequency
             if updates:
-                run = replace(run, **updates)
-        if classify is None:
+                run_cfg = replace(run_cfg, **updates)
+        if cls_cfg is None:
             classify_kwargs = {"ice_type": ice_type}
             if method_tuple is not None:
                 classify_kwargs["methods"] = method_tuple
-            classify = ClassificationSpec(**classify_kwargs)
+            cls_cfg = ClassificationSpec(**classify_kwargs)
         else:
             updates = {}
             if ice_type is not None:
@@ -203,38 +203,38 @@ class CICEPlotter:
             if method_tuple is not None:
                 updates["methods"] = method_tuple
             if updates:
-                classify = replace(classify, **updates)
-        if metrics is None:
+                cls_cfg = replace(cls_cfg, **updates)
+        if met_cfg is None:
             if method_tuple is not None:
-                metrics = MetricsSpec(methods=method_tuple)
+                met_cfg = MetricsSpec(methods=method_tuple)
             else:
-                metrics = MetricsSpec()
+                met_cfg = MetricsSpec()
         elif method_tuple is not None:
-            metrics = replace(metrics, methods=method_tuple)
-        self.run            = run
-        self.classify       = classify
-        self.metrics        = metrics
-        self.plotting       = plotting or PlottingSpec()
-        self.observations   = observations or ObservationSpec()
-        self.paths          = paths or ShugaPaths(run = run, classify = classify, observations = self.observations)
+            met_cfg = replace(met_cfg, methods=method_tuple)
+        self.run_cfg        = run_cfg
+        self.cls_cfg        = cls_cfg
+        self.met_cfg        = met_cfg
+        self.plt_cfg        = plt_cfg or PlottingSpec()
+        self.obs_cfg        = obs_cfg or ObservationSpec()
+        self.pth_cfg        = pth_cfg or ShugaPaths(run_cfg = run_cfg, cls_cfg = cls_cfg, obs_cfg = self.obs_cfg)
         self.chunks         = chunks or {"time": 31}
-        self.logger         = logger or build_file_logger("shuga.plotting", self.paths.logs_root_path / "plotting" / f"plotting_{run.sim_name}.log")
-        self.metrics_runner = CICEMetrics(run      = run,
-                                          classify = classify,
-                                          metrics  = self.metrics,
-                                          paths    = self.paths,
+        self.logger         = logger or build_file_logger("shuga.plt_cfg", self.pth_cfg.logs_root_path / "plotting" / f"plotting_{run_cfg.sim_name}.log")
+        self.metrics_runner = CICEMetrics(run_cfg  = run_cfg,
+                                          cls_cfg  = cls_cfg,
+                                          met_cfg  = self.met_cfg,
+                                          pth_cfg  = self.pth_cfg,
                                           chunks   = self.chunks,
                                           logger   = self.logger)
-        self.classifier     = CICEClassifier(run      = run,
-                                             classify = classify,
-                                             paths    = self.paths,
-                                             chunks   = self.chunks,
-                                             logger   = self.logger)
-        self.obs            = SeaIceObservations(run          = run,
-                                                 observations = self.observations,
-                                                 paths        = self.paths,
-                                                 chunks       = self.chunks,
-                                                 logger       = self.logger)
+        self.classifier     = CICEClassifier(run_cfg = run_cfg,
+                                             cls_cfg = cls_cfg,
+                                             pth_cfg = self.pth_cfg,
+                                             chunks  = self.chunks,
+                                             logger  = self.logger)
+        self.obs            = SeaIceObservations(run_cfg = run_cfg,
+                                                 obs_cfg = self.obs_cfg,
+                                                 pth_cfg = self.pth_cfg,
+                                                 chunks  = self.chunks,
+                                                 logger  = self.logger)
 
     # ------------------------------------------------------------
     def _require_pygmt(self):
@@ -319,8 +319,8 @@ class CICEPlotter:
     # helpers
     # ------------------------------------------------------------
     def _default_fip_cmap(self) -> str:
-        if self.plotting.fip_cmap is not None:
-            return str(Path(self.plotting.fip_cmap).expanduser())
+        if self.plt_cfg.fip_cmap is not None:
+            return str(Path(self.plt_cfg.fip_cmap).expanduser())
         return str(resource_files("shuga").joinpath("cpt", "FIP.cpt"))
 
     def _resolve_regions(self,
@@ -340,12 +340,12 @@ class CICEPlotter:
 
     def _nsidc_contours(self, date_str: str, hemisphere: str, threshold: float | None = None) -> list[np.ndarray]:
         ds  = self.obs.load_nsidc_daily(start_date=date_str, end_date=date_str, hemisphere=hemisphere)
-        sic = ds[self.observations.nsidc_sic_var].isel(time=0).astype(float)
+        sic = ds[self.obs_cfg.nsidc_sic_var].isel(time=0).astype(float)
         x   = ds["x"].values
         y   = ds["y"].values
         import matplotlib.pyplot as plt  # local import to avoid hard dependency outside plotting use
         fig, ax = plt.subplots()
-        cs      = ax.contour(x, y, sic.values, levels=[float(threshold if threshold is not None else self.observations.nsidc_threshold)])
+        cs      = ax.contour(x, y, sic.values, levels=[float(threshold if threshold is not None else self.obs_cfg.nsidc_threshold)])
         plt.close(fig)
         lines: list[np.ndarray] = []
         lonlat = xr.open_dataset(self.obs.nsidc_latlon_file(self.obs.canonical_hemisphere(hemisphere)))[["longitude", "latitude"]]
@@ -369,43 +369,43 @@ class CICEPlotter:
         if var == self.classifier.mask_var_name or var.lower() == "fi_mask":
             if method is None:
                 raise ValueError("method is required when plotting FI_mask")
-            ds_mask  = load_classified(run            = self.run,
-                                       classify       = self.classify,
-                                       metrics        = self.metrics,
-                                       plotting       = self.plotting,
-                                       observations   = self.observations,
-                                       paths          = self.paths,
+            ds_mask  = load_classified(run_cfg        = self.run_cfg,
+                                       cls_cfg        = self.cls_cfg,
+                                       met_cfg        = self.met_cfg,
+                                       plt_cfg        = self.plt_cfg,
+                                       obs_cfg        = self.obs_cfg,
+                                       pth_cfg        = self.pth_cfg,
                                        classification = method,
-                                       hemisphere     = self.run.hemisphere,
+                                       hemisphere     = self.run_cfg.hemisphere,
                                        chunks         = self.chunks,
                                        logger         = self.logger)
             da       = ds_mask["FI_mask"]
-            ds       = load_cice(run          = self.run,
-                                 classify     = self.classify,
-                                 metrics      = self.metrics,
-                                 plotting     = self.plotting,
-                                 observations = self.observations,
-                                 paths        = self.paths,
-                                 variables    = ["TLON", "TLAT"],
-                                 hemisphere   = self.run.hemisphere,
-                                 chunks       = self.chunks,
-                                 logger       = self.logger)
+            ds       = load_cice(run_cfg    = self.run_cfg,
+                                 cls_cfg    = self.cls_cfg,
+                                 met_cfg    = self.met_cfg,
+                                 plt_cfg    = self.plt_cfg,
+                                 obs_cfg    = self.obs_cfg,
+                                 pth_cfg    = self.pth_cfg,
+                                 variables  = ["TLON", "TLAT"],
+                                 hemisphere = self.run_cfg.hemisphere,
+                                 chunks     = self.chunks,
+                                 logger     = self.logger)
             lon, lat = self._detect_lonlat(ds)
         elif var.lower() in {"ispd", "ice_speed"}:
             ds = self.classifier.load_cice(methods=(method or "raw",))
             da = self.classifier.compute_speed(ds)
             lon, lat = self._detect_lonlat(ds)
         else:
-            ds = load_cice(run          = self.run,
-                           classify     = self.classify,
-                           metrics      = self.metrics,
-                           plotting     = self.plotting,
-                           observations = self.observations,
-                           paths        = self.paths,
-                           variables    = [var, "TLON", "TLAT"],
-                           hemisphere   = self.run.hemisphere,
-                           chunks       = self.chunks,
-                           logger       = self.logger)
+            ds = load_cice(run_cfg    = self.run_cfg,
+                           cls_cfg    = self.cls_cfg,
+                           met_cfg    = self.met_cfg,
+                           plt_cfg    = self.plt_cfg,
+                           obs_cfg    = self.obs_cfg,
+                           pth_cfg    = self.pth_cfg,
+                           variables  = [var, "TLON", "TLAT"],
+                           hemisphere = self.run_cfg.hemisphere,
+                           chunks     = self.chunks,
+                           logger     = self.logger)
             if var not in ds:
                 raise KeyError(f"Variable {var!r} not found in CICE history")
             da = ds[var]
@@ -475,7 +475,7 @@ class CICEPlotter:
             ~/AFIM_archive/CICE_0p25_Cgrid_coords.zarr
         """
         from shuga.grid.cice import CICEGridwork
-        gridwork = CICEGridwork(paths = self.paths, logger = self.logger)
+        gridwork = CICEGridwork(pth_cfg = self.pth_cfg, logger = self.logger)
         ds = gridwork.load_cice_static(variables   = ["TLON", "TLAT", "ULON", "ULAT", "ELON", "ELAT", "NLON", "NLAT"],
                                        require     = ("TLON", "TLAT"),
                                        chunks      = self.chunks,
@@ -521,9 +521,9 @@ class CICEPlotter:
         if title:
             frame.append(f'+t{title}')
         fig.basemap(region=list(region), projection=projection, frame=frame)
-        fig.coast(shorelines = shorelines or self.plotting.shorelines,
-                  land       = land       or self.plotting.land,
-                  water      = water      or self.plotting.water)
+        fig.coast(shorelines = shorelines or self.plt_cfg.shorelines,
+                  land       = land       or self.plt_cfg.land,
+                  water      = water      or self.plt_cfg.water)
 
     def plot_fip(self,
                  method            : str = "binary-days", *,
@@ -584,71 +584,57 @@ class CICEPlotter:
         "FIP", "diff", or "diff_cat" are the intended values, but any variable
         present in the supplied dataset can be plotted.
         """
-        pygmt = self._require_pygmt()
-        norm = normalize_method(method)
-        source_l = str(source).strip().lower()
-        field_l = str(field).strip()
-        target_sim = sim_name or self.run.sim_name
-        target_grid = grid_type or self.classify.grid_type
-
-        lon = lat = None
-        label = target_sim
-
+        pygmt       = self._require_pygmt()
+        norm        = normalize_method(method)
+        source_l    = str(source).strip().lower()
+        field_l     = str(field).strip()
+        target_sim  = sim_name or self.run_cfg.sim_name
+        target_grid = grid_type or self.cls_cfg.grid_type
+        lon         = lat = None
+        label       = target_sim
         if source_l == "sim":
             if af2020_start is not None or af2020_end is not None:
-                raise ValueError(
-                    "Do not pass af2020_start/af2020_end when source='sim'. "
-                    "Simulation FIP is loaded from the precomputed metrics store."
-                )
-
-            ds = load_metrics(
-                run=self.run,
-                classify=self.classify,
-                metrics=self.metrics,
-                plotting=self.plotting,
-                observations=self.observations,
-                paths=self.paths,
-                classification=norm,
-                sim_name=target_sim,
-                variables=["FIP"],
-                hemisphere=self.run.hemisphere,
-                grid_type=target_grid,
-                chunks=self.chunks,
-            )
+                raise ValueError("Do not pass af2020_start/af2020_end when source='sim'. Simulation FIP is loaded from the precomputed metrics store.")
+            ds = load_metrics(run_cfg        = self.run_cfg,
+                              cls_cfg        = self.cls_cfg,
+                              met_cfg        = self.met_cfg,
+                              plt_cfg        = self.plt_cfg,
+                              obs_cfg        = self.obs_cfg,
+                              pth_cfg        = self.pth_cfg,
+                              classification = norm,
+                              sim_name       = target_sim,
+                              variables      = ["FIP"],
+                              hemisphere     = self.run_cfg.hemisphere,
+                              grid_type      = target_grid,
+                              chunks         = self.chunks)
             if "FIP" not in ds:
                 raise KeyError(f"Could not find FIP in metrics store for {target_sim}/{norm}/{target_grid}.")
-            da = ds["FIP"].squeeze(drop=True)
+            da        = ds["FIP"].squeeze(drop=True)
             static_ds = self._load_static_lonlat(sim_name=target_sim)
-            lon, lat = self._detect_lonlat(static_ds)
-            label = target_sim
-
+            lon, lat  = self._detect_lonlat(static_ds)
+            label     = target_sim
         elif source_l == "af2020":
             if af2020_store is None:
                 raise ValueError("source='af2020' requires af2020_store=...")
-
             ods = xr.open_zarr(Path(af2020_store).expanduser(), consolidated=False, chunks=self.chunks)
             if af2020_start is not None or af2020_end is not None:
                 if "FIC" not in ods:
                     raise KeyError("AF2020 store does not contain FIC; cannot compute period-specific AF2020 FIP.")
                 da = ods["FIC"].sel(time=slice(af2020_start, af2020_end)).mean("time", skipna=True).rename("FIP")
-                da.attrs.update(
-                    long_name="AF2020 fast ice persistence",
-                    units="1",
-                    time_start=str(pd.Timestamp(af2020_start).date()) if af2020_start else str(pd.Timestamp(ods.time.values[0]).date()),
-                    time_end=str(pd.Timestamp(af2020_end).date()) if af2020_end else str(pd.Timestamp(ods.time.values[-1]).date()),
-                )
+                da.attrs.update(long_name  = "AF2020 fast ice persistence",
+                                units      = "1",
+                                time_start = str(pd.Timestamp(af2020_start).date()) if af2020_start else str(pd.Timestamp(ods.time.values[0]).date()),
+                                time_end   = str(pd.Timestamp(af2020_end).date()) if af2020_end else str(pd.Timestamp(ods.time.values[-1]).date()))
             else:
                 if "FIP" not in ods:
                     raise KeyError("AF2020 store does not contain FIP.")
                 da = ods["FIP"].squeeze(drop=True)
-            lon = ods["lon"] if "lon" in ods else da.coords.get("lon")
-            lat = ods["lat"] if "lat" in ods else da.coords.get("lat")
+            lon   = ods["lon"] if "lon" in ods else da.coords.get("lon")
+            lat   = ods["lat"] if "lat" in ods else da.coords.get("lat")
             label = "AF2020"
-
         elif source_l == "dataset":
             if dataset is None:
                 raise ValueError("source='dataset' requires dataset=...")
-
             if isinstance(dataset, xr.DataArray):
                 da = dataset
             else:
@@ -656,36 +642,30 @@ class CICEPlotter:
                     ds = dataset
                 else:
                     p = Path(dataset).expanduser()
-                    ds = xr.open_zarr(p, consolidated=False, chunks=self.chunks) if p.suffix == ".zarr" or p.is_dir() else xr.open_dataset(p, chunks=self.chunks)
+                    ds = xr.open_zarr(p, consolidated = False, chunks = self.chunks) if p.suffix == ".zarr" or p.is_dir() else xr.open_dataset(p, chunks = self.chunks)
                 if field_l not in ds:
                     raise KeyError(f"{field_l!r} not found in supplied dataset. Available variables: {list(ds.data_vars)}")
-                da = ds[field_l]
+                da  = ds[field_l]
                 lon = ds["lon"] if "lon" in ds else da.coords.get("lon")
                 lat = ds["lat"] if "lat" in ds else da.coords.get("lat")
             label = field_l
-
         else:
             raise ValueError("source must be one of: 'sim', 'af2020', 'dataset'.")
-
         if "time" in da.dims:
             if da.sizes.get("time", 0) != 1:
                 raise ValueError("plot_fip expects a 2-D field. Select a single time or compute persistence before plotting.")
             da = da.isel(time=0, drop=True)
-
         if lon is None or lat is None:
             if "lon" in da.coords and "lat" in da.coords:
                 lon, lat = da["lon"], da["lat"]
             else:
                 raise ValueError("Could not determine lon/lat for plot_fip.")
-
         is_diff = field_l.lower() in {"diff", "fip_diff"}
-        is_cat = field_l.lower() in {"diff_cat", "fip_diff_cat"}
-
+        is_cat  = field_l.lower() in {"diff_cat", "fip_diff_cat"}
         if FIP_plot_thresh is not None and not is_diff and not is_cat:
             da_plot = da.where(da > float(FIP_plot_thresh))
         else:
             da_plot = da
-
         if series is None:
             if is_diff:
                 series = [-1.0, 1.0, 0.02]
@@ -693,62 +673,43 @@ class CICEPlotter:
                 series = [0, 2, 1]
             else:
                 series = [0.0, 1.0, 0.05]
-
         if cmap is None:
             if is_diff:
                 cmap = "vik"
             elif is_cat:
-                cpt = Path(self.paths.logs_root_path).expanduser() / "plotting" / "FIP_diff_cat.cpt"
+                cpt = Path(self.pth_cfg.logs_root_path).expanduser() / "plotting" / "FIP_diff_cat.cpt"
                 cpt.parent.mkdir(parents=True, exist_ok=True)
-                pygmt.makecpt(
-                    cmap=",".join(categorical_colors),
-                    series=[0, 2, 1],
-                    categorical=True,
-                    color_model="R+c" + ",".join(categorical_labels),
-                    output=str(cpt),
-                )
+                pygmt.makecpt(cmap = ",".join(categorical_colors), series = [0, 2, 1], categorical = True,
+                              color_model = "R+c" + ",".join(categorical_labels), output = str(cpt))
                 cmap = str(cpt)
             else:
                 cmap = self._default_fip_cmap()
-
-        region_map = self._resolve_regions(region_name=region_name, region=region, regions=regions)
+        region_map = self._resolve_regions(region_name = region_name, region = region, regions = regions)
         saved: dict[str, str] = {}
-
         for name, reg in region_map.items():
-            data = self.pygmt_da_prep(da_plot, lon=lon, lat=lat, mask_zero=False, region=reg)
-
+            data = self.pygmt_da_prep(da_plot, lon = lon, lat = lat, mask_zero = False, region = reg)
             if output_path and len(region_map) == 1:
                 path = Path(output_path).expanduser()
             else:
                 if output_root is not None:
                     root = Path(output_root).expanduser()
                 else:
-                    root = self.paths.figure_root() / "FIP"
+                    root = self.pth_cfg.figure_root() / "FIP"
                 safe_label = str(label).replace("/", "_")
                 safe_field = field_l.replace("/", "_")
-                path = root / safe_label / name / f"{safe_label}_{safe_field}_{norm}.png"
-
+                path       = root / safe_label / name / f"{safe_label}_{safe_field}_{norm}.png"
             path.parent.mkdir(parents=True, exist_ok=True)
-            fig = pygmt.Figure()
-            proj = self.projection_from_region(reg, fig_size=fig_size or self.plotting.fip_fig_size)
-
+            fig  = pygmt.Figure()
+            proj = self.projection_from_region(reg, fig_size=fig_size or self.plt_cfg.fip_fig_size)
             if is_cat:
                 # CPT has already been written above.
                 pass
             else:
-                pygmt.makecpt(cmap=str(cmap), series=list(series), continuous=True)
-
+                pygmt.makecpt(cmap = str(cmap), series = list(series), continuous = True)
             plot_title = title or f"{label} {name} {field_l}"
             self.pygmt_base_layer(fig, reg, proj, title=plot_title, shorelines=shorelines, land=land, water=water)
-            fig.plot(
-                x=data["lon"],
-                y=data["lat"],
-                style=grid_style or self.plotting.grid_style,
-                fill=data["z"],
-                cmap=True if not is_cat else str(cmap),
-            )
-            fig.coast(region=reg, projection=proj, shorelines=shorelines or self.plotting.shorelines)
-
+            fig.plot(x = data["lon"], y = data["lat"], style = grid_style or self.plt_cfg.grid_style, fill = data["z"], cmap = True if not is_cat else str(cmap))
+            fig.coast(region = reg, projection = proj, shorelines = shorelines or self.plt_cfg.shorelines)
             if colorbar_position:
                 if colorbar_frame is not None:
                     frame = list(colorbar_frame)
@@ -758,13 +719,11 @@ class CICEPlotter:
                     frame = ['+l"FIP difference category"']
                 else:
                     frame = ['xaf+l"Fast ice persistence"']
-                fig.colorbar(position=colorbar_position, frame=frame, cmap=str(cmap) if is_cat else None)
-
+                fig.colorbar(position = colorbar_position, frame = frame, cmap = str(cmap) if is_cat else None)
             fig.savefig(path)
             if show:
                 fig.show()
             saved[name] = str(path)
-
         return next(iter(saved.values())) if len(saved) == 1 else saved
 
     def plot_timeseries(self, variable: str, method: str,
@@ -782,19 +741,19 @@ class CICEPlotter:
         pygmt = self._require_pygmt()
         norm  = normalize_method(method)
         var   = variable.upper()
-        sim   = sim_name or self.run.sim_name
-        dt0   = dt0_str  or self.run.start_date
-        dtN   = dtN_str  or self.run.end_date
-        hemi  = self.run.hemisphere
+        sim   = sim_name or self.run_cfg.sim_name
+        dt0   = dt0_str  or self.run_cfg.start_date
+        dtN   = dtN_str  or self.run_cfg.end_date
+        hemi  = self.run_cfg.hemisphere
         # Use overridden run context when sim_name changes
-        run = replace(self.run, sim_name=sim)
+        run_cfg = replace(self.run_cfg, sim_name=sim)
         self.logger.info(f"loading metrics for {sim} over period {dt0} -- {dtN} for hemisphere {hemi} ...")
-        ds  = load_metrics(run            = run,
-                           classify       = self.classify,
-                           metrics        = self.metrics,
-                           plotting       = self.plotting,
-                           observations   = self.observations,
-                           paths          = self.paths,
+        ds  = load_metrics(run_cfg        = run_cfg,
+                           cls_cfg        = self.cls_cfg,
+                           met_cfg        = self.met_cfg,
+                           plt_cfg        = self.plt_cfg,
+                           obs_cfg        = self.obs_cfg,
+                           pth_cfg        = self.pth_cfg,
                            classification = norm,
                            dt0_str        = dt0,
                            dtN_str        = dtN,
@@ -857,13 +816,8 @@ class CICEPlotter:
         # Prefer existing helper where possible; fall back to explicit path
         # if sim/date overrides are used and the helper is fixed to self.run.
         # ------------------------------------------------------------
-        # if output_path:
-        #     path = Path(output_path).expanduser()
         if not output_path:
-            P_png = self.paths.timeseries_plot_path(var, norm, region_key,
-                                                   sim_name   = sim,
-                                                   start_date = dt0,
-                                                   end_date   = dtN)
+            P_png = self.pth_cfg.timeseries_plot_path(var, norm, region_key)
         else:
             P_png = output_path
         # ------------------------------------------------------------
@@ -935,17 +889,17 @@ class CICEPlotter:
             label         = spec.get("label", sim_name)
             pen           = spec.get("pen", default_pens[i % len(default_pens)])
             sim_grid_type = spec.get("grid_type") or (grid_type_map or {}).get(sim_name, grid_type)
-            ds, resolved  = load_metrics(run             = self.run,
-                                         classify        = self.classify,
-                                         metrics         = self.metrics,
-                                         plotting        = self.plotting,
-                                         observations    = self.observations,
-                                         paths           = self.paths,
+            ds, resolved  = load_metrics(run_cfg             = self.run_cfg,
+                                         cls_cfg        = self.cls_cfg,
+                                         met_cfg         = self.met_cfg,
+                                         plt_cfg        = self.plt_cfg,
+                                         obs_cfg    = self.obs_cfg,
+                                         pth_cfg           = self.pth_cfg,
                                          classification  = norm,
                                          sim_name        = sim_name,
                                          dt0_str         = dt0_str,
                                          dtN_str         = dtN_str,
-                                         hemisphere      = self.run.hemisphere,
+                                         hemisphere      = self.run_cfg.hemisphere,
                                          grid_type       = sim_grid_type,
                                          chunks          = self.chunks,
                                          return_resolved = True)
@@ -1003,7 +957,7 @@ class CICEPlotter:
             ymax += pad
         region_key = region if region.lower() != "total" else "total"
         if output_path is None:
-            path = self.paths.multi_timeseries_plot_path(variable    = var,
+            path = self.pth_cfg.multi_timeseries_plot_path(variable    = var,
                                                          method      = norm,
                                                          simulations = series_list,
                                                          region      = region_key,
@@ -1038,31 +992,31 @@ class CICEPlotter:
                                   grid_style     : str | None = None) -> str:
         pygmt = self._require_pygmt()
         da, lon, lat = self._load_field(variable, date_str=date_str, method=method)
-        path = Path(output_path).expanduser() if output_path else self.paths.split_hemisphere_plot_path(variable, date_str)
+        path = Path(output_path).expanduser() if output_path else self.pth_cfg.split_hemisphere_plot_path(variable, date_str)
         path.parent.mkdir(parents=True, exist_ok=True)
         south = self.pygmt_da_prep(da.where(lat < 0), lon=lon, lat=lat, mask_zero=False)
         north = self.pygmt_da_prep(da.where(lat > 0), lon=lon, lat=lat, mask_zero=False)
         fig = pygmt.Figure()
         with pygmt.config(MAP_FRAME_TYPE="plain"):
-            fig.subplot(nrows=1, ncols=2, figsize=(f"{2*(fig_size or self.plotting.split_fig_size)}c", f"{fig_size or self.plotting.split_fig_size}c"), margins=["0.3c", "0.3c"])
+            fig.subplot(nrows=1, ncols=2, figsize=(f"{2*(fig_size or self.plt_cfg.split_fig_size)}c", f"{fig_size or self.plt_cfg.split_fig_size}c"), margins=["0.3c", "0.3c"])
             with fig.set_panel(panel=0):
                 reg = [-180, 180, -90, -45]
                 proj = "S0/-90/12c"
                 self.pygmt_base_layer(fig, reg, proj, title=(title or f"{variable} {date_str}") + " (SH)")
                 pygmt.makecpt(cmap=cmap, series=series, continuous=True)
-                fig.plot(x=south["lon"], y=south["lat"], style=grid_style or self.plotting.grid_style, fill=south["z"], cmap=True)
+                fig.plot(x=south["lon"], y=south["lat"], style=grid_style or self.plt_cfg.grid_style, fill=south["z"], cmap=True)
                 if add_nsidc_south:
                     for line in self._nsidc_contours(date_str, "south"):
-                        fig.plot(x=line[:, 0], y=line[:, 1], pen=self.plotting.nsidc_pen)
+                        fig.plot(x=line[:, 0], y=line[:, 1], pen=self.plt_cfg.nsidc_pen)
             with fig.set_panel(panel=1):
                 reg = [-180, 180, 45, 90]
                 proj = "S0/90/12c"
                 self.pygmt_base_layer(fig, reg, proj, title=(title or f"{variable} {date_str}") + " (NH)")
                 pygmt.makecpt(cmap=cmap, series=series, continuous=True)
-                fig.plot(x=north["lon"], y=north["lat"], style=grid_style or self.plotting.grid_style, fill=north["z"], cmap=True)
+                fig.plot(x=north["lon"], y=north["lat"], style=grid_style or self.plt_cfg.grid_style, fill=north["z"], cmap=True)
                 if add_nsidc_north:
                     for line in self._nsidc_contours(date_str, "north"):
-                        fig.plot(x=line[:, 0], y=line[:, 1], pen=self.plotting.nsidc_pen)
+                        fig.plot(x=line[:, 0], y=line[:, 1], pen=self.plt_cfg.nsidc_pen)
         fig.savefig(path)
         return str(path)
 
@@ -1085,22 +1039,22 @@ class CICEPlotter:
         out: dict[str, str] = {}
         for name, reg in region_map.items():
             data = self.pygmt_da_prep(da, lon=lon, lat=lat, region=reg)
-            path = Path(output_path).expanduser() if output_path and len(region_map) == 1 else (Path(output_root).expanduser() / self.run.sim_name / name / variable / f"{date_str}.png"
-                                                                                                if output_root is not None else self.paths.regional_var_plot_path(variable, date_str, name))
+            path = Path(output_path).expanduser() if output_path and len(region_map) == 1 else (Path(output_root).expanduser() / self.run_cfg.sim_name / name / variable / f"{date_str}.png"
+                                                                                                if output_root is not None else self.pth_cfg.regional_var_plot_path(variable, date_str, name))
             path.parent.mkdir(parents=True, exist_ok=True)
             fig  = pygmt.Figure()
-            proj = self.projection_from_region(reg, fig_size=fig_size or self.plotting.region_fig_size)
+            proj = self.projection_from_region(reg, fig_size=fig_size or self.plt_cfg.region_fig_size)
             pygmt.makecpt(cmap=cmap, series=series, continuous=True)
-            self.pygmt_base_layer(fig, reg, proj, title=title or f"{self.run.sim_name} {name} {variable} {date_str}")
-            fig.plot(x=data["lon"], y=data["lat"], style=grid_style or self.plotting.grid_style, fill=data["z"], cmap=True)
+            self.pygmt_base_layer(fig, reg, proj, title=title or f"{self.run_cfg.sim_name} {name} {variable} {date_str}")
+            fig.plot(x=data["lon"], y=data["lat"], style=grid_style or self.plt_cfg.grid_style, fill=data["z"], cmap=True)
             if add_nsidc or (add_nsidc is None and float(np.mean(reg[2:])) < 0):
                 for line in self._nsidc_contours(date_str, "south"):
                     lonline = line[:, 0]
                     latline = line[:, 1]
                     keep = self._region_mask(xr.DataArray(lonline, dims="p"), xr.DataArray(latline, dims="p"), reg).values
                     if np.any(keep):
-                        fig.plot(x=lonline[keep], y=latline[keep], pen=self.plotting.nsidc_pen)
-            fig.colorbar(position=self.plotting.colorbar_position)
+                        fig.plot(x=lonline[keep], y=latline[keep], pen=self.plt_cfg.nsidc_pen)
+            fig.colorbar(position=self.plt_cfg.colorbar_position)
             fig.savefig(path)
             out[name] = str(path)
         return next(iter(out.values())) if len(out) == 1 else out
@@ -1127,7 +1081,7 @@ class CICEPlotter:
         pygmt = self._require_pygmt()
         if len(panels) != 3:
             raise ValueError("plot_triptych currently expects exactly three panels.")
-        path = Path(output_path).expanduser() if output_path is not None else self.paths.figure_root() / "comparison" / f"{self.run.start_date}_{self.run.end_date}_triptych.png"
+        path = Path(output_path).expanduser() if output_path is not None else self.pth_cfg.figure_root() / "comparison" / f"{self.run_cfg.start_date}_{self.run_cfg.end_date}_triptych.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         proj = self.projection_from_region(region, fig_size=fig_size)
         fig = pygmt.Figure()
@@ -1148,7 +1102,7 @@ class CICEPlotter:
                 if layer.get("cmap") is not None:
                     pygmt.makecpt(cmap=layer["cmap"], series=layer.get("series"), continuous=True)
                 fill = data["z"] if layer.get("fill", "z") == "z" else layer.get("fill")
-                fig.plot(x=data["lon"], y=data["lat"], style=layer.get("style", self.plotting.grid_style), fill=fill, cmap=bool(layer.get("cmap")), pen=layer.get("pen"))
+                fig.plot(x=data["lon"], y=data["lat"], style=layer.get("style", self.plt_cfg.grid_style), fill=fill, cmap=bool(layer.get("cmap")), pen=layer.get("pen"))
                 cbar = layer.get("colorbar")
                 if cbar:
                     fig.colorbar(**cbar)

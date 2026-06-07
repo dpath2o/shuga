@@ -14,14 +14,14 @@ from .types      import (ClassificationSpec,
 
 @dataclass(slots=True)
 class ShugaPaths:
-    run                : RunSpec            | None = None
-    classify           : ClassificationSpec | None = None
-    metrics            : MetricsSpec        | None = None
-    plotting           : PlottingSpec       | None = None
-    observations       : ObservationSpec    | None = None
-    wave_forcing       : WaveForcingSpec    | None = None
-    cice_grid          : CICEGridSpec       | None = None
-    lateral_drag       : LateralDragSpec    | None = None
+    run_cfg            : RunSpec            | None = None
+    cls_cfg            : ClassificationSpec | None = None
+    met_cfg            : MetricsSpec        | None = None
+    plt_cfg            : PlottingSpec       | None = None
+    obs_cfg            : ObservationSpec    | None = None
+    wave_frcg_cfg      : WaveForcingSpec    | None = None
+    G_cice_cfg         : CICEGridSpec       | None = None
+    LD_cfg             : LateralDragSpec    | None = None
     default_project    : str = "gv90"
     default_user       : str = "da1339"
     default_hemisphere : str = "SH"
@@ -35,8 +35,8 @@ class ShugaPaths:
     archive_root       : str | Path | None = None
 
     def __post_init__(self) -> None:
-        project = self.run.project if self.run is not None else self.default_project
-        user    = self.run.user    if self.run is not None else self.default_user
+        project = self.run_cfg.project if self.run_cfg is not None else self.default_project
+        user    = self.run_cfg.user    if self.run_cfg is not None else self.default_user
         if self.gdata_root is None:
             self.gdata_root = Path("/g/data") / project / user
         else:
@@ -69,11 +69,11 @@ class ShugaPaths:
     #-------------------------------------------------------------------------------------------------
     @property
     def _project(self) -> str:
-        return self.run.project if self.run is not None else self.default_project
+        return self.run_cfg.project if self.run_cfg is not None else self.default_project
 
     @property
     def _user(self) -> str:
-        return self.run.user if self.run is not None else self.default_user
+        return self.run_cfg.user if self.run_cfg is not None else self.default_user
 
     @property
     def analysis_zarr_root_path(self) -> Path:
@@ -85,10 +85,10 @@ class ShugaPaths:
 
     @property
     def ice_domain(self) -> str:
-        classify = self._require_classify("ice_domain")
-        token = str(classify.ice_type).strip().upper()
+        cls_cfg = self._require_classify("ice_domain")
+        token = str(cls_cfg.ice_type).strip().upper()
         if token not in {"FI", "PI", "SI"}:
-            raise ValueError(f"Unsupported classify.ice_type={classify.ice_type!r}. Use 'FI', 'PI', or 'SI'.")
+            raise ValueError(f"Unsupported cls_cfg.ice_type={cls_cfg.ice_type!r}. Use 'FI', 'PI', or 'SI'.")
         return token
 
     @property
@@ -108,22 +108,22 @@ class ShugaPaths:
         domain = self.ice_domain
         if domain == "SI":
             return base / "SI"
-        classify = self._require_classify("classification_root_path")
-        return (base / f"ispd_thresh_{threshold_tag_dir(classify.ispd_thresh)}" / domain / str(classify.grid_type))
+        cls_cfg = self._require_classify("classification_root_path")
+        return (base / f"ispd_thresh_{threshold_tag_dir(cls_cfg.ispd_thresh)}" / domain / str(cls_cfg.grid_type))
 
     @property
     def hemisphere(self) -> str:
-        value = self.run.hemisphere if self.run is not None else self.default_hemisphere
+        value = self.run_cfg.hemisphere if self.run_cfg is not None else self.default_hemisphere
         return self.canonical_hemisphere(value)
 
     @property
     def output_root(self) -> Path:
         base = Path(self.afim_output_root).expanduser() if self.afim_output_root is not None else Path(f"/g/data/{self._project}/{self._user}/afim_output")
-        if self.run is None:
+        if self.run_cfg is None:
             return base
-        if base.name == self.run.sim_name:
+        if base.name == self.run_cfg.sim_name:
             return base
-        return base / self.run.sim_name
+        return base / self.run_cfg.sim_name
 
     @property
     def zarr_root(self) -> Path:
@@ -136,11 +136,11 @@ class ShugaPaths:
     @property
     def archive_root_path(self) -> Path:
         base = Path(self.archive_root).expanduser() if self.archive_root is not None else Path.home() / "AFIM_archive"
-        if self.run is None:
+        if self.run_cfg is None:
             return base
-        if base.name == self.run.sim_name:
+        if base.name == self.run_cfg.sim_name:
             return base
-        return base / self.run.sim_name
+        return base / self.run_cfg.sim_name
 
     @property
     def default_cice_static_store_path(self) -> Path:
@@ -183,14 +183,14 @@ class ShugaPaths:
 
     @property
     def seaice_root_path(self) -> Path:
-        obs = self.observations or ObservationSpec()
+        obs = self.obs_cfg or ObservationSpec()
         if obs.seaice_root is not None:
             return Path(obs.seaice_root).expanduser()
         return Path(f"/g/data/{self._project}/{self._user}/SeaIce")
 
     @property
     def iceh_frequency(self) -> str:
-        value = getattr(self.run, "iceh_frequency", "daily") if self.run is not None else "daily"
+        value = getattr(self.run_cfg, "iceh_frequency", "daily") if self.run_cfg is not None else "daily"
         token = str(value).strip().lower()
         if token not in {"daily", "hourly"}:
             raise ValueError(f"Unsupported iceh_frequency={token!r}")
@@ -213,14 +213,14 @@ class ShugaPaths:
 
     @property
     def fi_obs_root_path(self) -> Path:
-        obs = self.observations or ObservationSpec()
+        obs = self.obs_cfg or ObservationSpec()
         if obs.af2020_root is not None:
             return Path(obs.af2020_root).expanduser()
         return self.seaice_root_path / "FI_obs"
 
     @property
     def nsidc_root_path(self) -> Path:
-        obs = self.observations or ObservationSpec()
+        obs = self.obs_cfg or ObservationSpec()
         if obs.nsidc_root is not None:
             return Path(obs.nsidc_root).expanduser()
         return self.seaice_root_path / "NSIDC" / obs.nsidc_version
@@ -231,7 +231,7 @@ class ShugaPaths:
 
     @property
     def nsidc_aux_root_path(self) -> Path:
-        obs = self.observations or ObservationSpec()
+        obs = self.obs_cfg or ObservationSpec()
         if obs.nsidc_cellarea_root is not None:
             return Path(obs.nsidc_cellarea_root).expanduser()
         return self.seaice_root_path / "NSIDC" / obs.nsidc_cellarea_product
@@ -242,7 +242,7 @@ class ShugaPaths:
 
     @property
     def cawcr_org_root_path(self) -> Path:
-        obs = self.observations or ObservationSpec()
+        obs = self.obs_cfg or ObservationSpec()
         return self.cawcr_root_path / obs.cawcr_org_subdir
 
     @property
@@ -255,7 +255,7 @@ class ShugaPaths:
 
     @property
     def cice_defaults(self) -> dict[str, Path]:
-        spec = self.cice_grid or CICEGridSpec()
+        spec = self.G_cice_cfg or CICEGridSpec()
         return {"grid_file"      : Path(spec.default_grid_file).expanduser() if spec.default_grid_file is not None else self.grids_root_path / "ACCESS-OM3-025_Cgrid.nc",
                 "kmt_file"       : Path(spec.default_kmt_file).expanduser() if spec.default_kmt_file is not None else self.grids_root_path / "ACCESS-OM3-025_kmt.nc",
                 "bathymetry_file": Path(spec.default_bathymetry_file).expanduser() if spec.default_bathymetry_file is not None else self.grids_root_path / "unknown_bathymetry_file",
@@ -266,7 +266,7 @@ class ShugaPaths:
         """
         Generic default CICE/ACCESS-OM3 grid file.
 
-        This is safe to use without run=RunSpec(...). It is intended for
+        This is safe to use without run_cfg=RunSpec(...). It is intended for
         preprocessing workflows, such as ERA5 -> CICE regridding, that need
         the standard destination grid but are not tied to a specific CICE run.
         """
@@ -274,7 +274,7 @@ class ShugaPaths:
 
     @property
     def regridded_wave_root_path(self) -> Path:
-        wf = self.wave_forcing or WaveForcingSpec()
+        wf = self.wave_frcg_cfg or WaveForcingSpec()
         if wf.regridded_wave_root is not None:
             return Path(wf.regridded_wave_root).expanduser()
         return self.cawcr_root_path
@@ -313,35 +313,35 @@ class ShugaPaths:
 
     @property
     def grounded_iceberg_file_path(self) -> Path:
-        ld = self.lateral_drag or LateralDragSpec()
+        ld = self.LD_cfg or LateralDragSpec()
         if ld.grounded_iceberg_file is not None:
             return Path(ld.grounded_iceberg_file).expanduser()
         return Path(f"/g/data/{self._project}/{self._user}/grounded_icebergs/Kaihong_Jiao/Grounded_Icebergs_Full_Merged.gpkg")
 
     @property
     def high_res_coast_file_path(self) -> Path:
-        ld = self.lateral_drag or LateralDragSpec()
+        ld = self.LD_cfg or LateralDragSpec()
         if ld.high_res_coast_file is not None:
             return Path(ld.high_res_coast_file).expanduser()
         return Path(f"/g/data/{self._project}/{self._user}/coastlines/high_res_coast/add_coastline_high_res_polygon_v7_9.shp")
 
     @property
     def coast_form_factors_path(self) -> Path:
-        ld = self.lateral_drag or LateralDragSpec()
+        ld = self.LD_cfg or LateralDragSpec()
         if ld.coast_form_factors_file is not None:
             return Path(ld.coast_form_factors_file).expanduser()
         return self.form_factors_root_path / "coast.nc"
 
     @property
     def grounded_iceberg_form_factors_path(self) -> Path:
-        ld = self.lateral_drag or LateralDragSpec()
+        ld = self.LD_cfg or LateralDragSpec()
         if ld.grounded_iceberg_form_factors_file is not None:
             return Path(ld.grounded_iceberg_form_factors_file).expanduser()
         return self.form_factors_root_path / "grounded_icebergs.nc"
 
     @property
     def combined_form_factors_path(self) -> Path:
-        ld = self.lateral_drag or LateralDragSpec()
+        ld = self.LD_cfg or LateralDragSpec()
         if ld.combined_form_factors_file is not None:
             return Path(ld.combined_form_factors_file).expanduser()
         return self.form_factors_root_path / "combined.nc"
@@ -350,24 +350,24 @@ class ShugaPaths:
     # helper functions
     #-------------------------------------------------------------------------------------------------
     def _require_run(self, caller: str) -> RunSpec:
-        if self.run is None:
-            raise ValueError(f"ShugaPaths.{caller} requires run=RunSpec(...). "
+        if self.run_cfg is None:
+            raise ValueError(f"ShugaPaths.{caller} requires run_cfg=RunSpec(...). "
                              "Instantiate ShugaPaths with a RunSpec for simulation-specific paths.")
-        return self.run
+        return self.run_cfg
 
     def _require_classify(self, caller: str) -> ClassificationSpec:
-        if self.classify is None:
-            raise ValueError(f"ShugaPaths.{caller} requires classify=ClassificationSpec(...). "
+        if self.cls_cfg is None:
+            raise ValueError(f"ShugaPaths.{caller} requires cls_cfg=ClassificationSpec(...). "
                              "Instantiate ShugaPaths with a ClassificationSpec for classification/metrics paths.")
-        return self.classify
+        return self.cls_cfg
 
     def with_ice_type(self, ice_type: str) -> "ShugaPaths":
         """
         Return a copy of this path bundle with a different classification/metrics
         ice-domain selector.
         """
-        classify = self._require_classify("with_ice_type")
-        return replace(self, classify = replace(classify, ice_type = str(ice_type).strip().upper()))
+        cls_cfg = self._require_classify("with_ice_type")
+        return replace(self, cls_cfg = replace(cls_cfg, ice_type = str(ice_type).strip().upper()))
 
     @staticmethod
     def canonical_hemisphere(value: str) -> str:
@@ -416,20 +416,20 @@ class ShugaPaths:
     def classification_store(self, method: str) -> Path:
         if self.ice_domain == "SI":
             return self.classification_root_path / "data.zarr"
-        classify = self._require_classify("classification_store")
+        cls_cfg = self._require_classify("classification_store")
         return (self.classification_root_path / method_dirname(method,
-                                                               bin_window   = classify.bin_window,
-                                                               bin_min_days = classify.bin_min_days,
-                                                               roll_window  = classify.roll_window) / "data.zarr")
+                                                               bin_window   = cls_cfg.bin_window,
+                                                               bin_min_days = cls_cfg.bin_min_days,
+                                                               roll_window  = cls_cfg.roll_window) / "data.zarr")
 
     def metrics_store(self, method: str) -> Path:
         if self.ice_domain == "SI":
             return self.classification_root_path / "mets.zarr"
-        classify = self._require_classify("metrics_store")
+        cls_cfg = self._require_classify("metrics_store")
         return (self.classification_root_path / method_dirname(method,
-                                                               bin_window   = classify.bin_window,
-                                                               bin_min_days = classify.bin_min_days,
-                                                               roll_window  = classify.roll_window) / "mets.zarr")
+                                                               bin_window   = cls_cfg.bin_window,
+                                                               bin_min_days = cls_cfg.bin_min_days,
+                                                               roll_window  = cls_cfg.roll_window) / "mets.zarr")
 
     def resolve_daily_iceh_root(self, daily_root: str | Path | None = None) -> Path:
         if daily_root is not None:
@@ -554,23 +554,23 @@ class ShugaPaths:
         return self.metrics_store(method)
 
     def classification_log_path(self) -> Path:
-        run = self._require_run("classification_log_path")
-        classify = self._require_classify("classification_log_path")
-        stem = (f"classify_{run.sim_name}_{classify.ice_type}_{classify.grid_type}"
-                f"_ispd_thresh{threshold_tag_compact(classify.ispd_thresh)}"
-                f"_BW{classify.bin_window}_BM{classify.bin_min_days}_roll{classify.roll_window}.log")
+        run_cfg = self._require_run("classification_log_path")
+        cls_cfg = self._require_classify("classification_log_path")
+        stem = (f"classify_{run_cfg.sim_name}_{cls_cfg.ice_type}_{cls_cfg.grid_type}"
+                f"_ispd_thresh{threshold_tag_compact(cls_cfg.ispd_thresh)}"
+                f"_BW{cls_cfg.bin_window}_BM{cls_cfg.bin_min_days}_roll{cls_cfg.roll_window}.log")
         return self.logs_root_path / "classification" / stem
 
     def metrics_log_path(self) -> Path:
-        run = self._require_run("metrics_log_path")
-        classify = self._require_classify("metrics_log_path")
-        stem = (f"metrics_{run.sim_name}_{classify.ice_type}_{classify.grid_type}"
-                f"_ispd_thresh{threshold_tag_compact(classify.ispd_thresh)}"
-                f"_BW{classify.bin_window}_BM{classify.bin_min_days}_roll{classify.roll_window}.log")
+        run_cfg = self._require_run("metrics_log_path")
+        cls_cfg = self._require_classify("metrics_log_path")
+        stem = (f"metrics_{run_cfg.sim_name}_{cls_cfg.ice_type}_{cls_cfg.grid_type}"
+                f"_ispd_thresh{threshold_tag_compact(cls_cfg.ispd_thresh)}"
+                f"_BW{cls_cfg.bin_window}_BM{cls_cfg.bin_min_days}_roll{cls_cfg.roll_window}.log")
         return self.logs_root_path / "metrics" / stem
 
     def figure_root(self, region: str | None = None, *, sim_name: str | None = None) -> Path:
-        sim = sim_name or self._require_run("figure_root").sim_name
+        sim   = sim_name or self._require_run("figure_root").sim_name
         parts = [self.graphics_root_path, sim]
         if region is not None:
             parts.append(str(region))
@@ -594,25 +594,26 @@ class ShugaPaths:
         region : str, default 'total'
             Region key used in the graphical output tree.
         sim_name : str, optional
-            Simulation name override. Defaults to self.run.sim_name.
+            Simulation name override. Defaults to self.run_cfg.sim_name.
         start_date : str, optional
-            Plot start date override. Defaults to self.run.start_date.
+            Plot start date override. Defaults to self.run_cfg.start_date.
         end_date : str, optional
-            Plot end date override. Defaults to self.run.end_date.
+            Plot end date override. Defaults to self.run_cfg.end_date.
         """
         norm   = normalize_method(classification)
-        run    = self.run
-        sim    = sim_name or (self._require_run("fip_plot_path").sim_name if run is None else run.sim_name)
-        dt0    = start_date or (self._require_run("fip_plot_path").start_date if run is None else run.start_date)
-        dtN    = end_date or (self._require_run("fip_plot_path").end_date if run is None else run.end_date)
+        run_cfg    = self.run_cfg
+        sim    = sim_name or (self._require_run("fip_plot_path").sim_name if run_cfg is None else run_cfg.sim_name)
+        dt0    = start_date or (self._require_run("fip_plot_path").start_date if run_cfg is None else run_cfg.start_date)
+        dtN    = end_date or (self._require_run("fip_plot_path").end_date if run_cfg is None else run_cfg.end_date)
         return (self.graphics_root_path / sim / region / "FIP" / f"{dt0}_{dtN}_{sim}_FIP_{norm.replace('-', '_')}.png")
 
     def timeseries_plot_path(self, variable: str, method: str, region: str = "total") -> Path:
-        run = self._require_run("timeseries_plot_path")
+        run_cfg     = self._require_run("timeseries_plot_path")
         method_part = method_slug(method)
-        name = f"{run.start_date}_{run.end_date}_{run.sim_name}_{variable}_{method_part}.png"
-        return self.figure_root(region=region) / "timeseries" / name
-
+        name        = f"{run_cfg.start_date}_{run_cfg.end_date}_{run_cfg.sim_name}_{variable}_{method_part}.png"
+        P_          = self.figure_root(region=region) / "timeseries" / name
+        P_.parent.mkdir(parents = True, exist_ok = True)
+        return P_
 
     def multi_timeseries_plot_path(self, variable: str, method: str, simulations, *,
                                    region  : str        = "total",
@@ -621,11 +622,11 @@ class ShugaPaths:
         var        = filename_token(str(variable).upper())
         norm       = filename_token(normalize_method(method))
         region_key = filename_token("total" if str(region).strip().lower() == "total" else str(region))
-        run        = self.run
+        run_cfg    = self.run_cfg
         if dt0_str is None or dtN_str is None:
-            run = self._require_run("multi_timeseries_plot_path")
-        dt0        = filename_token(dt0_str or run.start_date)
-        dtN        = filename_token(dtN_str or run.end_date)
+            run_cfg = self._require_run("multi_timeseries_plot_path")
+        dt0 = filename_token(dt0_str or run_cfg.start_date)
+        dtN = filename_token(dtN_str or run_cfg.end_date)
         sim_tokens: list[str] = []
         for spec in simulations:
             if isinstance(spec, str):
@@ -660,14 +661,14 @@ class ShugaPaths:
         return self.wave_weights_root_path / f"cawcr2cice_{year:04d}{month:02d}.npz"
 
     def cawcr_figure_dir(self, year: int, month: int) -> Path:
-        wf = self.wave_forcing or WaveForcingSpec()
+        wf = self.wave_frcg_cfg or WaveForcingSpec()
         return self.graphics_root_path / wf.figure_subdir / f"{year:04d}{month:02d}"
 
     # ------------------------------
     # CICE grid / ice_in resolution
     # ------------------------------
     def resolve_ice_in_file(self) -> Path | None:
-        spec = self.cice_grid or CICEGridSpec()
+        spec = self.G_cice_cfg or CICEGridSpec()
         if spec.ice_in_file is not None:
             path = Path(spec.ice_in_file).expanduser()
             return path if path.exists() else None
@@ -675,9 +676,9 @@ class ShugaPaths:
         if spec.experiment_root is not None:
             roots.append(Path(spec.experiment_root).expanduser())
         roots.extend([self.output_root,
-                      Path(f"/g/data/{self.run.project}/{self.run.user}/simulations/{self.run.sim_name}"),
-                      Path(f"/g/data/{self.run.project}/{self.run.user}/experiments/{self.run.sim_name}"),
-                      Path.home() / self.run.sim_name])
+                      Path(f"/g/data/{self.run_cfg.project}/{self.run_cfg.user}/simulations/{self.run_cfg.sim_name}"),
+                      Path(f"/g/data/{self.run_cfg.project}/{self.run_cfg.user}/experiments/{self.run_cfg.sim_name}"),
+                      Path.home() / self.run_cfg.sim_name])
         candidates = []
         for root in roots:
             candidates.extend([root / "ice_in",
@@ -699,7 +700,7 @@ class ShugaPaths:
 
             /g/data/<project>/<user>/afim_output/<sim_name>/ice_diag.d
         """
-        spec = self.cice_grid or CICEGridSpec()
+        spec = self.G_cice_cfg or CICEGridSpec()
         explicit = getattr(spec, "ice_diag_file", None)
         if explicit is not None:
             path = Path(explicit).expanduser()
@@ -709,9 +710,9 @@ class ShugaPaths:
             roots.append(Path(spec.experiment_root).expanduser())
         roots.extend([self.output_root,
                       self.archive_root_path,
-                      Path(f"/g/data/{self.run.project}/{self.run.user}/simulations/{self.run.sim_name}"),
-                      Path(f"/g/data/{self.run.project}/{self.run.user}/experiments/{self.run.sim_name}"),
-                      Path.home() / self.run.sim_name])
+                      Path(f"/g/data/{self.run_cfg.project}/{self.run_cfg.user}/simulations/{self.run_cfg.sim_name}"),
+                      Path(f"/g/data/{self.run_cfg.project}/{self.run_cfg.user}/experiments/{self.run_cfg.sim_name}"),
+                      Path.home() / self.run_cfg.sim_name])
         candidates: list[Path] = []
         for root in roots:
             candidates.extend([root / "ice_diag.d",
@@ -725,7 +726,7 @@ class ShugaPaths:
         return None
 
     def load_persisted_cice_grid_assets(self) -> dict[str, Path | None]:
-        if self.run is None:
+        if self.run_cfg is None:
             return {key: None for key in self._grid_asset_keys()}
         cfg = self.cice_grid_assets_config_path
         if not cfg.exists():
@@ -738,20 +739,20 @@ class ShugaPaths:
         return out
 
     def persist_cice_grid_assets(self, *, grid_spec: CICEGridSpec | None = None, overwrite: bool = True) -> Path:
-        spec = grid_spec or self.cice_grid or CICEGridSpec()
+        spec = grid_spec or self.G_cice_cfg or CICEGridSpec()
         payload: dict[str, str | None] = {}
         for key in self._grid_asset_keys():
             value = getattr(spec, key, None)
             payload[key] = str(Path(value).expanduser()) if value is not None else None
         target = self.cice_grid_assets_config_path
-        target.parent.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(parents = True, exist_ok = True)
         if target.exists() and not overwrite:
             return target
         target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
         return target
 
     def resolve_cice_grid_assets(self) -> dict[str, Path | None]:
-        spec      = self.cice_grid or CICEGridSpec()
+        spec      = self.G_cice_cfg or CICEGridSpec()
         defaults  = self.cice_defaults
         persisted = self.load_persisted_cice_grid_assets()
         resolved: dict[str, Path | None] = {"grid_file"      : Path(spec.grid_file).expanduser() if spec.grid_file is not None else None,
@@ -765,7 +766,7 @@ class ShugaPaths:
         for key, value in persisted.items():
             if key in resolved and resolved[key] is None and value is not None:
                 resolved[key] = value
-        if self.run is not None:
+        if self.run_cfg is not None:
             if resolved["ice_in_file"] is None:
                 resolved["ice_in_file"] = self.resolve_ice_in_file()
             if resolved["ice_diag_file"] is None:

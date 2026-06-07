@@ -73,13 +73,13 @@ def _apply_hemisphere_mask(ds: xr.Dataset, hemisphere: str | None) -> xr.Dataset
     mask = lat < 0 if hemi == "SH" else lat > 0
     return ds.where(mask)
 
-def _split_requested_variables(variables: list[str] | None, paths: ShugaPaths, static_store: Path | None, *,
+def _split_requested_variables(variables: list[str] | None, pth_cfg: ShugaPaths, static_store: Path | None, *,
                                chunks: dict | None = None, logger = LOGGER) -> tuple[list[str] | None, list[str] | None]:
     if variables is None:
         return None, None
     requested = list(dict.fromkeys(variables))
     static_names: set[str] = set()
-    ds_static = _open_static_dataset(paths, static_store, variables = None, chunks = chunks, logger = logger)
+    ds_static = _open_static_dataset(pth_cfg, static_store, variables = None, chunks = chunks, logger = logger)
     if ds_static is not None:
         try:
             static_names = set(ds_static.data_vars) | set(ds_static.coords)
@@ -91,9 +91,9 @@ def _split_requested_variables(variables: list[str] | None, paths: ShugaPaths, s
     dynamic_requested = [v for v in requested if v not in static_names]
     return dynamic_requested or None, static_requested or None
 
-def _merge_static(ds_all: xr.Dataset, paths: ShugaPaths, static_store: Path | None, variables: list[str] | None, *,
+def _merge_static(ds_all: xr.Dataset, pth_cfg: ShugaPaths, static_store: Path | None, variables: list[str] | None, *,
                   chunks: dict | None = None, logger = LOGGER) -> xr.Dataset:
-    ds_static_all = _open_static_dataset(paths, static_store, variables = variables, chunks = chunks, logger = logger)
+    ds_static_all = _open_static_dataset(pth_cfg, static_store, variables = variables, chunks = chunks, logger = logger)
     if ds_static_all is None:
         return ds_all
     try:
@@ -167,7 +167,7 @@ def _open_grouped_iceh_store(zarr_root  : Path, *,
         raise ValueError("No CICE datasets remained after filtering by time/variables.")
     return xr.concat(ds_list, dim="time", data_vars="minimal",  coords="minimal", compat="override", combine_attrs="override")
 
-def _open_static_dataset(paths: ShugaPaths, static_store: Path | None, *,
+def _open_static_dataset(pth_cfg: ShugaPaths, static_store: Path | None, *,
                          variables: list[str] | None = None,
                          chunks   : dict | None = None,
                          logger = LOGGER) -> xr.Dataset | None:
@@ -178,7 +178,7 @@ def _open_static_dataset(paths: ShugaPaths, static_store: Path | None, *,
     """
     try:
         from shuga.grid.cice import CICEGridwork
-        gridwork = CICEGridwork(paths=paths, logger=logger)
+        gridwork = CICEGridwork(pth_cfg=pth_cfg, logger=logger)
         return gridwork.load_cice_static(P_cice_static_store = static_store,
                                          variables           = variables,
                                          require             = (),
@@ -199,14 +199,14 @@ class IceHistoryLoader:
     - daily CICE history stored as iceh_daily.zarr/YYYY-MM
     - hourly instantaneous CICE history stored as iceh_hourly.zarr/YYYY_MM_DD
     """
-    def __init__(self, paths: ShugaPaths, *, logger=None) -> None:
-        self.paths = paths
-        self.run   = paths.run
+    def __init__(self, pth_cfg: ShugaPaths, *, logger=None) -> None:
+        self.pth_cfg = pth_cfg
+        self.run_cfg   = pth_cfg.run_cfg
         self.logger = logger or LOGGER
 
     @property
     def frequency(self) -> str:
-        return normalize_iceh_frequency(getattr(self.run, "iceh_frequency", "daily"))
+        return normalize_iceh_frequency(getattr(self.run_cfg, "iceh_frequency", "daily"))
 
     def default_chunks(self) -> dict[str, int]:
         if self.frequency == "hourly":
@@ -225,24 +225,24 @@ class IceHistoryLoader:
         var_list = _maybe_listify_variables(variables)
         if var_list is None:
             self.logger.warning("IceHistoryLoader.load() called with variables=None; this may be expensive.")
-        zarr_root         = (Path(cice_store).expanduser() if cice_store is not None else self.paths.resolve_cice_store())
-        stat_eff          = (Path(static_store).expanduser() if static_store is not None else self.paths.resolve_static_store())
-        dyn_req, stat_req = _split_requested_variables(var_list, self.paths, stat_eff, chunks = chunks, logger = self.logger)
+        zarr_root         = (Path(cice_store).expanduser() if cice_store is not None else self.pth_cfg.resolve_cice_store())
+        stat_eff          = (Path(static_store).expanduser() if static_store is not None else self.pth_cfg.resolve_static_store())
+        dyn_req, stat_req = _split_requested_variables(var_list, self.pth_cfg, stat_eff, chunks = chunks, logger = self.logger)
         only_stat_req     = var_list is not None and dyn_req is None and stat_req is not None
         if only_stat_req:
             ds_all = xr.Dataset()
         else:
             ds_all = _open_grouped_iceh_store(zarr_root,
                                               frequency   = self.frequency,
-                                              dt0_str     = dt0_str or self.run.start_date,
-                                              dtN_str     = dtN_str or self.run.end_date,
+                                              dt0_str     = dt0_str or self.run_cfg.start_date,
+                                              dtN_str     = dtN_str or self.run_cfg.end_date,
                                               variables   = dyn_req,
                                               chunks      = chunks,
                                               allow_empty = False,
                                               logger      = self.logger)
 
-        ds_all = _merge_static(ds_all, self.paths, stat_eff, var_list, chunks = chunks, logger = self.logger)
-        ds_all = _apply_hemisphere_mask(ds_all, hemisphere or self.run.hemisphere)
+        ds_all = _merge_static(ds_all, self.pth_cfg, stat_eff, var_list, chunks = chunks, logger = self.logger)
+        ds_all = _apply_hemisphere_mask(ds_all, hemisphere or self.run_cfg.hemisphere)
         if var_list is not None:
             present = [v for v in var_list if v in ds_all.data_vars or v in ds_all.coords]
             if not present:
@@ -250,7 +250,7 @@ class IceHistoryLoader:
             ds_all = ds_all[present]
         return ds_all
 
-def load_ice_history(run: RunSpec, paths: ShugaPaths, *,
+def load_ice_history(run_cfg: RunSpec, pth_cfg: ShugaPaths, *,
                      dt0_str     : str | None = None,
                      dtN_str     : str | None = None,
                      variables                = None,
@@ -258,7 +258,7 @@ def load_ice_history(run: RunSpec, paths: ShugaPaths, *,
                      cice_store  : str | Path | None = None,
                      static_store: str | Path | None = None,
                      chunks      : dict | None = None) -> xr.Dataset:
-    loader = IceHistoryLoader(paths)
+    loader = IceHistoryLoader(pth_cfg)
     return loader.load(dt0_str      = dt0_str,
                        dtN_str      = dtN_str,
                        variables    = variables,

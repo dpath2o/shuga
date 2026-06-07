@@ -38,26 +38,29 @@ class AF2020Observations:
     fields is provided for FIC side-by-side plots; FIP comparisons default to native
     15-day sampling unless the caller explicitly requests daily sampling.
     """
-    def __init__(self, run: RunSpec | None = None, observations: ObservationSpec | None = None, paths: ShugaPaths | None = None, *,
+    def __init__(self,
+                 run_cfg : RunSpec | None = None,
+                 obs_cfg : ObservationSpec | None = None,
+                 pth_cfg : ShugaPaths | None = None, *,
                  D_org_nc: str | Path | None = None,
                  D_reG   : str | Path | None = None,
                  chunks  : dict | None = None,
                  af20_cfg: AF2020Spec | None = None,
-                 logger = None) -> None:
-        self.af20_cfg     = af20_cfg or AF2020Spec()
-        self.run          = run or RunSpec(sim_name="AF2020", start_date="2000-01-01", end_date="2018-12-31")
-        self.observations = observations or ObservationSpec()
-        self.paths        = paths or ShugaPaths(run=self.run, classify=None, observations=self.observations)  # type: ignore[arg-type]
-        org_root          = D_org_nc if D_org_nc is not None else self.af20_cfg.D_org_nc
-        reg_root          = D_reG    if D_reG    is not None else self.af20_cfg.D_reG
+                 logger  = None) -> None:
+        self.af20_cfg = af20_cfg or AF2020Spec()
+        self.run_cfg  = run_cfg or RunSpec(sim_name = "AF2020", start_date = "2000-01-01", end_date = "2018-12-31")
+        self.obs_cfg  = obs_cfg or ObservationSpec()
+        self.pth_cfg  = pth_cfg or ShugaPaths(run_cfg = self.run_cfg, classify = None, obs_cfg = self.obs_cfg)  # type: ignore[arg-type]
+        org_root      = D_org_nc if D_org_nc is not None else self.af20_cfg.D_org_nc
+        reg_root      = D_reG    if D_reG    is not None else self.af20_cfg.D_reG
         if org_root is None:
-            org_root = self.paths.fi_obs_root_path / "org"
+            org_root = self.pth_cfg.fi_obs_root_path / "org"
         if reg_root is None:
-            reg_root = self.paths.fi_obs_root_path
+            reg_root = self.pth_cfg.fi_obs_root_path
         self.D_org_nc = Path(org_root).expanduser()
         self.D_reG    = Path(reg_root).expanduser()
         self.chunks   = chunks or {"time": "auto"}
-        self.logger   = logger or build_file_logger("shuga.observations.AF2020", Path.home() / "logs" / "observations" / "shuga_AF2020.log")
+        self.logger   = logger or build_file_logger("shuga.obs_cfg.AF2020", Path.home() / "logs" / "observations" / "shuga_AF2020.log")
         self._org_cache: xr.Dataset | None = None
         self._fia_daily_cache: xr.Dataset | None = None
 
@@ -66,8 +69,8 @@ class AF2020Observations:
     # ---------------------------------------------------------------------
     def org_files(self, start_date: str | None = None, end_date: str | None = None) -> list[Path]:
         """Return origin AF2020 ``FastIce_70_YYYY.nc`` files covering a date range."""
-        start = pd.Timestamp(start_date or self.run.start_date)
-        end   = pd.Timestamp(end_date or self.run.end_date)
+        start = pd.Timestamp(start_date or self.run_cfg.start_date)
+        end   = pd.Timestamp(end_date or self.run_cfg.end_date)
         years = range(int(start.year), int(end.year) + 1)
         files = [self.D_org_nc / f"FastIce_70_{year:04d}.nc" for year in years]
         files = [p for p in files if p.exists()]
@@ -228,24 +231,24 @@ class AF2020Observations:
     def load_fia_daily(self) -> xr.Dataset:
         """Load the existing daily AF2020 FIA NetCDF product."""
         if self._fia_daily_cache is None:
-            path = self.paths.fi_obs_root_path / self.observations.af2020_fia_daily_file
+            path = self.pth_cfg.fi_obs_root_path / self.obs_cfg.af2020_fia_daily_file
             if not path.exists():
                 raise FileNotFoundError(f"AF2020 FIA daily file does not exist: {path}")
             ds = xr.open_dataset(path, chunks={"time": 366})
-            if self.observations.af2020_fia_daily_var not in ds:
-                raise KeyError(f"Variable {self.observations.af2020_fia_daily_var!r} not found in {path}")
+            if self.obs_cfg.af2020_fia_daily_var not in ds:
+                raise KeyError(f"Variable {self.obs_cfg.af2020_fia_daily_var!r} not found in {path}")
             self._fia_daily_cache = ds
         return self._fia_daily_cache
 
     def get_fia_daily(self) -> xr.DataArray:
         """Return daily AF2020 FIA as ``FIA`` in 10^3 km2."""
-        da = self.load_fia_daily()[self.observations.af2020_fia_daily_var].astype("float32").rename("FIA")
+        da = self.load_fia_daily()[self.obs_cfg.af2020_fia_daily_var].astype("float32").rename("FIA")
         da.attrs.update(long_name="Observed Fast Ice Area", units="10^3 km^2")
         return da
 
     def subset_fia_daily(self, start_date: str | None = None, end_date: str | None = None) -> xr.DataArray:
-        start_date = start_date or self.run.start_date
-        end_date = end_date or self.run.end_date
+        start_date = start_date or self.run_cfg.start_date
+        end_date = end_date or self.run_cfg.end_date
         return self.get_fia_daily().sel(time=slice(start_date, end_date))
 
     def fia_daily_climatology(self) -> xr.DataArray:
@@ -257,8 +260,8 @@ class AF2020Observations:
 
     def repeat_fia_daily_climatology(self, start_date: str | None = None, end_date: str | None = None) -> xr.DataArray:
         """Repeat AF2020 daily FIA climatology over an arbitrary daily period."""
-        start_date = start_date or self.run.start_date
-        end_date = end_date or self.run.end_date
+        start_date = start_date or self.run_cfg.start_date
+        end_date = end_date or self.run_cfg.end_date
         clim = self.fia_daily_climatology()
         t = pd.date_range(start_date, end_date, freq="D")
         doy_vals = np.asarray(clim["doy"].values).astype(int)

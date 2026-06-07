@@ -41,16 +41,16 @@ class CICEClassifier:
 
     Parameters
     ----------
-    run : RunSpec
+    run_cfg : RunSpec
         Run-level configuration describing the simulation, analysis period, and
         hemisphere.
-    classify : ClassificationSpec
+    cls_cfg : ClassificationSpec
         Classification configuration defining variables, thresholds, grid type,
         methods, and rolling/window parameters.
-    paths : ShugaPaths | None, optional
+    pth_cfg : ShugaPaths | None, optional
         Path bundle used to locate input stores and classification outputs. If
         omitted, a new ``ShugaPaths`` instance is built from ``run`` and
-        ``classify``.
+        ``cls_cfg``.
     chunks : dict | None, optional
         Dask chunking used when loading CICE history data. Defaults to
         ``{"time": 31}``.
@@ -65,9 +65,9 @@ class CICEClassifier:
     ----------
     run : RunSpec
         Active run configuration.
-    classify : ClassificationSpec
+    cls_cfg : ClassificationSpec
         Active classification configuration.
-    paths : ShugaPaths
+    pth_cfg : ShugaPaths
         Resolved path bundle for inputs and outputs.
     chunks : dict
         Chunking policy used when opening history data.
@@ -84,8 +84,10 @@ class CICEClassifier:
     - Output stores are written as Zarr version 2 with a canonical variable
       name of ``FI_mask``.
     """
-    def __init__(self, run: RunSpec, classify: ClassificationSpec,
-                 paths    : ShugaPaths | None                             = None, *,
+    def __init__(self,
+                 run_cfg  : RunSpec,
+                 cls_cfg  : ClassificationSpec,
+                 pth_cfg  : ShugaPaths | None                             = None, *,
                  chunks   : dict | None                                   = None,
                  regridder: Callable[[xr.DataArray], xr.DataArray] | None = None,
                  logger                                                   = None) -> None:
@@ -95,15 +97,15 @@ class CICEClassifier:
 
         Parameters
         ----------
-        run : RunSpec
+        run_cfg : RunSpec
             Run-level configuration describing the simulation and requested time
             window.
-        classify : ClassificationSpec
+        cls_cfg : ClassificationSpec
             Classification settings, including thresholds, variables, methods, and
             grid reconstruction mode.
-        paths : ShugaPaths | None, optional
+        pth_cfg : ShugaPaths | None, optional
             Path bundle for locating model history input and classification output
-            stores. If omitted, one is constructed from ``run`` and ``classify``.
+            stores. If omitted, one is constructed from ``run_cfg`` and ``cls_cfg``.
         chunks : dict | None, optional
             Chunking to use when reading CICE history data. Defaults to
             ``{"time": 31}``.
@@ -120,21 +122,21 @@ class CICEClassifier:
         - The logger defaults to a file-backed classifier logger when not
           explicitly provided.
         """
-        self.run       = run
-        self.classify  = classify
-        self.paths     = paths or ShugaPaths(run=run, classify=classify)
+        self.run_cfg   = run_cfg
+        self.cls_cfg   = cls_cfg
+        self.pth_cfg   = pth_cfg or ShugaPaths(run_cfg = run_cfg, classify = cls_cfg)
         self.chunks    = chunks or {"time": 31}
         self.regridder = regridder
-        self.logger    = logger or build_file_logger("shuga.classify", self.paths.classification_log_path())
+        self.logger    = logger or build_file_logger("shuga.cls_cfg", self.pth_cfg.classification_log_path())
         self._ds_cache: xr.Dataset | None = None
 
     @property
     def mask_var_name(self) -> str:
-        return f"{self.classify.ice_type}_mask"
+        return f"{self.cls_cfg.ice_type}_mask"
 
     @property
     def grid_selection(self) -> tuple[str, ...]:
-        return parse_grid_selection(self.classify.grid_type)
+        return parse_grid_selection(self.cls_cfg.grid_type)
 
     #----------------------------------------------------------------------------
     # helpers
@@ -143,35 +145,35 @@ class CICEClassifier:
         pads = [0]
         methods = [normalize_method(m) for m in methods]
         if "binary-days" in methods:
-            pads.append(self.classify.bin_window // 2)
+            pads.append(self.cls_cfg.bin_window // 2)
         if "rolling-mean" in methods:
-            pads.append(self.classify.roll_window // 2)
+            pads.append(self.cls_cfg.roll_window // 2)
         return max(pads)
 
     def _target_da(self, ds: xr.Dataset) -> xr.DataArray:
-        target = ds[self.classify.aice_var]
+        target = ds[self.cls_cfg.aice_var]
         if target.ndim < 3:
-            raise ValueError(f"Expected {self.classify.aice_var!r} to have time,y,x dims; got {target.dims!r}")
+            raise ValueError(f"Expected {self.cls_cfg.aice_var!r} to have time,y,x dims; got {target.dims!r}")
         return target
 
     def _required_velocity_vars(self) -> list[str]:
         sel = set(self.grid_selection)
         if "Tc" in sel:
-            return [self.classify.uvelE_var,
-                    self.classify.uvelN_var,
-                    self.classify.vvelE_var,
-                    self.classify.vvelN_var]
-        vars_keep = [self.classify.speed_var_u, self.classify.speed_var_v]
+            return [self.cls_cfg.uvelE_var,
+                    self.cls_cfg.uvelN_var,
+                    self.cls_cfg.vvelE_var,
+                    self.cls_cfg.vvelN_var]
+        vars_keep = [self.cls_cfg.speed_var_u, self.cls_cfg.speed_var_v]
         return vars_keep
 
     def _crop_requested_window(self, da: xr.DataArray) -> xr.DataArray:
-        return da.sel(time=slice(self.run.start_date, self.run.end_date))
+        return da.sel(time=slice(self.run_cfg.start_date, self.run_cfg.end_date))
 
     def _sea_ice_mask(self, aice: xr.DataArray) -> xr.DataArray:
         """
         Sea-ice presence mask used as the parent domain for FI/PI classification.
         """
-        return (aice > float(self.classify.aice_thresh)).astype("bool")
+        return (aice > float(self.cls_cfg.aice_thresh)).astype("bool")
 
     def _pack_ice_mask(self, fi_mask: xr.DataArray, aice: xr.DataArray) -> xr.DataArray:
         """
@@ -185,26 +187,24 @@ class CICEClassifier:
         pi_mask.name = "PI_mask"
         pi_mask.attrs.update({"long_name"  : "Pack-ice mask derived as sea ice excluding fast ice",
                               "definition" : "PI_mask = (aice > aice_thresh) & ~FI_mask",
-                              "aice_thresh": float(self.classify.aice_thresh)})
+                              "aice_thresh": float(self.cls_cfg.aice_thresh)})
         return pi_mask.astype("bool")
 
-    def load_cice(self, methods: list[str] | tuple[str, ...] | None = None) -> xr.Dataset:
-        methods     = list(methods or self.classify.methods)
+    def _load_cice(self, methods: list[str] | tuple[str, ...] | None = None) -> xr.Dataset:
+        methods     = list(methods or self.cls_cfg.methods)
         extend_days = self._required_padding_days(methods)
         if self._ds_cache is None:
-            vars_keep    = [self.classify.aice_var, *self._required_velocity_vars(), "TLON", "TLAT"]
-            self.logger.info("Resolved CICE store: %s", self.paths.resolve_cice_store())
-            if static_store is not None:
-                self.logger.info("Resolved static store: %s", static_store)
-            dt0            = (pd.to_datetime(self.run.start_date) - pd.Timedelta(days=int(extend_days))).strftime("%Y-%m-%d")
-            dtN            = (pd.to_datetime(self.run.end_date)   + pd.Timedelta(days=int(extend_days))).strftime("%Y-%m-%d")
-            self._ds_cache = load_cice(run        = self.run,
-                                       classify   = self.classify,
-                                       paths      = self.paths,
+            vars_keep      = [self.cls_cfg.aice_var, *self._required_velocity_vars(), "TLON", "TLAT"]
+            self.logger.info("Resolved CICE store: %s", self.pth_cfg.resolve_cice_store())
+            dt0            = (pd.to_datetime(self.run_cfg.start_date) - pd.Timedelta(days = int(extend_days))).strftime("%Y-%m-%d")
+            dtN            = (pd.to_datetime(self.run_cfg.end_date)   + pd.Timedelta(days = int(extend_days))).strftime("%Y-%m-%d")
+            self._ds_cache = load_cice(run_cfg    = self.run_cfg,
+                                       cls_cfg    = self.cls_cfg,
+                                       pth_cfg    = self.pth_cfg,
                                        dt0_str    = dt0,
                                        dtN_str    = dtN,
                                        variables  = vars_keep,
-                                       hemisphere = self.run.hemisphere,
+                                       hemisphere = self.run_cfg.hemisphere,
                                        chunks     = self.chunks)
         return self._ds_cache
 
@@ -243,21 +243,21 @@ class CICEClassifier:
 
         Notes
         -----
-        - The exact velocity inputs used depend on ``self.classify.grid_type``.
+        - The exact velocity inputs used depend on ``self.cls_cfg.grid_type``.
         - ``grid_type`` metadata is written from ``self.grid_selection``.
         - The output units are metres per second.
         """
         target = self._target_da(ds)
         speed = compute_tgrid_speed(ds, target,
-                                    grid_type     = self.classify.grid_type,
-                                    u_var         = self.classify.speed_var_u,
-                                    v_var         = self.classify.speed_var_v,
-                                    uvelE_var     = self.classify.uvelE_var,
-                                    uvelN_var     = self.classify.uvelN_var,
-                                    vvelE_var     = self.classify.vvelE_var,
-                                    vvelN_var     = self.classify.vvelN_var,
-                                    wrap_x        = bool(self.classify.wrap_x),
-                                    cgrid_combine = self.classify.cgrid_combine,
+                                    grid_type     = self.cls_cfg.grid_type,
+                                    u_var         = self.cls_cfg.speed_var_u,
+                                    v_var         = self.cls_cfg.speed_var_v,
+                                    uvelE_var     = self.cls_cfg.uvelE_var,
+                                    uvelN_var     = self.cls_cfg.uvelN_var,
+                                    vvelE_var     = self.cls_cfg.vvelE_var,
+                                    vvelN_var     = self.cls_cfg.vvelN_var,
+                                    wrap_x        = bool(self.cls_cfg.wrap_x),
+                                    cgrid_combine = self.cls_cfg.cgrid_combine,
                                     regridder     = self.regridder,
                                     logger        = self.logger)
         speed.name = "ice_speed"
@@ -298,15 +298,15 @@ class CICEClassifier:
           classification method, and grid selection.
         """
         speed     = self.compute_speed(ds)
-        aice      = ds[self.classify.aice_var]
-        mask      = ((aice > float(self.classify.aice_thresh))
+        aice      = ds[self.cls_cfg.aice_var]
+        mask      = ((aice > float(self.cls_cfg.aice_thresh))
                      & np.isfinite(speed)
                      & (speed > 0)
-                     & (speed <= float(self.classify.ispd_thresh)))
+                     & (speed <= float(self.cls_cfg.ispd_thresh)))
         mask.name = self.mask_var_name
-        mask.attrs.update({"long_name"            : f"{self.classify.ice_type} raw daily mask",
-                           "ispd_thresh_m_s"      : float(self.classify.ispd_thresh),
-                           "aice_thresh"          : float(self.classify.aice_thresh),
+        mask.attrs.update({"long_name"            : f"{self.cls_cfg.ice_type} raw daily mask",
+                           "ispd_thresh_m_s"      : float(self.cls_cfg.ispd_thresh),
+                           "aice_thresh"          : float(self.cls_cfg.aice_thresh),
                            "classification_method": "raw",
                            "grid_type"            : " ".join(self.grid_selection)})
         return mask.astype("bool")
@@ -333,7 +333,7 @@ class CICEClassifier:
           persistence or smoothing.
         - If ``ds`` is not supplied, history data are loaded via ``load_cice()``.
         """
-        ds = ds if ds is not None else self.load_cice(methods=("raw",))
+        ds = ds if ds is not None else self._load_cice(methods=("raw",))
         return self._crop_requested_window(self.compute_raw_mask(ds))
 
     def classify_binary_days(self, ds: xr.Dataset | None = None) -> xr.DataArray:
@@ -365,15 +365,15 @@ class CICEClassifier:
         - Output metadata records the classification method and the binary-days
           window settings.
         """
-        ds        = ds if ds is not None else self.load_cice(methods=("binary-days",))
+        ds        = ds if ds is not None else self._load_cice(methods=("binary-days",))
         raw       = self.compute_raw_mask(ds).astype("int16")
-        mask      = raw.rolling(time=self.classify.bin_window, center=True, min_periods=self.classify.bin_min_days).sum() >= self.classify.bin_min_days
+        mask      = raw.rolling(time=self.cls_cfg.bin_window, center=True, min_periods=self.cls_cfg.bin_min_days).sum() >= self.cls_cfg.bin_min_days
         mask      = self._crop_requested_window(mask.astype("bool"))
         mask.name = self.mask_var_name
-        mask.attrs.update({"long_name"            : f"{self.classify.ice_type} binary-days mask",
+        mask.attrs.update({"long_name"            : f"{self.cls_cfg.ice_type} binary-days mask",
                            "classification_method": "binary-days",
-                           "bin_window"           : int(self.classify.bin_window),
-                           "bin_min_days"         : int(self.classify.bin_min_days),
+                           "bin_window"           : int(self.cls_cfg.bin_window),
+                           "bin_min_days"         : int(self.cls_cfg.bin_min_days),
                            "grid_type"            : " ".join(self.grid_selection)})
         return mask
 
@@ -406,19 +406,19 @@ class CICEClassifier:
         - Output metadata records the classification method and rolling window
           length.
         """
-        ds         = ds if ds is not None else self.load_cice(methods=("rolling-mean",))
+        ds         = ds if ds is not None else self._load_cice(methods=("rolling-mean",))
         speed      = self.compute_speed(ds)
-        aice       = ds[self.classify.aice_var]
-        roll_speed = speed.rolling(time=self.classify.roll_window, center=True, min_periods=self.classify.roll_window).mean()
-        mask       = ((aice > float(self.classify.aice_thresh))
+        aice       = ds[self.cls_cfg.aice_var]
+        roll_speed = speed.rolling(time=self.cls_cfg.roll_window, center=True, min_periods=self.cls_cfg.roll_window).mean()
+        mask       = ((aice > float(self.cls_cfg.aice_thresh))
                       & np.isfinite(roll_speed)
                       & (roll_speed > 0)
-                      & (roll_speed <= float(self.classify.ispd_thresh)))
+                      & (roll_speed <= float(self.cls_cfg.ispd_thresh)))
         mask       = self._crop_requested_window(mask.astype("bool"))
         mask.name  = self.mask_var_name
-        mask.attrs.update({"long_name"             : f"{self.classify.ice_type} rolling-mean mask",
+        mask.attrs.update({"long_name"             : f"{self.cls_cfg.ice_type} rolling-mean mask",
                            "classification_method" : "rolling-mean",
-                           "roll_window"           : int(self.classify.roll_window),
+                           "roll_window"           : int(self.cls_cfg.roll_window),
                            "grid_type"             : " ".join(self.grid_selection)})
         return mask
 
@@ -454,155 +454,59 @@ class CICEClassifier:
             return self.classify_binary_days(ds)
         return self.classify_rolling_mean(ds)
 
-    # def write_classification(self, method: str, data: xr.Dataset | xr.DataArray, *,
-    #                          overwrite: bool = False) -> str:
-    #     """
-    #     Write classified output to its method-specific Zarr store.
-
-    #     Accepts either:
-    #     - a legacy mask DataArray, or
-    #     - a Dataset containing FI_mask and optional FI/PI classified diagnostics.
-    #     """
-    #     store = self.paths.classification_store(method)
-    #     store.parent.mkdir(parents=True, exist_ok=True)
-    #     if store.exists():
-    #         if not overwrite:
-    #             self.logger.info("Classification store exists and overwrite=False, skipping: %s", store)
-    #             return str(store)
-    #         shutil.rmtree(store)
-    #     if isinstance(data, xr.DataArray):
-    #         mask  = strip_to_time_coord(data)
-    #         #mask  = _strip_to_classification_coords(data)
-    #         t_org = mask["time"] if "time" in mask.coords else None
-    #         mask  = xr.DataArray(mask.data,
-    #                              dims   = mask.dims,
-    #                              coords = {"time": t_org} if t_org is not None else None,
-    #                              name   = "FI_mask",
-    #                              attrs  = mask.attrs)
-    #         ds_out = xr.Dataset({"FI_mask": mask})
-    #     else:
-    #         if "FI_mask" not in data.data_vars:
-    #             if len(data.data_vars) == 1:
-    #                 only = next(iter(data.data_vars))
-    #                 data = data.rename({only: "FI_mask"})
-    #             else:
-    #                 raise KeyError(f"Classification dataset must contain FI_mask; got {list(data.data_vars)}")
-    #         cleaned = {}
-    #         for name in ("FI_mask", "FI_ispd", "FI_aice", "PI_mask", "PI_ispd", "PI_aice"):
-    #             if name in data.data_vars:
-    #                 da    = strip_to_time_coord(data[name])
-    #                 #da    = _strip_to_classification_coords(data[name])
-    #                 t_org = da["time"] if "time" in da.coords else None
-    #                 cleaned[name] = xr.DataArray(da.data,
-    #                                              dims   = da.dims,
-    #                                              coords = {"time": t_org} if t_org is not None else None,
-    #                                              name   = name,
-    #                                              attrs  = da.attrs)
-    #         ds_out = xr.Dataset(cleaned)
-    #     ds_out.attrs.update({"sim_name"  : self.run.sim_name,
-    #                          "start_date": self.run.start_date,
-    #                          "end_date"  : self.run.end_date,
-    #                          "hemisphere": self.run.hemisphere,
-    #                          "ice_type"  : self.classify.ice_type,
-    #                          "grid_type" : self.classify.grid_type,
-    #                          "method"    : normalize_method(method)})
-    #     chunk_map = self._output_chunk_map(ds_out)
-    #     if chunk_map:
-    #         self.logger.info("Rechunking classification output with chunks: %s", chunk_map)
-    #         ds_out = ds_out.chunk(chunk_map)
-    #     ds_out = sanitise_for_zarr_write(ds_out)
-    #     encoding = {}
-    #     for name, var in ds_out.data_vars.items():
-    #         if getattr(var.data, "chunks", None) is not None:
-    #             encoding[name] = {"chunks": tuple(int(c[0]) for c in var.chunks)}
-    #     for name, var in ds_out.coords.items():
-    #         if getattr(var.data, "chunks", None) is not None:
-    #             encoding[name] = {"chunks": tuple(int(c[0]) for c in var.chunks)}
-    #     self.logger.info("Writing %s classification to %s", normalize_method(method), store)
-    #     ds_out.to_zarr(store, mode="w", consolidated=False, encoding=encoding, zarr_format=2)
-    #     return str(store)
     def write_classification(self, method: str, data: xr.Dataset | xr.DataArray, *,
                              overwrite: bool = False) -> str:
         """
         Write classified output to its domain-specific Zarr store.
 
-        Domain is determined from self.paths.ice_domain:
+        Domain is determined from self.pth_cfg.ice_domain:
         - FI -> FI_mask, FI_ispd, FI_aice
         - PI -> PI_mask, PI_ispd, PI_aice
         - SI -> SI_mask, SI_aice
         """
-        domain = self.paths.ice_domain
-        store = self.paths.classification_store(method)
+        domain = self.pth_cfg.ice_domain
+        store = self.pth_cfg.classification_store(method)
         store.parent.mkdir(parents=True, exist_ok=True)
-
         if store.exists():
             if not overwrite:
                 self.logger.info("Classification store exists and overwrite=False, skipping: %s", store)
                 return str(store)
             shutil.rmtree(store)
-
-        allowed_vars = {
-            "FI": ("FI_mask", "FI_ispd", "FI_aice"),
-            "PI": ("PI_mask", "PI_ispd", "PI_aice"),
-            "SI": ("SI_mask", "SI_aice"),
-        }[domain]
+        allowed_vars = {"FI": ("FI_mask", "FI_ispd", "FI_aice"),
+                        "PI": ("PI_mask", "PI_ispd", "PI_aice"),
+                        "SI": ("SI_mask", "SI_aice")}[domain]
         required_mask = f"{domain}_mask"
-
         if isinstance(data, xr.DataArray):
-            mask = strip_to_time_coord(data)
-            t_org = mask["time"] if "time" in mask.coords else None
-            mask = xr.DataArray(
-                mask.data,
-                dims=mask.dims,
-                coords={"time": t_org} if t_org is not None else None,
-                name=required_mask,
-                attrs=mask.attrs,
-            )
+            mask   = strip_to_time_coord(data)
+            t_org  = mask["time"] if "time" in mask.coords else None
+            mask   = xr.DataArray(mask.data, dims = mask.dims, coords = {"time": t_org} if t_org is not None else None, name = required_mask, attrs = mask.attrs)
             ds_out = xr.Dataset({required_mask: mask})
-
         else:
             if required_mask not in data.data_vars:
                 if len(data.data_vars) == 1:
                     only = next(iter(data.data_vars))
                     data = data.rename({only: required_mask})
                 else:
-                    raise KeyError(
-                        f"{domain} classification dataset must contain {required_mask}; "
-                        f"got {list(data.data_vars)}"
-                    )
-
+                    raise KeyError(f"{domain} classification dataset must contain {required_mask}; got {list(data.data_vars)}")
             cleaned = {}
             for name in allowed_vars:
                 if name in data.data_vars:
                     da = strip_to_time_coord(data[name])
                     t_org = da["time"] if "time" in da.coords else None
-                    cleaned[name] = xr.DataArray(
-                        da.data,
-                        dims=da.dims,
-                        coords={"time": t_org} if t_org is not None else None,
-                        name=name,
-                        attrs=da.attrs,
-                    )
-
+                    cleaned[name] = xr.DataArray(da.data, dims = da.dims, coords = {"time": t_org} if t_org is not None else None, name = name, attrs = da.attrs)
             ds_out = xr.Dataset(cleaned)
-
-        ds_out.attrs.update({
-            "sim_name"  : self.run.sim_name,
-            "start_date": self.run.start_date,
-            "end_date"  : self.run.end_date,
-            "hemisphere": self.run.hemisphere,
-            "ice_type"  : domain,
-            "grid_type" : self.classify.grid_type,
-            "method"    : normalize_method(method),
-        })
-
+        ds_out.attrs.update({"sim_name"  : self.run_cfg.sim_name,
+                             "start_date": self.run_cfg.start_date,
+                             "end_date"  : self.run_cfg.end_date,
+                             "hemisphere": self.run_cfg.hemisphere,
+                             "ice_type"  : domain,
+                             "grid_type" : self.cls_cfg.grid_type,
+                             "method"    : normalize_method(method)})
         chunk_map = self._output_chunk_map(ds_out)
         if chunk_map:
             self.logger.info("Rechunking classification output with chunks: %s", chunk_map)
             ds_out = ds_out.chunk(chunk_map)
-
         ds_out = sanitise_for_zarr_write(ds_out)
-
         encoding = {}
         for name, var in ds_out.data_vars.items():
             if getattr(var.data, "chunks", None) is not None:
@@ -610,7 +514,6 @@ class CICEClassifier:
         for name, var in ds_out.coords.items():
             if getattr(var.data, "chunks", None) is not None:
                 encoding[name] = {"chunks": tuple(int(c[0]) for c in var.chunks)}
-
         self.logger.info("Writing %s/%s classification to %s", domain, normalize_method(method), store)
         ds_out.to_zarr(store, mode="w", consolidated=False, encoding=encoding, zarr_format=2)
         return str(store)
@@ -628,48 +531,39 @@ class CICEClassifier:
         - PI_aice : sea-ice concentration masked by PI_mask
         """
         norm = normalize_method(method)
-        ds   = ds if ds is not None else self.load_cice(methods=(norm,))
-        aice = ds[self.classify.aice_var]
+        ds   = ds if ds is not None else self._load_cice(methods=(norm,))
+        aice = ds[self.cls_cfg.aice_var]
         if norm == "raw":
             speed_used = self.compute_speed(ds)
-            mask       = ((aice > float(self.classify.aice_thresh))
-                          & np.isfinite(speed_used)
-                          & (speed_used > 0)
-                          & (speed_used <= float(self.classify.ispd_thresh)))
+            mask       = ((aice > float(self.cls_cfg.aice_thresh)) & np.isfinite(speed_used) & (speed_used > 0) & (speed_used <= float(self.cls_cfg.ispd_thresh)))
             mask       = self._crop_requested_window(mask.astype("bool"))
-            mask.attrs.update({"long_name"             : f"{self.classify.ice_type} raw daily mask",
-                               "ispd_thresh_m_s"       : float(self.classify.ispd_thresh),
-                               "aice_thresh"           : float(self.classify.aice_thresh),
+            mask.attrs.update({"long_name"             : f"{self.cls_cfg.ice_type} raw daily mask",
+                               "ispd_thresh_m_s"       : float(self.cls_cfg.ispd_thresh),
+                               "aice_thresh"           : float(self.cls_cfg.aice_thresh),
                                "classification_method" : "raw",
                                "grid_type"             : " ".join(self.grid_selection)})
             speed_source = "instantaneous_tgrid_speed"
         elif norm == "binary-days":
             speed_used = self.compute_speed(ds)
-            raw        = ((aice > float(self.classify.aice_thresh))
-                          & np.isfinite(speed_used)
-                          & (speed_used > 0)
-                          & (speed_used <= float(self.classify.ispd_thresh)))
-            mask       = (raw.astype("int16").rolling(time        = self.classify.bin_window,
+            raw        = ((aice > float(self.cls_cfg.aice_thresh)) & np.isfinite(speed_used) & (speed_used > 0) & (speed_used <= float(self.cls_cfg.ispd_thresh)))
+            mask       = (raw.astype("int16").rolling(time        = self.cls_cfg.bin_window,
                                                       center      = True,
-                                                      min_periods = self.classify.bin_min_days).sum() >= self.classify.bin_min_days)
+                                                      min_periods = self.cls_cfg.bin_min_days).sum() >= self.cls_cfg.bin_min_days)
             mask       = self._crop_requested_window(mask.astype("bool"))
-            mask.attrs.update({"long_name"              : f"{self.classify.ice_type} binary-days mask",
+            mask.attrs.update({"long_name"              : f"{self.cls_cfg.ice_type} binary-days mask",
                                "classification_method"  : "binary-days",
-                               "bin_window"             : int(self.classify.bin_window),
-                               "bin_min_days"           : int(self.classify.bin_min_days),
+                               "bin_window"             : int(self.cls_cfg.bin_window),
+                               "bin_min_days"           : int(self.cls_cfg.bin_min_days),
                                "grid_type"              : " ".join(self.grid_selection)})
             speed_source = "instantaneous_tgrid_speed"
         else:
             inst_speed = self.compute_speed(ds)
-            speed_used = inst_speed.rolling(time=self.classify.roll_window, center=True, min_periods=self.classify.roll_window).mean()
-            mask       = ((aice > float(self.classify.aice_thresh))
-                          & np.isfinite(speed_used)
-                          & (speed_used > 0)
-                          & (speed_used <= float(self.classify.ispd_thresh)))
+            speed_used = inst_speed.rolling(time=self.cls_cfg.roll_window, center=True, min_periods=self.cls_cfg.roll_window).mean()
+            mask       = ((aice > float(self.cls_cfg.aice_thresh)) & np.isfinite(speed_used) & (speed_used > 0) & (speed_used <= float(self.cls_cfg.ispd_thresh)))
             mask       = self._crop_requested_window(mask.astype("bool"))
-            mask.attrs.update({"long_name"             : f"{self.classify.ice_type} rolling-mean mask",
+            mask.attrs.update({"long_name"             : f"{self.cls_cfg.ice_type} rolling-mean mask",
                                "classification_method" : "rolling-mean",
-                               "roll_window"           : int(self.classify.roll_window),
+                               "roll_window"           : int(self.cls_cfg.roll_window),
                                "grid_type"             : " ".join(self.grid_selection)})
             speed_source = "rolling_mean_tgrid_speed"
         # ------------------------------------------------------------------
@@ -686,8 +580,8 @@ class CICEClassifier:
                                "speed_source"          : speed_source,
                                "grid_type"             : " ".join(self.grid_selection)})
         if norm == "rolling-mean":
-            fi_speed.attrs["roll_window"] = int(self.classify.roll_window)
-        fi_aice = aice_crop.where(mask).astype(np.float32)
+            fi_speed.attrs["roll_window"] = int(self.cls_cfg.roll_window)
+        fi_aice      = aice_crop.where(mask).astype(np.float32)
         fi_aice.name = "FI_aice"
         fi_aice.attrs.update({"long_name"             : "Fast-ice sea-ice concentration",
                               "units"                 : aice.attrs.get("units", "1"),
@@ -700,7 +594,7 @@ class CICEClassifier:
         pi_mask.attrs.update({"classification_method" : norm,
                               "source_mask"           : "FI_mask",
                               "grid_type"             : " ".join(self.grid_selection)})
-        pi_speed = speed_crop.where(pi_mask).astype(np.float32)
+        pi_speed      = speed_crop.where(pi_mask).astype(np.float32)
         pi_speed.name = "PI_ispd"
         pi_speed.attrs.update({"long_name"             : "Pack-ice speed used for classification",
                                "units"                 : "m s-1",
@@ -709,8 +603,8 @@ class CICEClassifier:
                                "definition"            : "PI_ispd = speed_used.where(PI_mask)",
                                "grid_type"             : " ".join(self.grid_selection)})
         if norm == "rolling-mean":
-            pi_speed.attrs["roll_window"] = int(self.classify.roll_window)
-        pi_aice = aice_crop.where(pi_mask).astype(np.float32)
+            pi_speed.attrs["roll_window"] = int(self.cls_cfg.roll_window)
+        pi_aice      = aice_crop.where(pi_mask).astype(np.float32)
         pi_aice.name = "PI_aice"
         pi_aice.attrs.update({"long_name"             : "Pack-ice sea-ice concentration",
                               "units"                 : aice.attrs.get("units", "1"),
@@ -727,8 +621,7 @@ class CICEClassifier:
                            "PI_ispd": pi_speed,
                            "PI_aice": pi_aice})
 
-    def run_methods(self, methods: list[str] | tuple[str, ...] | None = None, *,
-                    overwrite: bool = False) -> dict[str, str]:
+    def run_methods(self, methods: list[str] | tuple[str, ...] | None = None, *, overwrite: bool = False) -> dict[str, str]:
         """
         Run one or more classification methods and write their outputs.
 
@@ -741,7 +634,7 @@ class CICEClassifier:
         ----------
         methods : list[str] | tuple[str, ...] | None, optional
             Methods to run. If omitted, the methods configured in
-            ``self.classify.methods`` are used.
+            ``self.cls_cfg.methods`` are used.
         overwrite : bool, optional
             If ``True``, existing classification stores are replaced. If ``False``,
             existing stores are left in place and may be skipped during writing.
@@ -758,49 +651,35 @@ class CICEClassifier:
         - The resolved classification root and speed-reconstruction mode are logged
           before processing begins.
         """
-        methods = list(methods or self.classify.methods)
+        methods = list(methods or self.cls_cfg.methods)
         methods = [normalize_method(m) for m in methods]
-        self.logger.info("Resolved classification root: %s", self.paths.classification_root_path)
+        self.logger.info("Resolved classification root: %s", self.pth_cfg.classification_root_path)
         self.logger.info("Classification speed reconstruction mode(s): %s", ", ".join(self.grid_selection))
-        ds                  = self.load_cice(methods=methods)
+        ds                  = self._load_cice(methods = methods)
         out: dict[str, str] = {}
-        # for method in methods:
-        #     self.logger.info("Classifying method: %s", method)
-        #     ds_method   = self.build_classification_output(method, ds)
-        #     out[method] = self.write_classification(method, ds_method, overwrite=overwrite)
         for method in methods:
             self.logger.info("Classifying method: %s", method)
             ds_method = self.build_classification_output(method, ds)
-
             for domain, ds_domain in self.split_classification_output(ds_method).items():
-                domain_paths = self.paths.with_ice_type(domain)
+                domain_paths = self.pth_cfg.with_ice_type(domain)
                 self.logger.info("Writing %s/%s classification", domain, method)
-
-                old_paths = self.paths
+                old_paths = self.pth_cfg
                 try:
-                    self.paths = domain_paths
-                    out[f"{domain}:{method}"] = self.write_classification(
-                        method,
-                        ds_domain,
-                        overwrite=overwrite,
-                    )
+                    self.pth_cfg = domain_paths
+                    out[f"{domain}:{method}"] = self.write_classification(method, ds_domain, overwrite = overwrite)
                 finally:
-                    self.paths = old_paths
+                    self.pth_cfg = old_paths
         # ------------------------------------------------------------------
         # Sea ice classification store: method-independent parent mask.
         # ------------------------------------------------------------------
-        si_paths = self.paths.with_ice_type("SI")
-        old_paths = self.paths
+        si_paths  = self.pth_cfg.with_ice_type("SI")
+        old_paths = self.pth_cfg
         try:
-            self.paths = si_paths
-            ds_si = self.build_si_classification_output(ds)
-            out["SI"] = self.write_classification(
-                "raw",
-                ds_si,
-                overwrite=overwrite,
-            )
+            self.pth_cfg = si_paths
+            ds_si      = self.build_si_classification_output(ds)
+            out["SI"]  = self.write_classification("raw", ds_si, overwrite = overwrite)
         finally:
-            self.paths = old_paths
+            self.pth_cfg = old_paths
         return out
 
     def split_classification_output(self, ds_out: xr.Dataset) -> dict[str, xr.Dataset]:
@@ -808,18 +687,14 @@ class CICEClassifier:
                 "PI": ds_out[[v for v in ("PI_mask", "PI_ispd", "PI_aice") if v in ds_out]]}
 
     def build_si_classification_output(self, ds: xr.Dataset) -> xr.Dataset:
-        aice = self._crop_requested_window(ds[self.classify.aice_var])
-        si_mask = (aice >= float(self.classify.aice_thresh)).astype("bool")
+        aice         = self._crop_requested_window(ds[self.cls_cfg.aice_var])
+        si_mask      = (aice >= float(self.cls_cfg.aice_thresh)).astype("bool")
         si_mask.name = "SI_mask"
-        si_mask.attrs.update({
-            "long_name": "Sea-ice mask",
-            "definition": "SI_mask = aice >= aice_thresh",
-            "aice_thresh": float(self.classify.aice_thresh),
-        })
-        si_aice = aice.where(si_mask).astype(np.float32)
+        si_mask.attrs.update({"long_name"  : "Sea-ice mask",
+                              "definition" : "SI_mask = aice >= aice_thresh",
+                              "aice_thresh": float(self.cls_cfg.aice_thresh)})
+        si_aice      = aice.where(si_mask).astype(np.float32)
         si_aice.name = "SI_aice"
-        si_aice.attrs.update({
-            "long_name": "Sea-ice concentration over SI_mask",
-            "units": aice.attrs.get("units", "1"),
-        })
+        si_aice.attrs.update({"long_name": "Sea-ice concentration over SI_mask",
+                              "units"    : aice.attrs.get("units", "1")})
         return xr.Dataset({"SI_mask": si_mask, "SI_aice": si_aice})

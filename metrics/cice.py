@@ -88,21 +88,21 @@ class CICEMetrics:
 
     Parameters
     ----------
-    run : RunSpec
+    run_cfg : RunSpec
         Run-level configuration describing the simulation, analysis period, and
         hemisphere.
-    classify : ClassificationSpec
+    cls_cfg : ClassificationSpec
         Classification configuration describing the mask source, ice type,
         grid type, and classification method settings used by downstream
         metrics.
-    metrics : MetricsSpec | None, optional
+    met_cfg : MetricsSpec | None, optional
         Metrics configuration containing scaling factors, requested metric
         groups, and related output settings. If omitted, a default
         ``MetricsSpec()`` is created.
-    paths : ShugaPaths | None, optional
+    pth_cfg : ShugaPaths | None, optional
         Path bundle used to locate input history, classification, and metrics
         stores. If omitted, a new ``ShugaPaths`` instance is built from
-        ``run`` and ``classify``.
+        ``run_cfg`` and ``cls_cfg``.
     chunks : dict | None, optional
         Dask chunking used when opening model and metrics datasets. Defaults to
         ``{"time": 31}``.
@@ -112,13 +112,13 @@ class CICEMetrics:
 
     Attributes
     ----------
-    run : RunSpec
+    run_cfg : RunSpec
         Active run configuration.
-    classify : ClassificationSpec
+    cls_cfg : ClassificationSpec
         Active classification configuration.
-    metrics : MetricsSpec
+    met_cfg : MetricsSpec
         Active metrics configuration.
-    paths : ShugaPaths
+    pth_cfg : ShugaPaths
         Resolved path bundle for input and output stores.
     chunks : dict
         Chunking policy used when opening datasets.
@@ -166,10 +166,12 @@ class CICEMetrics:
     #----------------------------------------------------------------------------------
     # class initialisation
     #----------------------------------------------------------------------------------
-    def __init__(self, run: RunSpec, classify: ClassificationSpec,
-                 metrics : MetricsSpec | None = None,
-                 paths   : ShugaPaths | None  = None, *,
-                 chunks  : dict | None        = None,
+    def __init__(self,
+                 run_cfg: RunSpec,
+                 cls_cfg: ClassificationSpec,
+                 met_cfg: MetricsSpec | None = None,
+                 pth_cfg: ShugaPaths | None  = None, *,
+                 chunks : dict | None        = None,
                  logger                       = None) -> None:
         """
         Initialise a metrics builder for a single simulation and classification
@@ -177,20 +179,20 @@ class CICEMetrics:
 
         Parameters
         ----------
-        run : RunSpec
+        run_cfg : RunSpec
             Run-level configuration describing the simulation, requested date
             range, and hemisphere.
-        classify : ClassificationSpec
+        cls_cfg : ClassificationSpec
             Classification settings used to locate classified-mask inputs and to
             annotate output metrics with ice type, grid type, and method context.
-        metrics : MetricsSpec | None, optional
+        met_cfg : MetricsSpec | None, optional
             Metrics configuration controlling scale factors, requested metric
             collections, and related processing defaults. If omitted, a default
             ``MetricsSpec()`` instance is used.
-        paths : ShugaPaths | None, optional
+        pth_cfg : ShugaPaths | None, optional
             Path bundle for locating CICE history, classification stores, metrics
-            stores, and log files. If omitted, one is constructed from ``run`` and
-            ``classify``.
+            stores, and log files. If omitted, one is constructed from ``run_cfg`` and
+            ``cls_cfg``.
         chunks : dict | None, optional
             Chunking to use when opening datasets. Defaults to ``{"time": 31}``.
         logger : logging.Logger | None, optional
@@ -209,12 +211,12 @@ class CICEMetrics:
           default ``MetricsSpec()`` so scaling and output settings remain
           available.
         """
-        self.run                                      = run
-        self.classify                                 = classify
-        self.metrics                                  = metrics or MetricsSpec()
-        self.paths                                    = paths or ShugaPaths(run=run, classify=classify)
+        self.run_cfg                                  = run_cfg
+        self.cls_cfg                                  = cls_cfg
+        self.met_cfg                                  = met_cfg or MetricsSpec()
+        self.pth_cfg                                  = pth_cfg or ShugaPaths(run_cfg=run_cfg, cls_cfg=cls_cfg)
         self.chunks                                   = chunks or {"time": 31}
-        self.logger                                   = logger or build_file_logger("shuga.metrics", self.paths.metrics_log_path())
+        self.logger                                   = logger or build_file_logger("shuga.met_cfg", self.pth_cfg.metrics_log_path())
         self.region_defs                              = ANTARCTIC_8_REGIONS
         self._cice_cache: xr.Dataset | None           = None
         self._classified_cache: dict[str, xr.Dataset] = {}
@@ -225,7 +227,7 @@ class CICEMetrics:
     #----------------------------------------------------------------------------------
     @property
     def mask_var_name(self) -> str:
-        return f"{self.classify.ice_type}_mask"
+        return f"{self.cls_cfg.ice_type}_mask"
 
     # Backwards-compatible pure-helper aliases. The canonical implementations
     # live in shuga.metrics.skill and shuga.metrics.temporal.
@@ -271,12 +273,14 @@ class CICEMetrics:
             raise ImportError("PyGMT is required for plotting methods.") from exc
         return pygmt
 
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def _plotter(self):
         from shuga.plotting import CICEPlotter
-        return CICEPlotter(run      = self.run,
-                           classify = self.classify,
-                           metrics  = self.metrics,
-                           paths    = self.paths,
+        return CICEPlotter(run_cfg      = self.run_cfg,
+                           cls_cfg = self.cls_cfg,
+                           met_cfg  = self.met_cfg,
+                           pth_cfg    = self.pth_cfg,
                            chunks   = self.chunks,
                            logger   = self.logger)
 
@@ -299,41 +303,44 @@ class CICEMetrics:
         return output_chunk_map(ds)
 
     def _si_mask(self, aice: xr.DataArray) -> xr.DataArray:
-        thresh = float(getattr(self.classify, "aice_thresh", 0.15))
+        thresh = float(getattr(self.cls_cfg, "aice_thresh", 0.15))
         return xr.where(aice >= thresh, True, False)
 
-    def _expand_metric_names(self, metric_names=None, metric_groups=None) -> list[str]:
-        return expand_metric_names(metric_names=metric_names, metric_groups=metric_groups)
+    def _expand_metric_names(self, metric_names = None, metric_groups = None) -> list[str]:
+        return expand_metric_names(metric_names = metric_names, metric_groups = metric_groups)
 
     def _open_existing_metrics(self, method: str) -> xr.Dataset | None:
-        return open_existing_metrics(paths  = self.paths,
-                                     cache  = self._metrics_cache,
-                                     method = method)
+        return open_existing_metrics(pth_cfg = self.pth_cfg,
+                                     cache   = self._metrics_cache,
+                                     method  = method)
 
     def _backup_legacy_store(self, store: Path) -> Path:
-        return backup_legacy_store(store, logger=self.logger)
+        return backup_legacy_store(store, logger = self.logger)
 
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def _get_cice(self) -> xr.Dataset:
         if self._cice_cache is None:
             requested = ["aice", "hi", "strength", "dvidtt", "dvidtd", "daidtt", "daidtd",
                          "KuxE", "KuxN", "KuyE", "KuyN", "earea", "narea", "uarea",
                          "tarea", "TLON", "TLAT", "ULON", "ULAT"]
             requested = list(dict.fromkeys(requested + DIAGNOSTIC_INPUT_VARS))
-            self.logger.info("Resolved CICE store: %s", self.paths.resolve_cice_store())
-            static_store = self.paths.resolve_static_store()
+            self.logger.info("Resolved CICE store: %s", self.pth_cfg.resolve_cice_store())
+            static_store = self.pth_cfg.resolve_static_store()
             if static_store is not None:
                 self.logger.info("Resolved static store: %s", static_store)
-            self._cice_cache = load_cice(run        = self.run,
-                                         classify   = self.classify,
-                                         metrics    = self.metrics,
-                                         paths      = self.paths,
+            self._cice_cache = load_cice(run_cfg    = self.run_cfg,
+                                         cls_cfg    = self.cls_cfg,
+                                         met_cfg    = self.met_cfg,
+                                         pth_cfg    = self.pth_cfg,
                                          variables  = requested,
-                                         hemisphere = self.run.hemisphere,
+                                         hemisphere = self.run_cfg.hemisphere,
                                          chunks     = self.chunks)
         return self._cice_cache
 
+    # ------------------------------------------------------------------
     def _classified_variables_for_domain(self) -> list[str]:
-        domain = str(self.classify.ice_type).strip().upper()
+        domain = str(self.cls_cfg.ice_type).strip().upper()
         if domain == "FI":
             return ["FI_mask"]
         if domain == "PI":
@@ -342,58 +349,45 @@ class CICEMetrics:
             return ["SI_mask"]
         raise ValueError(f"Unsupported ice_type={domain!r}")
 
+    # ------------------------------------------------------------------
     def _get_classified(self, method: str) -> xr.Dataset:
         norm = normalize_method(method)
         if norm not in self._classified_cache:
-            self._classified_cache[norm] = load_classified(
-                run=self.run,
-                classify=self.classify,
-                metrics=self.metrics,
-                paths=self.paths,
-                classification=norm,
-                dt0_str=self.run.start_date,
-                dtN_str=self.run.end_date,
-                variables=self._classified_variables_for_domain(),
-                hemisphere=self.run.hemisphere,
-                chunks=self.chunks,
-            )
+            self._classified_cache[norm] = load_classified(run_cfg        = self.run_cfg,
+                                                           cls_cfg        = self.cls_cfg,
+                                                           met_cfg        = self.met_cfg,
+                                                           pth_cfg        = self.pth_cfg,
+                                                           classification = norm,
+                                                           dt0_str        = self.run_cfg.start_date,
+                                                           dtN_str        = self.run_cfg.end_date,
+                                                           variables      = self._classified_variables_for_domain(),
+                                                           hemisphere     = self.run_cfg.hemisphere,
+                                                           chunks         = self.chunks)
         return self._classified_cache[norm]
-    # def _get_classified(self, method: str) -> xr.Dataset:
-    #     norm = normalize_method(method)
-    #     if norm not in self._classified_cache:
-    #         self._classified_cache[norm] = load_classified(run            = self.run,
-    #                                                        classify       = self.classify,
-    #                                                        metrics        = self.metrics,
-    #                                                        paths          = self.paths,
-    #                                                        classification = norm,
-    #                                                        dt0_str        = self.run.start_date,
-    #                                                        dtN_str        = self.run.end_date,
-    #                                                        variables      = ["FI_mask","PI_mask"],
-    #                                                        hemisphere     = self.run.hemisphere,
-    #                                                        chunks         = self.chunks)
-    #     return self._classified_cache[norm]
 
+    # ------------------------------------------------------------------
     def _obs_skill_dataset(self, ds: xr.Dataset) -> xr.Dataset:
-        if not self.metrics.obs_metrics_store:
+        if not self.met_cfg.obs_metrics_store:
             return xr.Dataset()
-        store = Path(self.metrics.obs_metrics_store).expanduser()
+        store = Path(self.met_cfg.obs_metrics_store).expanduser()
         if not store.exists():
             self.logger.warning("Observation metrics store does not exist: %s", store)
             return xr.Dataset()
         obs = xr.open_zarr(store, consolidated=False)
         out = {}
-        if self.metrics.obs_fia_var in obs and "FIA" in ds:
-            mod, ref = xr.align(ds["FIA"], obs[self.metrics.obs_fia_var], join="inner")
+        if self.met_cfg.obs_fia_var in obs and "FIA" in ds:
+            mod, ref = xr.align(ds["FIA"], obs[self.met_cfg.obs_fia_var], join="inner")
             stats    = self._skill_stats(mod.values, ref.values)
             for k, v in stats.items():
                 out[f"FIA_{k}"] = xr.DataArray(v)
-        if self.metrics.obs_fit_var in obs and "FIT" in ds:
-            mod, ref = xr.align(ds["FIT"], obs[self.metrics.obs_fit_var], join="inner")
+        if self.met_cfg.obs_fit_var in obs and "FIT" in ds:
+            mod, ref = xr.align(ds["FIT"], obs[self.met_cfg.obs_fit_var], join="inner")
             stats    = self._skill_stats(mod.values, ref.values)
             for k, v in stats.items():
                 out[f"FIT_{k}"] = xr.DataArray(v)
         return xr.Dataset(out)
 
+    # ------------------------------------------------------------------
     def _match_mask_to_field(self, mask: xr.DataArray | None, field: xr.DataArray) -> xr.DataArray | None:
         if mask is None:
             return None
@@ -402,24 +396,19 @@ class CICEMetrics:
         except Exception:
             return None
 
+    # ------------------------------------------------------------------
     def _validate_metric_domain(self, requested: set[str]) -> None:
-        domain = str(self.classify.ice_type).strip().upper()
-        has_fi = any(name.startswith("FI") or name.startswith("FIA_") or name.startswith("FIT_")
-                     or name in self.FIPSI_NAMES for name in requested)
+        domain = str(self.cls_cfg.ice_type).strip().upper()
+        has_fi = any(name.startswith("FI") or name.startswith("FIA_") or name.startswith("FIT_") or name in self.FIPSI_NAMES for name in requested)
         has_pi = any(name.startswith("PI") for name in requested)
-        has_si = any(name.startswith("SI") or name.startswith("SIA_") or name.startswith("SIT_")
-                     for name in requested)
+        has_si = any(name.startswith("SI") or name.startswith("SIA_") or name.startswith("SIT_") for name in requested)
         requested_domains = {d for d, flag in {"FI": has_fi, "PI": has_pi, "SI": has_si}.items() if flag}
         if len(requested_domains) > 1:
-            raise ValueError(
-                f"Requested metrics span multiple ice domains {sorted(requested_domains)}. "
-                "Run metrics separately for FI, PI, and SI so outputs go to separate trees."
-            )
+            raise ValueError(f"Requested metrics span multiple ice domains {sorted(requested_domains)}. "
+                             "Run metrics separately for FI, PI, and SI so outputs go to separate trees.")
         if requested_domains and domain not in requested_domains:
-            raise ValueError(
-                f"classify.ice_type={domain!r} but requested metrics are for "
-                f"{sorted(requested_domains)}. Use --ice-type {next(iter(requested_domains))}."
-            )
+            raise ValueError(f"cls_cfg.ice_type={domain!r} but requested metrics are for "
+                             f"{sorted(requested_domains)}. Use --ice-type {next(iter(requested_domains))}.")
 
     #----------------------------------------------------------------------------------
     # the following functions are the backbone of this module
@@ -446,7 +435,7 @@ class CICEMetrics:
         area          = self._ensure_2d_static(ds["tarea"])
         lon, lat      = self._detect_lonlat(ds)
         regional_mask = self._region_mask(area, lon, lat)
-        domain        = str(self.classify.ice_type).strip().upper()
+        domain        = str(self.cls_cfg.ice_type).strip().upper()
         fi_mask       = None
         pi_mask       = None
         if domain == "FI":
@@ -462,32 +451,6 @@ class CICEMetrics:
         else:
             raise ValueError(f"Unsupported ice_type={domain!r}")
         si_mask = self._si_mask(aice)
-        # domain        = str(self.classify.ice_type).strip().upper()
-        # need_masks    = needs_classified_masks(requested, self.FIPSI_NAMES)
-        # ds_mask       = self._get_classified(method) if need_masks else None
-        # need_fi       = needs_fast_ice_mask(requested, self.FIPSI_NAMES)
-        # ds_mask       = self._get_classified(method) if need_fi else None
-        # fi_mask       = ds_mask["FI_mask"].astype(bool) if ds_mask is not None else None
-        # if fi_mask is not None:
-        #     aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
-        # si_mask = self._si_mask(aice)
-        # if ds_mask is not None and "FI_mask" in ds_mask:
-        #     fi_mask = ds_mask["FI_mask"].astype(bool)
-        # if ds_mask is not None and "PI_mask" in ds_mask:
-        #     pi_mask = ds_mask["PI_mask"].astype(bool)
-        # if fi_mask is not None:
-        #     aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
-        # si_mask = self._si_mask(aice)
-        # if pi_mask is not None:
-        #     aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
-        # elif fi_mask is not None:
-        #     # Backward-compatible fallback for older classification stores that only
-        #     # contain FI_mask.
-        #     pi_mask      = (si_mask & (~fi_mask)).astype(bool)
-        #     pi_mask.name = "PI_mask"
-        #     pi_mask.attrs.update({"long_name" : "Derived pack-ice mask",
-        #                           "definition": "PI_mask = SI_mask & ~FI_mask",
-        #                           "fallback"  : "Derived in metrics because PI_mask was absent from classification store."})
         ctx     = MetricDispatchContext(ds           = ds,
                                         aice         = aice,
                                         hi           = hi,
@@ -496,9 +459,9 @@ class CICEMetrics:
                                         fi_mask      = fi_mask,
                                         pi_mask      = pi_mask,
                                         si_mask      = si_mask,
-                                        area_scale   = self.metrics.area_scale,
-                                        volume_scale = self.metrics.volume_scale)
-        dispatcher = MetricDispatcher(context=ctx, calculator=self)
+                                        area_scale   = self.met_cfg.area_scale,
+                                        volume_scale = self.met_cfg.volume_scale)
+        dispatcher = MetricDispatcher(context = ctx, calculator = self)
         out        = xr.Dataset()
         def publish(name: str) -> xr.DataArray | None:
             da = dispatcher.get(name)
@@ -600,19 +563,20 @@ class CICEMetrics:
         # Common output metadata.
         # ------------------------------------------------------------------
         out = attach_common_metrics_attrs(out,
-                                          sim_name   = self.run.sim_name,
-                                          start_date = self.run.start_date,
-                                          end_date   = self.run.end_date,
-                                          hemisphere = self.run.hemisphere,
-                                          ice_type   = self.classify.ice_type,
-                                          grid_type  = self.classify.grid_type,
+                                          sim_name   = self.run_cfg.sim_name,
+                                          start_date = self.run_cfg.start_date,
+                                          end_date   = self.run_cfg.end_date,
+                                          hemisphere = self.run_cfg.hemisphere,
+                                          ice_type   = self.cls_cfg.ice_type,
+                                          grid_type  = self.cls_cfg.grid_type,
                                           method     = method)
         missing = sorted(name for name in requested if name not in out.data_vars)
         if missing:
             self.logger.info("Requested metrics not produced for %s/%s, likely because required inputs are absent: %s",
-                             self.run.sim_name, method, missing)
+                             self.run_cfg.sim_name, method, missing)
         return out
 
+    # ------------------------------------------------------------------
     def _strip_aux_coords(self, da: xr.DataArray) -> xr.DataArray:
         keep_non_dim = {"time", "region"}
         drop = [c for c in da.coords if (c not in da.dims and c not in keep_non_dim)]
@@ -620,6 +584,7 @@ class CICEMetrics:
             da = da.reset_coords(drop, drop=True)
         return da
 
+    # ------------------------------------------------------------------
     def _assert_same_indexes(self, existing: xr.Dataset, ds_new: xr.Dataset, dims: tuple[str, ...] = ("time", "region")) -> None:
         for dim in dims:
             if dim in existing.coords and dim in ds_new.coords:
@@ -643,6 +608,7 @@ class CICEMetrics:
                                      f"This usually means the existing mets.zarr was produced by an "
                                      f"older merge path and should be rebuilt.")
 
+    # ------------------------------------------------------------------
     def _encoding_from_dataset(self, ds: xr.Dataset) -> dict[str, dict]:
         encoding: dict[str, dict] = {}
         for name, var in ds.variables.items():
@@ -651,6 +617,7 @@ class CICEMetrics:
                 encoding[name] = {"chunks": tuple(int(c[0]) for c in chunks)}
         return encoding
 
+    # ------------------------------------------------------------------
     def _prepare_output_dataset(self, ds_out: xr.Dataset) -> xr.Dataset:
         cleaned = {name: self._strip_aux_coords(ds_out[name]) for name in ds_out.data_vars}
         coords  = {}
@@ -667,6 +634,7 @@ class CICEMetrics:
         #ds_out = _sanitize_for_zarr_write(ds_out)
         return ds_out
 
+    # ------------------------------------------------------------------
     def compute_seasonal_summary(self, da: xr.DataArray, prefix: str) -> dict[str, xr.DataArray]:
         """
         Compute simple annual extrema summary statistics for a time series.
@@ -722,6 +690,7 @@ class CICEMetrics:
             out[f"{prefix}_{col}_std"]  = xr.DataArray(np.nanstd(vals, ddof=0))
         return out
 
+    # ------------------------------------------------------------------
     def persistence_stability_index(self, mask: xr.DataArray, area: xr.DataArray,
                                     persistence_threshold : float = 0.8,
                                     winter_months         : tuple[int, ...] = (5, 6, 7, 8, 9, 10)) -> dict[str, xr.DataArray]:
@@ -771,9 +740,11 @@ class CICEMetrics:
         ever_area       = xr.where(winter.any("time"), area, 0.0).sum()
         ratio           = xr.where(ever_area > 0, persistent_area / ever_area, np.nan)
         return {"FIPSI"                  : ratio,
-                "persistent_winter_area" : persistent_area / self.metrics.area_scale,
-                "ever_winter_area"       : ever_area / self.metrics.area_scale}
+                "persistent_winter_area" : persistent_area / self.met_cfg.area_scale,
+                "ever_winter_area"       : ever_area / self.met_cfg.area_scale}
 
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def compute_metrics(self, method: str, *,
                         overwrite                 : bool                       = False,
                         metric_names              : str | Iterable[str] | None = None,
@@ -845,11 +816,11 @@ class CICEMetrics:
         norm      = normalize_method(method)
         requested = set(self._expand_metric_names(metric_names=metric_names, metric_groups=metric_groups))
         self._validate_metric_domain(requested)
-        self.logger.info("Resolved class store for %s: %s", norm, self.paths.classification_store(norm))
-        self.logger.info("Resolved metrics store for %s: %s", norm, self.paths.metrics_store(norm))
+        self.logger.info("Resolved class store for %s: %s", norm, self.pth_cfg.classification_store(norm))
+        self.logger.info("Resolved metrics store for %s: %s", norm, self.pth_cfg.metrics_store(norm))
         if not requested:
             raise ValueError("No metrics requested.")
-        store    = self.paths.metrics_store(norm)
+        store    = self.pth_cfg.metrics_store(norm)
         existing = None if overwrite else self._open_existing_metrics(norm)
         if existing is None:
             to_compute = requested
@@ -863,12 +834,12 @@ class CICEMetrics:
         self.logger.info("Requested metrics (%d): %s", len(requested), ", ".join(sorted(requested)))
         self.logger.info("Computing metrics (%d): %s", len(to_compute), ", ".join(sorted(to_compute)))
         ds_new = self._compute_requested_metrics(norm, to_compute)
-        ds_new.attrs.update({"sim_name"   : self.run.sim_name,
-                             "start_date" : self.run.start_date,
-                             "end_date"   : self.run.end_date,
-                             "hemisphere" : self.run.hemisphere,
-                             "ice_type"   : self.classify.ice_type,
-                             "grid_type"  : self.classify.grid_type,
+        ds_new.attrs.update({"sim_name"   : self.run_cfg.sim_name,
+                             "start_date" : self.run_cfg.start_date,
+                             "end_date"   : self.run_cfg.end_date,
+                             "hemisphere" : self.run_cfg.hemisphere,
+                             "ice_type"   : self.cls_cfg.ice_type,
+                             "grid_type"  : self.cls_cfg.grid_type,
                              "method"     : norm})
         store.parent.mkdir(parents=True, exist_ok=True)
         if existing is not None and update_missing_only and not overwrite:
@@ -884,12 +855,12 @@ class CICEMetrics:
                 self._metrics_cache.pop(norm, None)
                 self._backup_legacy_store(store)
                 ds_out = self._compute_requested_metrics(norm, requested)
-                ds_out.attrs.update({"sim_name"   : self.run.sim_name,
-                                     "start_date" : self.run.start_date,
-                                     "end_date"   : self.run.end_date,
-                                     "hemisphere" : self.run.hemisphere,
-                                     "ice_type"   : self.classify.ice_type,
-                                     "grid_type"  : self.classify.grid_type,
+                ds_out.attrs.update({"sim_name"   : self.run_cfg.sim_name,
+                                     "start_date" : self.run_cfg.start_date,
+                                     "end_date"   : self.run_cfg.end_date,
+                                     "hemisphere" : self.run_cfg.hemisphere,
+                                     "ice_type"   : self.cls_cfg.ice_type,
+                                     "grid_type"  : self.cls_cfg.grid_type,
                                      "method"     : norm})
                 ds_out    = self._prepare_output_dataset(ds_out)
                 tmp_store = store.with_name(store.name + ".tmp")
@@ -932,12 +903,12 @@ class CICEMetrics:
                 ds_out = ds_new
         else:
             ds_out = ds_new
-        ds_out.attrs.update({"sim_name"   : self.run.sim_name,
-                             "start_date" : self.run.start_date,
-                             "end_date"   : self.run.end_date,
-                             "hemisphere" : self.run.hemisphere,
-                             "ice_type"   : self.classify.ice_type,
-                             "grid_type"  : self.classify.grid_type,
+        ds_out.attrs.update({"sim_name"   : self.run_cfg.sim_name,
+                             "start_date" : self.run_cfg.start_date,
+                             "end_date"   : self.run_cfg.end_date,
+                             "hemisphere" : self.run_cfg.hemisphere,
+                             "ice_type"   : self.cls_cfg.ice_type,
+                             "grid_type"  : self.cls_cfg.grid_type,
                              "method"     : norm})
         ds_out    = self._prepare_output_dataset(ds_out)
         tmp_store = store.with_name(store.name + ".tmp")
@@ -958,6 +929,8 @@ class CICEMetrics:
         self._metrics_cache[norm] = ds_out
         return str(store)
 
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def report_metric_extrema(self, method: str, *,
                               variable                : str = "FIA",
                               year_mode               : str = "calendar",
@@ -977,9 +950,9 @@ class CICEMetrics:
         ds = self._open_existing_metrics(norm)
         if ds is None or variable not in ds.data_vars:
             if not compute_missing:
-                store = self.paths.metrics_store(norm)
+                store = self.pth_cfg.metrics_store(norm)
                 raise KeyError(f"Metric {variable!r} is not available in {store}. Run metrics first, or call with compute_missing=True.")
-            self.logger.info("Metric %s missing for %s; computing it now.", variable, self.run.sim_name)
+            self.logger.info("Metric %s missing for %s; computing it now.", variable, self.run_cfg.sim_name)
             self.compute_metrics(norm,
                                  metric_names        = [variable],
                                  metric_groups       = [],
@@ -989,10 +962,10 @@ class CICEMetrics:
             raise KeyError(f"Metric {variable!r} could not be loaded after metrics computation.")
         da = ds[variable]
         if "time" in da.coords:
-            da = da.sel(time = slice(pd.to_datetime(self.run.start_date), pd.to_datetime(self.run.end_date)))
+            da = da.sel(time = slice(pd.to_datetime(self.run_cfg.start_date), pd.to_datetime(self.run_cfg.end_date)))
         out = self.compute_extrema_table(da,
                                          variable                 = variable,
-                                         sim_name                 = self.run.sim_name,
+                                         sim_name                 = self.run_cfg.sim_name,
                                          year_mode                = year_mode,
                                          include_mean             = include_mean,
                                          include_overall          = include_overall,
@@ -1002,8 +975,7 @@ class CICEMetrics:
                                          rate_min_points          = rate_min_points,
                                          drop_partial_periods     = drop_partial_periods)
         out.insert(1, "method", norm)
-        out.insert(2, "grid_type", self.classify.grid_type)
-        out.insert(3, "ice_type", self.classify.ice_type)
-        out.insert(4, "hemisphere", self.run.hemisphere)
+        out.insert(2, "grid_type", self.cls_cfg.grid_type)
+        out.insert(3, "ice_type", self.cls_cfg.ice_type)
+        out.insert(4, "hemisphere", self.run_cfg.hemisphere)
         return out
-

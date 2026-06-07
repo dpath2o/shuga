@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse
-import shutil
+import argparse, shutil, sys
 from dataclasses import replace
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import xarray as xr
+repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 from shuga.core.types import ClassificationSpec, MetricsSpec, ObservationSpec, PlottingSpec, RunSpec
 from shuga.core.paths import ShugaPaths
 from shuga.io import load_classified, load_metrics
 from shuga.plotting.cice import CICEPlotter, compute_fip
-from shuga.regridder.pyresample import (add_lonlat_from_epsg3031,
+from shuga.regridding.pyresample import (add_lonlat_from_epsg3031,
                                         area_definition_from_xy,
                                         compute_fipdiff_stats_weighted,
                                         fip_difference_dataset,
@@ -110,20 +112,17 @@ def _load_or_compute_sim_fip(args        : argparse.Namespace,
             if args.sim_fip_source == "metrics":
                 raise
             print(f"[info] could not use metrics FIP; recomputing from classification: {exc}")
-
-    cls = load_classified(
-        run=run,
-        classify=classify,
-        metrics=metrics,
-        plotting=plotting,
-        observations=observations,
-        paths=paths,
-        classification=args.classification,
-        variables=[f"{args.ice_type.upper()}_mask"],
-        hemisphere=args.hemisphere,
-        grid_type=args.grid_type,
-        chunks={"time": args.chunks_time},
-    )
+    cls = load_classified(run            = run,
+                          classify       = classify,
+                          metrics        = metrics,
+                          plotting       = plotting,
+                          observations   = observations,
+                          paths          = paths,
+                          classification = args.classification,
+                          variables      = [f"{args.ice_type.upper()}_mask"],
+                          hemisphere     = args.hemisphere,
+                          grid_type      = args.grid_type,
+                          chunks         = {"time": args.chunks_time})
     mask_name = f"{args.ice_type.upper()}_mask"
     if mask_name not in cls:
         # fallback for older stores
@@ -131,128 +130,85 @@ def _load_or_compute_sim_fip(args        : argparse.Namespace,
             mask_name = "FI_mask"
         else:
             raise KeyError(f"No {args.ice_type.upper()}_mask/FI_mask found in classification store.")
-    fi = cls[mask_name].sel(time=slice(fip_start, fip_end))
+    fi = cls[mask_name].sel(time = slice(fip_start, fip_end))
     if fi.sizes.get("time", 0) == 0:
         raise ValueError(f"No simulation FI_mask data in {fip_start}..{fip_end}.")
-    out = compute_fip(fi, name="SIM_FIP")
-    out.attrs.update(source="computed from classification", time_start=fip_start, time_end=fip_end)
+    out = compute_fip(fi, name = "SIM_FIP")
+    out.attrs.update(source = "computed from classification", time_start = fip_start, time_end = fip_end)
     return out
-
 
 def main() -> None:
     args = parse_args()
     fip_start, fip_end = _comparison_window(args)
-
-    run = RunSpec(
-        sim_name=args.sim_name,
-        start_date=args.start_date,
-        end_date=args.end_date,
-        hemisphere=args.hemisphere,
-        project=args.project,
-        user=args.user,
-    )
-    classify = ClassificationSpec(
-        ice_type=args.ice_type,
-        grid_type=args.grid_type,
-        ispd_thresh=args.ispd_thresh,
-        methods=(args.classification,),
-        bin_window=args.bin_window,
-        bin_min_days=args.bin_min_days,
-        roll_window=args.roll_window,
-    )
-    metrics = MetricsSpec(methods=(args.classification,))
-    plotting = PlottingSpec()
-    observations = ObservationSpec()
-    paths = ShugaPaths(run=run, classify=classify, metrics=metrics, plotting=plotting, observations=observations)
-
+    run_cfg = RunSpec(sim_name   = args.sim_name,
+                      start_date = args.start_date,
+                      end_date   = args.end_date,
+                      hemisphere = args.hemisphere,
+                      project    = args.project,
+                      user       = args.user)
+    cls_cfg = ClassificationSpec(ice_type     = args.ice_type,
+                                 grid_type    = args.grid_type,
+                                 ispd_thresh  = args.ispd_thresh,
+                                 methods      = (args.classification,),
+                                 bin_window   = args.bin_window,
+                                 bin_min_days = args.bin_min_days,
+                                 roll_window  = args.roll_window)
+    met_cfg = MetricsSpec(methods = (args.classification))
+    plt_cfg = PlottingSpec()
+    obs_cfg = ObservationSpec()
+    pth_cfg = ShugaPaths(run = run_cfg, classify = cls_cfg, metrics = met_cfg, plotting = plt_cfg, observations = obs_cfg)
     af_store = Path(args.af2020_store).expanduser()
-    af = xr.open_zarr(af_store, consolidated=False, chunks={"time": args.chunks_time})
+    af       = xr.open_zarr(af_store, consolidated = False, chunks = {"time": args.chunks_time})
     if "FIC" not in af:
         raise KeyError(f"AF2020 store must contain FIC to compute period-specific FIP: {af_store}")
-
     obs_fip = af["FIC"].sel(time=slice(fip_start, fip_end)).mean("time", skipna=True).astype("float32").rename("obs")
     obs_fip.attrs.update(source="AF2020 common-grid FIC", time_start=fip_start, time_end=fip_end)
-
-    sim_fip_native = _load_or_compute_sim_fip(
-        args, run, classify, metrics, plotting, observations, paths, fip_start, fip_end
-    )
-
-    cice = _open_static_grid(args.sim_name)
-    area_def = area_definition_from_xy(
-        af["x"],
-        af["y"],
-        pixel_size=float(args.pixel_size_m),
-        area_id="AF2020_common_for_FIP_diff",
-    )
-
-    mod_fip = resample_swath_to_area(
-        sim_fip_native,
-        cice["TLAT"].values,
-        cice["TLON"].values + float(args.cice_lon_shift_deg),
-        area_def,
-        radius=float(args.radius_of_influence_m),
-        fill_value=np.nan,
-        pixel_size=float(args.pixel_size_m),
-        name="mod",
-    )
-
-    FIP = fip_difference_dataset(
-        mod_fip,
-        obs_fip,
-        category_threshold=float(args.category_threshold),
-        name_mod="mod",
-        name_obs="obs",
-    )
-    FIP = FIP.assign_coords(lon=af["lon"], lat=af["lat"])
-    FIP.attrs.update(
-        sim_name=args.sim_name,
-        classification=args.classification,
-        grid_type=args.grid_type,
-        fip_start=fip_start,
-        fip_end=fip_end,
-        af2020_store=str(af_store),
-        pixel_size_m=float(args.pixel_size_m),
-        radius_of_influence_m=float(args.radius_of_influence_m),
-        cice_lon_shift_deg=float(args.cice_lon_shift_deg),
-    )
-
+    sim_fip_native = _load_or_compute_sim_fip(args, run_cfg, cls_cfg, met_cfg, plt_cfg, obs_cfg, pth_cfg, fip_start, fip_end)
+    cice           = _open_static_grid(args.sim_name)
+    area_def       = area_definition_from_xy(af["x"], af["y"], pixel_size = float(args.pixel_size_m), area_id = "AF2020_common_for_FIP_diff")
+    mod_fip        = resample_swath_to_area(sim_fip_native, cice["TLAT"].values, cice["TLON"].values + float(args.cice_lon_shift_deg), area_def,
+                                            radius     = float(args.radius_of_influence_m),
+                                            fill_value = np.nan,
+                                            pixel_size = float(args.pixel_size_m),
+                                            name       = "mod")
+    FIP            = fip_difference_dataset(mod_fip, obs_fip, category_threshold = float(args.category_threshold), name_mod = "mod", name_obs = "obs")
+    FIP            = FIP.assign_coords(lon = af["lon"], lat = af["lat"])
+    FIP.attrs.update(sim_name              = args.sim_name,
+                     classification        = args.classification,
+                     grid_type             = args.grid_type,
+                     fip_start             = fip_start,
+                     fip_end               = fip_end,
+                     af2020_store          = str(af_store),
+                     pixel_size_m          = float(args.pixel_size_m),
+                     radius_of_influence_m = float(args.radius_of_influence_m),
+                     cice_lon_shift_deg    = float(args.cice_lon_shift_deg))
     if args.out_store is not None:
         out_store = Path(args.out_store).expanduser()
     else:
         out_root = Path(args.out_root).expanduser() if args.out_root else Path.home() / "AFIM_archive" / args.sim_name / "zarr" / "comparisons"
         out_store = out_root / f"FIPdiff_{args.sim_name}_minus_AF2020_{args.classification}_{args.grid_type}_{fip_start}_{fip_end}.zarr"
-
     if out_store.exists() and args.overwrite:
         shutil.rmtree(out_store)
     if out_store.exists() and not args.overwrite:
         raise FileExistsError(f"{out_store} exists. Pass --overwrite to replace it.")
-    out_store.parent.mkdir(parents=True, exist_ok=True)
-    FIP.to_zarr(out_store, mode="w", consolidated=False)
+    out_store.parent.mkdir(parents = True, exist_ok = True)
+    FIP.to_zarr(out_store, mode="w", consolidated = False)
     print(f"[done] wrote FIP difference store: {out_store}")
-
-    stats = compute_fipdiff_stats_weighted(
-        FIP,
-        pixel_size_m=float(args.pixel_size_m),
-        threecat_percent_only=False,
-    )
+    stats     = compute_fipdiff_stats_weighted(FIP, pixel_size_m = float(args.pixel_size_m), threecat_percent_only = False)
     stats_csv = Path(args.stats_csv).expanduser() if args.stats_csv else out_store.with_suffix(".regional_stats.csv")
     stats.to_csv(stats_csv)
     print(f"[done] wrote stats: {stats_csv}")
-
     if args.plot:
-        plotter = CICEPlotter(run=run, classify=classify, metrics=metrics, plotting=plotting, observations=observations, paths=paths)
+        plotter   = CICEPlotter(run = run_cfg, classify = cls_cfg, metrics = met_cfg, plotting = plt_cfg, observations =obs_cfg, paths = pth_cfg)
         plot_root = Path(args.plot_root).expanduser() if args.plot_root else out_store.parent / "figures"
-        field = "diff_cat" if args.plot_categorical else "diff"
-        plotter.plot_fip(
-            method=args.classification,
-            source="dataset",
-            field=field,
-            dataset=FIP,
-            output_root=plot_root,
-            title=f"{args.sim_name} - AF2020 {fip_start} to {fip_end}",
-        )
+        field     = "diff_cat" if args.plot_categorical else "diff"
+        plotter.plot_fip(method      = args.classification,
+                         source      = "dataset",
+                         field       = field,
+                         dataset     = FIP,
+                         output_root = plot_root,
+                         title       = f"{args.sim_name} - AF2020 {fip_start} to {fip_end}")
         print(f"[done] wrote regional plots under: {plot_root}")
-
 
 if __name__ == "__main__":
     main()

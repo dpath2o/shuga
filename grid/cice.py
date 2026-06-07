@@ -29,10 +29,10 @@ class CICEGridwork:
     degrees and publishes ``TLON`` / ``TLAT`` on the T-grid regardless of the
     source file naming convention.
     """
-    def __init__(self, paths: ShugaPaths, grid_spec: CICEGridSpec | None = None, logger=None) -> None:
-        self.paths     = paths
-        self.grid_spec = grid_spec or paths.cice_grid or CICEGridSpec()
-        self.logger    = logger
+    def __init__(self, pth_cfg: ShugaPaths, G_cice_cfg: CICEGridSpec | None = None, logger = None) -> None:
+        self.pth_cfg    = pth_cfg
+        self.G_cice_cfg = G_cice_cfg or pth_cfg.G_cice_cfg or CICEGridSpec()
+        self.logger     = logger
         self._grid_bundle: CICEGridBundle | None = None
 
     #------------------------------------------------------------------------------
@@ -110,7 +110,7 @@ class CICEGridwork:
                 return False
             return True
         if P_mask is None:
-            P_mask = self.paths.cice_kmt_path
+            P_mask = self.pth_cfg.cice_kmt_path
         if P_mask is not None and Path(P_mask).exists():
             ds = xr.open_dataset(P_mask, decode_times=False)
             var = self._pick(ds, "kmt", "KMT", "wet", "mask")
@@ -123,7 +123,7 @@ class CICEGridwork:
                         return None
                     return xr.where(np.isfinite(da) & (da > 0), True, False)
         if P_topog is None:
-            P_topog = self.paths.cice_bathymetry_path
+            P_topog = self.pth_cfg.cice_bathymetry_path
         if P_topog is not None and Path(P_topog).exists():
             ds = xr.open_dataset(P_topog, decode_times=False)
             var = self._pick(ds, "depth", "DEPTH", "bathymetry", "topog", "bathy")
@@ -195,9 +195,9 @@ class CICEGridwork:
         if ny is None:
             ny = ny_in
         if P_grid is None:
-            P_grid = self.paths.cice_grid_path
+            P_grid = self.pth_cfg.cice_grid_path
         if lon_type is None:
-            lon_type = self.grid_spec.lon_type
+            lon_type = self.G_cice_cfg.lon_type
         self._log(f"Opening grid geometry: {P_grid}")
         ds       = xr.open_dataset(P_grid, decode_times=False)
         is_super = ("nxp" in ds.sizes) and ("nyp" in ds.sizes) and ("x" in ds.variables) and ("y" in ds.variables)
@@ -281,7 +281,7 @@ class CICEGridwork:
         if self._grid_bundle is not None and P_grid is None and P_mask_org is None and P_mask_mod is None and not slice_hem and build_faces:
             return self._grid_bundle
         tlon, tlat, anglet_rad, dx_m, dy_m, area_m2, grid_kind, ds_grid = self.load_super_grid(P_grid   = P_grid,
-                                                                                               lon_type = self.grid_spec.lon_type,
+                                                                                               lon_type = self.G_cice_cfg.lon_type,
                                                                                                nx       = nx,
                                                                                                ny       = ny)
         if tuple(np.asarray(tlon).shape) != tuple(np.asarray(tlat).shape):
@@ -296,9 +296,9 @@ class CICEGridwork:
                            coords    = {"nj": np.arange(nj, dtype=np.int32),
                                         "ni": np.arange(ni, dtype=np.int32)},
                            attrs     = {"grid_kind"  : grid_kind,
-                                        "source_path": str(P_grid or self.paths.cice_grid_path)})
+                                        "source_path": str(P_grid or self.pth_cfg.cice_grid_path)})
         if slice_hem:
-            hemi = self.paths.hemisphere
+            hemi = self.pth_cfg.hemisphere
             if hemi == "SH":
                 selector = tgrid["TLAT"] <= 0.0
             else:
@@ -307,7 +307,7 @@ class CICEGridwork:
         mask_org   = self._open_ocean_mask_on_tgrid(P_mask=P_mask_org, nx=ni, ny=nj)
         mask_mod   = self._open_ocean_mask_on_tgrid(P_mask=P_mask_mod, nx=ni, ny=nj) if P_mask_mod is not None else None
         bathy      = None
-        bathy_path = self.paths.cice_bathymetry_path
+        bathy_path = self.pth_cfg.cice_bathymetry_path
         if bathy_path is not None and Path(bathy_path).exists():
             ds_b = xr.open_dataset(bathy_path, decode_times=False)
             v = self._pick(ds_b, "depth", "DEPTH", "bathymetry", "topog", "bathy")
@@ -332,7 +332,7 @@ class CICEGridwork:
                                             "NLAT": (("nj_b", "ni"), lat_n)},
                                coords    = {"nj_b": np.arange(lon_n.shape[0], dtype=np.int32),
                                             "ni"  : np.arange(lon_n.shape[1], dtype=np.int32)})
-        assets = self.paths.resolve_cice_grid_assets()
+        assets = self.pth_cfg.resolve_cice_grid_assets()
         bundle = CICEGridBundle(tgrid       = tgrid,
                                 ugrid       = ugrid,
                                 egrid       = egrid,
@@ -341,7 +341,7 @@ class CICEGridwork:
                                 mask_mod    = mask_mod,
                                 bathymetry  = bathy,
                                 grid_kind   = grid_kind,
-                                source_path = str(P_grid or self.paths.cice_grid_path),
+                                source_path = str(P_grid or self.pth_cfg.cice_grid_path),
                                 metadata    = {"ice_in_file"    : str(assets.get("ice_in_file")) if assets.get("ice_in_file") is not None else None,
                                                "ice_diag_file"  : str(assets.get("ice_diag_file")) if assets.get("ice_diag_file") is not None else None,
                                                "grid_file"      : str(assets.get("grid_file")) if assets.get("grid_file") is not None else None,
@@ -417,7 +417,7 @@ class CICEGridwork:
         ----------
         P_cice_static_store
             Optional explicit zarr path. If omitted, use
-            ``self.paths.resolve_static_store()``.
+            ``self.pth_cfg.resolve_static_store()``.
         variables
             Optional variable list to return. If omitted, all variables in the
             static store are returned.
@@ -448,10 +448,10 @@ class CICEGridwork:
             Static CICE coordinate/metric/mask dataset.
         """
         if P_cice_static_store is None:
-            P_ = self.paths.resolve_static_store()
+            P_ = self.pth_cfg.resolve_static_store()
             if P_ is None:
                 raise FileNotFoundError("Could not find CICE static-coordinate zarr store. "
-                                        f"Default expected at {self.paths.default_cice_static_store_path}")
+                                        f"Default expected at {self.pth_cfg.default_cice_static_store_path}")
         else:
             P_ = Path(P_cice_static_store).expanduser()
         P_ = Path(P_).expanduser()
@@ -509,7 +509,7 @@ class CICEGridwork:
             if south_lat_max is not None:
                 row_mask = (tlat <= float(south_lat_max)).any(dim=xdim).compute()
             else:
-                hemi = self.paths.canonical_hemisphere(hemisphere or self.paths.hemisphere)
+                hemi = self.pth_cfg.canonical_hemisphere(hemisphere or self.pth_cfg.hemisphere)
                 if hemi == "SH":
                     row_mask = (tlat <= 0.0).any(dim=xdim).compute()
                 else:

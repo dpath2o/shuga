@@ -3,6 +3,7 @@ import numpy as np
 import xarray as xr
 from shuga.metrics.regional import ensure_2d_static, spatial_dims
 
+# ------------------------------------------------------------------
 def _align_mask(mask: xr.DataArray | None, field: xr.DataArray) -> xr.DataArray | None:
     if mask is None:
         return None
@@ -11,14 +12,16 @@ def _align_mask(mask: xr.DataArray | None, field: xr.DataArray) -> xr.DataArray 
     except Exception:
         return None
 
+# ------------------------------------------------------------------
 def _masked_weighted_field(field: xr.DataArray, area: xr.DataArray,
-                           mask: xr.DataArray | None = None) -> xr.DataArray:
+                            mask: xr.DataArray | None = None) -> xr.DataArray:
     area2d   = ensure_2d_static(area)
     mask_eff = _align_mask(mask, field)
     if mask_eff is not None:
         field = field.where(mask_eff, 0.0)
     return field * area2d
 
+# ------------------------------------------------------------------
 def compute_area_series(sic: xr.DataArray, area: xr.DataArray,
                         mask: xr.DataArray | None = None, *, name: str, long_name: str,
                         scale: float | None = None) -> xr.DataArray:
@@ -40,6 +43,7 @@ def compute_area_series(sic: xr.DataArray, area: xr.DataArray,
     da.attrs.update({"long_name": long_name, "units": units})
     return da
 
+# ------------------------------------------------------------------
 def compute_volume_series(sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray,
                           mask: xr.DataArray | None = None, *, name: str, long_name: str,
                           scale: float | None = None) -> xr.DataArray:
@@ -59,6 +63,7 @@ def compute_volume_series(sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArra
     da.attrs.update({"long_name": long_name, "units": units})
     return da
 
+# ------------------------------------------------------------------
 def compute_thickness_series(sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray,
                              mask: xr.DataArray | None = None, *, name: str, long_name: str) -> xr.DataArray:
     """
@@ -77,6 +82,7 @@ def compute_thickness_series(sic: xr.DataArray, hi: xr.DataArray, area: xr.DataA
     da.attrs.update({"long_name": long_name, "units": "m"})
     return da
 
+# ------------------------------------------------------------------
 def compute_strength_series(sic: xr.DataArray, hi: xr.DataArray, strength: xr.DataArray, area: xr.DataArray,
                             mask: xr.DataArray | None = None, *, name: str, long_name: str) -> xr.DataArray:
     """
@@ -98,6 +104,7 @@ def compute_strength_series(sic: xr.DataArray, hi: xr.DataArray, strength: xr.Da
     da.attrs.update({"long_name": long_name, "units": "MPa"})
     return da
 
+# ------------------------------------------------------------------
 def compute_persistence_mask(mask: xr.DataArray, *, name: str, long_name: str,
                              percent: bool = True) -> xr.DataArray:
     """
@@ -116,6 +123,7 @@ def compute_persistence_mask(mask: xr.DataArray, *, name: str, long_name: str,
     da.attrs.update({"long_name": long_name, "units": units})
     return da
 
+# ------------------------------------------------------------------
 def compute_temporal_mean(da: xr.DataArray, *, name: str, long_name: str) -> xr.DataArray:
     """
     Temporal mean over the time axis.
@@ -125,6 +133,7 @@ def compute_temporal_mean(da: xr.DataArray, *, name: str, long_name: str) -> xr.
                       "units"    : da.attrs.get("units", "1")})
     return out
 
+# ------------------------------------------------------------------
 def convert_thickness_tendency_to_m_per_day(da: xr.DataArray) -> xr.DataArray:
     """
     Convert CICE tendency-like fields to m day^-1 where possible.
@@ -145,6 +154,7 @@ def convert_thickness_tendency_to_m_per_day(da: xr.DataArray) -> xr.DataArray:
     out.attrs["units"] = "m day^-1"
     return out
 
+# ------------------------------------------------------------------
 def compute_volume_rate(tendency: xr.DataArray, sic: xr.DataArray, area: xr.DataArray,
                         mask: xr.DataArray | None = None, *, name: str, long_name: str) -> xr.DataArray:
     """
@@ -162,6 +172,7 @@ def compute_volume_rate(tendency: xr.DataArray, sic: xr.DataArray, area: xr.Data
     da.attrs.update({"long_name": long_name, "units": "m^3 day^-1"})
     return da
 
+# ------------------------------------------------------------------
 def compute_area_rate(tendency: xr.DataArray, area: xr.DataArray,
                       mask: xr.DataArray | None = None, *, name: str, long_name: str) -> xr.DataArray:
     """
@@ -178,6 +189,7 @@ def compute_area_rate(tendency: xr.DataArray, area: xr.DataArray,
     da.attrs.update({"long_name": long_name, "units": "m^2 day^-1"})
     return da
 
+# ------------------------------------------------------------------
 def compute_spatial_rate_year(tendency: xr.DataArray, mask: xr.DataArray, *, name: str, long_name: str,
                               area: xr.DataArray | None = None) -> xr.DataArray:
     """
@@ -199,6 +211,7 @@ def compute_spatial_rate_year(tendency: xr.DataArray, mask: xr.DataArray, *, nam
     da.attrs.update({"long_name": long_name, "units": units})
     return da
 
+# ------------------------------------------------------------------
 def compute_region_series(sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArray, region_mask: xr.DataArray,
                           mask: xr.DataArray | None = None, *, area_name: str, thickness_name: str, area_long_name: str,
                           thickness_long_name: str) -> tuple[xr.DataArray, xr.DataArray]:
@@ -225,6 +238,7 @@ def compute_region_series(sic: xr.DataArray, hi: xr.DataArray, area: xr.DataArra
     thick_da.attrs.update({"long_name": thickness_long_name, "units": "m"})
     return area_da, thick_da
 
+# ------------------------------------------------------------------
 def compute_area_weighted_stress(stress: xr.DataArray, area: xr.DataArray,
                                  mask: xr.DataArray | None = None, *, base_name: str) -> xr.Dataset:
     """

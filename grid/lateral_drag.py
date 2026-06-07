@@ -18,15 +18,15 @@ class FormFactors:
     """
 
     def __init__(self,
-                 paths            : ShugaPaths,
-                 grid_spec        : CICEGridSpec | None = None,
-                 lateral_drag_spec: LateralDragSpec | None = None,
+                 pth_cfg   : ShugaPaths,
+                 G_cice_cfg: CICEGridSpec    | None = None,
+                 LD_cfg    : LateralDragSpec | None = None,
                  logger = None) -> None:
-        self.paths     = paths
-        self.grid_spec = grid_spec or paths.cice_grid or CICEGridSpec()
-        self.spec      = lateral_drag_spec or paths.lateral_drag or LateralDragSpec()
-        self.logger    = logger
-        self.gridwork  = CICEGridwork(paths=paths, grid_spec=self.grid_spec, logger=logger)
+        self.pth_cfg    = pth_cfg
+        self.G_cice_cfg = G_cice_cfg or pth_cfg.G_cice_cfg or CICEGridSpec()
+        self.spec       = LD_cfg or pth_cfg.LD_cfg or LateralDragSpec()
+        self.logger     = logger
+        self.gridwork   = CICEGridwork(pth_cfg = pth_cfg, G_cice_cfg = self.G_cice_cfg, logger = logger)
 
     #----------------------------------------------------------------------
     # helpers
@@ -116,7 +116,7 @@ class FormFactors:
     def _read_grounded_iceberg_table(self, grounded_iceberg_file: str | Path | None = None) -> pd.DataFrame:
         import geopandas as gpd
         if grounded_iceberg_file is None:
-            grounded_iceberg_file = self.paths.grounded_iceberg_file_path
+            grounded_iceberg_file = self.pth_cfg.grounded_iceberg_file_path
         path = Path(grounded_iceberg_file)
         suffix = path.suffix.lower()
         if suffix in {".gpkg", ".shp", ".geojson"}:
@@ -158,9 +158,9 @@ class FormFactors:
         import geopandas as gpd
         from scipy.spatial import cKDTree
         if high_res_coast_file is None:
-            high_res_coast_file = self.paths.high_res_coast_file_path
+            high_res_coast_file = self.pth_cfg.high_res_coast_file_path
         if output_path is None:
-            output_path = self.paths.coast_form_factors_path
+            output_path = self.pth_cfg.coast_form_factors_path
         output_path = Path(output_path)
         if output_path.exists() and not overwrite:
             return xr.open_dataset(output_path)
@@ -207,9 +207,9 @@ class FormFactors:
                                                  overwrite            : bool = False) -> xr.Dataset:
         from scipy.spatial import cKDTree
         if grounded_iceberg_file is None:
-            grounded_iceberg_file = self.paths.grounded_iceberg_file_path
+            grounded_iceberg_file = self.pth_cfg.grounded_iceberg_file_path
         if output_path is None:
-            output_path = self.paths.grounded_iceberg_form_factors_path
+            output_path = self.pth_cfg.grounded_iceberg_form_factors_path
         output_path = Path(output_path)
         if output_path.exists() and not overwrite:
             return xr.open_dataset(output_path)
@@ -255,11 +255,11 @@ class FormFactors:
                           combine              : str | None = None,
                           overwrite            : bool = False) -> xr.Dataset:
         if coast_path is None:
-            coast_path = self.paths.coast_form_factors_path
+            coast_path = self.pth_cfg.coast_form_factors_path
         if grounded_iceberg_path is None:
-            grounded_iceberg_path = self.paths.grounded_iceberg_form_factors_path
+            grounded_iceberg_path = self.pth_cfg.grounded_iceberg_form_factors_path
         if output_path is None:
-            output_path = self.paths.combined_form_factors_path
+            output_path = self.pth_cfg.combined_form_factors_path
         if combine is None:
             combine = self.spec.f2_map_method
         output_path = Path(output_path)

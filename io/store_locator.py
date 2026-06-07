@@ -18,19 +18,19 @@ class CICEStoreLocator:
 
     Parameters
     ----------
-    run : RunSpec
+    run_cfg : RunSpec
         Run configuration used as the base context for simulation, project,
         user, and output-root resolution.
-    classify : ClassificationSpec
+    cls_cfg : ClassificationSpec
         Classification configuration used when constructing classification-root
         paths and method directories.
-    metrics : MetricsSpec | None, optional
+    met_cfg : MetricsSpec | None, optional
         Optional metrics configuration retained for downstream path/context
         compatibility.
-    plotting : PlottingSpec | None, optional
+    plt_cfg : PlottingSpec | None, optional
         Optional plotting configuration retained for downstream
         path/context compatibility.
-    observations : ObservationSpec | None, optional
+    obs_cfg : ObservationSpec | None, optional
         Optional observation configuration retained for downstream
         path/context compatibility.
     logger : logging.Logger | None, optional
@@ -48,37 +48,41 @@ class CICEStoreLocator:
     - The class does not require stores to be opened; it only resolves their
       filesystem locations unless higher-level code opens the returned path.
     """
-    def __init__(self, run, classify, metrics=None, plotting=None, observations=None,
-                 paths: ShugaPaths | None = None, logger=None):
-        self.run          = run
-        self.classify     = classify
-        self.metrics      = metrics
-        self.plotting     = plotting
-        self.observations = observations
-        self.paths        = paths
-        self.logger       = logger
+    def __init__(self, run_cfg, cls_cfg,
+                 met_cfg = None,
+                 plt_cfg = None,
+                 obs_cfg = None,
+                 pth_cfg: ShugaPaths | None = None,
+                 logger = None):
+        self.run_cfg = run_cfg
+        self.cls_cfg = cls_cfg
+        self.met_cfg = met_cfg
+        self.plt_cfg = plt_cfg
+        self.obs_cfg = obs_cfg
+        self.pth_cfg = pth_cfg
+        self.logger  = logger
 
     def _paths_for_sim(self, sim_name: str, project: str | None = None, user: str | None = None) -> ShugaPaths:
-        base_paths = self.paths
-        base_run   = base_paths.run if base_paths is not None else self.run
+        base_paths = self.pth_cfg
+        base_run   = base_paths.run_cfg if base_paths is not None else self.run_cfg
         run_other  = replace(base_run,
                              sim_name = sim_name,
                              project  = project or base_run.project,
                              user     = user or base_run.user)
         if base_paths is None:
-            return ShugaPaths(run          = run_other,
-                              classify     = self.classify,
-                              metrics      = self.metrics,
-                              plotting     = self.plotting,
-                              observations = self.observations)
-        return ShugaPaths(run                 = run_other,
-                          classify            = self.classify,
-                          metrics             = self.metrics or base_paths.metrics,
-                          plotting            = self.plotting or base_paths.plotting,
-                          observations        = self.observations or base_paths.observations,
-                          wave_forcing        = base_paths.wave_forcing,
-                          cice_grid           = base_paths.cice_grid,
-                          lateral_drag        = base_paths.lateral_drag,
+            return ShugaPaths(run_cfg          = run_other,
+                              cls_cfg     = self.cls_cfg,
+                              met_cfg      = self.met_cfg,
+                              plt_cfg     = self.plt_cfg,
+                              obs_cfg = self.obs_cfg)
+        return ShugaPaths(run_cfg             = run_other,
+                          cls_cfg             = self.cls_cfg,
+                          met_cfg             = self.met_cfg or base_paths.met_cfg,
+                          plt_cfg             = self.plt_cfg or base_paths.plt_cfg,
+                          obs_cfg             = self.obs_cfg or base_paths.obs_cfg,
+                          wave_frcg_cfg       = base_paths.wave_frcg_cfg,
+                          G_cice_cfg          = base_paths.G_cice_cfg,
+                          LD_cfg              = base_paths.LD_cfg,
                           afim_output_root    = base_paths.afim_output_root,
                           graphics_root       = base_paths.graphics_root,
                           logs_root           = base_paths.logs_root,
@@ -90,16 +94,16 @@ class CICEStoreLocator:
     def _method_dir(self, method: str) -> str:
         norm = normalize_method(method)
         return method_dirname(norm,
-                              bin_window   = self.classify.bin_window,
-                              bin_min_days = self.classify.bin_min_days,
-                              roll_window  = self.classify.roll_window)
+                              bin_window   = self.cls_cfg.bin_window,
+                              bin_min_days = self.cls_cfg.bin_min_days,
+                              roll_window  = self.cls_cfg.roll_window)
 
-    def _classification_parent(self, paths: ShugaPaths) -> Path:
-        return paths.classification_root_path.parent
+    def _classification_parent(self, pth_cfg: ShugaPaths) -> Path:
+        return pth_cfg.classification_root_path.parent
 
-    def _candidate_grid_types(self, paths: ShugaPaths, method: str, store_name: str,
+    def _candidate_grid_types(self, pth_cfg: ShugaPaths, method: str, store_name: str,
                               search_order: tuple[str, ...]) -> list[tuple[str, Path]]:
-        parent                        = self._classification_parent(paths)
+        parent                        = self._classification_parent(pth_cfg)
         method_dir                    = self._method_dir(method)
         found: list[tuple[str, Path]] = []
         if not parent.exists():
@@ -195,28 +199,28 @@ class CICEStoreLocator:
         if store_kind not in {"metrics", "classification"}:
             raise ValueError(f"Unsupported store_kind={store_kind!r}")
         selection           = selection or StoreSelection()
-        paths               = self._paths_for_sim(sim_name=sim_name, project=project, user=user)
+        pth_cfg               = self._paths_for_sim(sim_name=sim_name, project=project, user=user)
         norm                = normalize_method(method)
         store_name          = "mets.zarr" if store_kind == "metrics" else "data.zarr"
         method_dir          = self._method_dir(norm)
         if store_kind == "metrics":
-            exact = paths.metrics_store(norm)
+            exact = pth_cfg.metrics_store(norm)
         else:
-            exact = paths.classification_store(norm)
+            exact = pth_cfg.classification_store(norm)
         if exact.exists():
             resolved = ResolvedStore(sim_name=sim_name,
                                      method=norm,
-                                     grid_type=str(paths.classify.grid_type),
+                                     grid_type=str(pth_cfg.cls_cfg.grid_type),
                                      store_kind=store_kind,
                                      path=exact)
             if self.logger is not None:
-                self.logger.info("Resolved %s store for %s [%s/%s] by exact path: %s", store_kind, sim_name, paths.classify.grid_type, norm, exact)
+                self.logger.info("Resolved %s store for %s [%s/%s] by exact path: %s", store_kind, sim_name, pth_cfg.cls_cfg.grid_type, norm, exact)
             return resolved
-        if paths.ice_domain == "SI":
+        if pth_cfg.ice_domain == "SI":
             raise FileNotFoundError(f"Could not find {store_kind} store for sim={sim_name!r}, domain='SI': {exact}")
         requested_grid_type = selection.requested_grid_type(sim_name)
         if requested_grid_type is not None:
-            candidate = self._classification_parent(paths) / requested_grid_type / method_dir / store_name
+            candidate = self._classification_parent(pth_cfg) / requested_grid_type / method_dir / store_name
             if not candidate.exists():
                 raise FileNotFoundError(f"Requested {store_kind} store does not exist for sim={sim_name!r}, "
                                         f"method={norm!r}, grid_type={requested_grid_type!r}: {candidate}")
@@ -228,7 +232,7 @@ class CICEStoreLocator:
             if self.logger is not None:
                 self.logger.info("Resolved %s store for %s [%s/%s]: %s", store_kind, sim_name, requested_grid_type, norm, candidate)
             return resolved
-        found = self._candidate_grid_types(paths        = paths,
+        found = self._candidate_grid_types(pth_cfg        = pth_cfg,
                                            method       = norm,
                                            store_name   = store_name,
                                            search_order = selection.search_order)
@@ -243,7 +247,7 @@ class CICEStoreLocator:
                 self.logger.info("Resolved %s store for %s [%s/%s]: %s", store_kind, sim_name, grid_type, norm, candidate)
             return resolved
         if not found:
-            parent = self._classification_parent(paths)
+            parent = self._classification_parent(pth_cfg)
             raise FileNotFoundError(f"Could not find any {store_kind} store for sim={sim_name!r}, method={norm!r}. "
                                     f"Looked under: {parent}/*/{method_dir}/{store_name}")
         if selection.require_unique:

@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse, sys
@@ -89,56 +88,56 @@ def main() -> None:
     methods       = [normalize_method(m) for m in _comma_split(args.methods)]
     metric_groups = _comma_split(args.metric_groups)
     metric_names  = _comma_split(args.metric_names)
-    run           = RunSpec(sim_name       = args.sim_name,
+    run_cfg       = RunSpec(sim_name       = args.sim_name,
                             start_date     = args.start_date,
                             end_date       = args.end_date,
                             hemisphere     = args.hemisphere,
                             project        = args.project,
                             user           = args.user,
                             iceh_frequency = args.iceh_frequency)
-    classify      = ClassificationSpec(ice_type     = args.ice_type,
+    cls_cfg       = ClassificationSpec(ice_type     = args.ice_type,
                                        grid_type    = args.grid_type,
                                        ispd_thresh  = args.ispd_thresh,
                                        methods      = tuple(methods),
                                        bin_window   = args.bin_window,
                                        bin_min_days = args.bin_min_days,
                                        roll_window  = args.roll_window)
-    metrics       = MetricsSpec(methods            = tuple(methods),
+    met_cfg       = MetricsSpec(methods            = tuple(methods),
                                 obs_metrics_store  = args.obs_metrics_store,
                                 obs_fia_var        = args.obs_fia_var,
                                 obs_fit_var        = args.obs_fit_var,
                                 coast_distance_var = args.coast_distance_var)
-    obs           = ObservationSpec(seaice_root         = args.seaice_root,
+    obs_cfg       = ObservationSpec(seaice_root         = args.seaice_root,
                                     nsidc_root          = args.nsidc_root,
                                     nsidc_cellarea_root = args.nsidc_cellarea_root,
                                     af2020_root         = args.af2020_root)
-    plotting      = PlottingSpec(fig_size        = args.fig_size,
+    plt_cfg       = PlottingSpec(fig_size        = args.fig_size,
                                  fip_fig_size    = args.fig_size,
                                  region_fig_size = args.fig_size)
-    paths         = ShugaPaths(run                 = run,
-                               classify            = classify,
-                               observations        = obs,
+    pth_cfg       = ShugaPaths(run_cfg                 = run_cfg,
+                               cls_cfg            = cls_cfg,
+                               obs_cfg        = obs_cfg,
                                afim_output_root    = args.afim_output_root,
                                graphics_root       = args.graphics_root,
                                cice_store          = args.cice_store,
                                static_store        = args.static_store,
                                classification_root = args.classification_root,
                                logs_root           = args.logs_root)
-    logger        = build_file_logger("shuga.metrics", paths.metrics_log_path(), level=args.log_level)
-    logger.info("Logging to: %s", paths.metrics_log_path())
-    logger.info("Resolved CICE store: %s", paths.resolve_cice_store())
-    static_store  = paths.resolve_static_store()
+    logger        = build_file_logger("shuga.met_cfg", pth_cfg.metrics_log_path(), level=args.log_level)
+    logger.info("Logging to: %s", pth_cfg.metrics_log_path())
+    logger.info("Resolved CICE store: %s", pth_cfg.resolve_cice_store())
+    static_store  = pth_cfg.resolve_static_store()
     if static_store is None:
         logger.warning("No CICE static store resolved. Metrics requiring tarea/TLON/TLAT or face areas may fail.")
-    logger.info("Resolved classification root: %s", paths.classification_root_path)
-    runner              = CICEMetrics(run=run, classify=classify, metrics=metrics, paths=paths, logger=logger)
-    plotter             = CICEPlotter(run          = run,
-                                      classify     = classify,
-                                      metrics      = metrics,
-                                      plotting     = plotting,
-                                      observations = obs,
-                                      paths        = paths,
-                                      logger       = logger)
+    logger.info("Resolved classification root: %s", pth_cfg.classification_root_path)
+    runner              = CICEMetrics(run_cfg = run_cfg, cls_cfg = cls_cfg, met_cfg = met_cfg, pth_cfg = pth_cfg, logger = logger)
+    plotter             = CICEPlotter(run_cfg = run_cfg,
+                                      cls_cfg = cls_cfg,
+                                      met_cfg = met_cfg,
+                                      plt_cfg = plt_cfg,
+                                      obs_cfg = obs_cfg,
+                                      pth_cfg = pth_cfg,
+                                      logger  = logger)
     update_missing_only = args.update_missing_only or (not args.overwrite)
     for method in methods:
         logger.info("Processing class method: %s", method)

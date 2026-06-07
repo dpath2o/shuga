@@ -46,14 +46,17 @@ DIAGNOSTIC_INPUT_VARS = ["uvel", "vvel", "uocn", "vocn", "aice", "hi",
                          "KuxE", "KuxN",
                          "KuyE", "KuyN"]
 
+# ------------------------------------------------------------------
 def prefixed_diag_names(prefix: str) -> list[str]:
     return [f"{prefix}_{name}_mean" for name in DIAG_BASE_NAMES]
 
+# ------------------------------------------------------------------
 def prefixed_diags_requested(requested: set[str], prefix: str | None = None) -> bool:
     if prefix is not None:
         return bool(set(prefixed_diag_names(prefix)) & set(requested))
     return any(bool(set(prefixed_diag_names(pfx)) & set(requested)) for pfx in DIAG_PREFIXES)
 
+# ------------------------------------------------------------------
 def compute_prefixed_diagnostic_dataset(*, ds: xr.Dataset, area: xr.DataArray, requested: set[str],
                                         prefix: str,
                                         mask: xr.DataArray | None,
@@ -84,13 +87,16 @@ def compute_prefixed_diagnostic_dataset(*, ds: xr.Dataset, area: xr.DataArray, r
                                         "ice_mask_prefix"  : prefix})
     return out
 
+# ------------------------------------------------------------------
 def diagnostics_requested(requested: set[str]) -> bool:
     return bool(set(DIAGNOSTIC_NAMES) & set(requested))
 
+# ------------------------------------------------------------------
 def _publish_requested(ds: xr.Dataset, requested: set[str]) -> xr.Dataset:
     keep = [name for name in DIAGNOSTIC_NAMES if name in requested and name in ds]
     return ds[keep] if keep else xr.Dataset()
 
+# ------------------------------------------------------------------
 def mag(ds: xr.Dataset, x: str, y: str, name: str) -> xr.DataArray | None:
     if x not in ds or y not in ds:
         return None
@@ -101,6 +107,7 @@ def mag(ds: xr.Dataset, x: str, y: str, name: str) -> xr.DataArray | None:
                      long_name = name, source_x = x, source_y = y)
     return out
 
+# ------------------------------------------------------------------
 def ice_speed(ds: xr.Dataset) -> xr.DataArray | None:
     if not all(v in ds for v in ("uvel", "vvel")):
         return None
@@ -108,13 +115,14 @@ def ice_speed(ds: xr.Dataset) -> xr.DataArray | None:
     out.attrs.update(units = "m s-1", long_name = "Sea-ice speed", source_x = "uvel", source_y = "vvel")
     return out
 
+# ------------------------------------------------------------------
 def rel_ice_ocean_speed(ds: xr.Dataset) -> xr.DataArray | None:
     if not all(v in ds for v in ("uvel", "vvel", "uocn", "vocn")):
         return None
     out = xr.apply_ufunc(np.hypot, ds["uvel"] - ds["uocn"], ds["vvel"] - ds["vocn"], dask="allowed").rename("rel_ice_ocean_speed")
     out.attrs.update(units = "m s-1", long_name = "Relative ice-ocean speed", note = "Computed as hypot(uvel-uocn, vvel-vocn).")
     return out
-
+# ------------------------------------------------------------------
 def strain_invariant(ds: xr.Dataset) -> xr.DataArray | None:
     """
     Prefer existing CICE invariant if present.
@@ -142,6 +150,7 @@ def strain_invariant(ds: xr.Dataset) -> xr.DataArray | None:
         return out
     return None
 
+# ------------------------------------------------------------------
 def ku_proxy(ds: xr.Dataset) -> xr.Dataset:
     """
     Build T-grid-like lateral-drag proxy fields from available edge terms.
@@ -180,6 +189,7 @@ def ku_proxy(ds: xr.Dataset) -> xr.Dataset:
             units=out["ld_x_proxy"].attrs.get("units", out["ld_y_proxy"].attrs.get("units", "unknown") if "ld_y_proxy" in out else "unknown"))
     return out
 
+# ------------------------------------------------------------------
 def compute_diagnostic_terms(ds: xr.Dataset, *,
                              requested: set[str] | None = None,
                              rho_ice  : float = RHO_ICE_DEFAULT,
@@ -239,3 +249,4 @@ def compute_diagnostic_terms(ds: xr.Dataset, *,
                                      note      = "Sign depends on Kux/Kuy convention. Negative values should indicate damping only if K proxies oppose ice velocity.",
                                      rho_ice   = float(rho_ice))
     return _publish_requested(out, requested)
+

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SIM="LD-fsnow-sep"
+SIM="LD-fsnow-red"
 START="1993-01-01"
-END="1993-12-31"
+END="1994-12-31"
 METHODS="binary-days,rolling-mean"
 GRID="Tc"
 

@@ -4,18 +4,17 @@
 #PBS -l walltime=04:00:00
 #PBS -l ncpus=8
 #PBS -l mem=48GB
-#PBS -l storage=gdata/gv90+scratch/gv90
+#PBS -l storage=gdata/gv90+scratch/gv90+gdata/xp65+gdata/jk72
 #PBS -j oe
-#PBS -N FIP_diff
+#PBS -N diff_FIP
 
 set -euo pipefail
 
 cd "${PBS_O_WORKDIR:-$PWD}"
 
 module purge
-# Adjust to your current shuga environment if needed.
-# module use /g/data/gv90/apps/modulefiles
-# module load conda/analysis3
+module use /g/data/xp65/public/modules
+module load conda/analysis3-25.12
 
 : "${SIM_NAME:?Set SIM_NAME, e.g. qsub -v SIM_NAME=LD-blend-base FIP_differencing.pbs}"
 : "${START_DATE:=2000-01-01}"
@@ -28,20 +27,18 @@ module purge
 : "${OVERWRITE:=0}"
 : "${PLOT:=1}"
 
-args=(
-  shuga/scripts/comparisons/FIP_differencing.py
-  --sim-name "${SIM_NAME}"
-  --start-date "${START_DATE}"
-  --end-date "${END_DATE}"
-  --fip-start "${FIP_START}"
-  --fip-end "${FIP_END}"
-  --classification "${CLASSIFICATION}"
-  --grid-type "${GRID_TYPE}"
-  --af2020-store "${AF2020_STORE}"
-  --pixel-size-m "${PIXEL_SIZE_M:-5000}"
-  --radius-of-influence-m "${ROI_M:-10000}"
-  --cice-lon-shift-deg "${CICE_LON_SHIFT_DEG:-0.25}"
-)
+args=(FIP_differencing.py
+      --sim-name "${SIM_NAME}"
+      --start-date "${START_DATE}"
+      --end-date "${END_DATE}"
+      --fip-start "${FIP_START}"
+      --fip-end "${FIP_END}"
+      --classification "${CLASSIFICATION}"
+      --grid-type "${GRID_TYPE}"
+      --af2020-store "${AF2020_STORE}"
+      --pixel-size-m "${PIXEL_SIZE_M:-5000}"
+      --radius-of-influence-m "${ROI_M:-10000}"
+      --cice-lon-shift-deg "${CICE_LON_SHIFT_DEG:-0.25}")
 
 if [[ "${OVERWRITE}" == "1" ]]; then
   args+=(--overwrite)

@@ -14,13 +14,17 @@ class NSIDCObservations:
     This is the NSIDC-specific portion extracted from the older, ambiguously named
     ``shuga.observations.cice.SeaIceObservations`` module.
     """
-    def __init__(self, run: RunSpec, observations: ObservationSpec | None = None, paths: ShugaPaths | None = None, *,
-                 chunks: dict | None = None, logger = None) -> None:
-        self.run = run
-        self.observations = observations or ObservationSpec()
-        self.paths = paths or ShugaPaths(run=run, classify=None, observations=self.observations)  # type: ignore[arg-type]
-        self.chunks = chunks or {"time": 31}
-        self.logger = logger or build_file_logger("shuga.observations.NSIDC", Path.home() / "logs" / "observations" / "shuga_NSIDC.log")
+    def __init__(self,
+                 run_cfg: RunSpec,
+                 obs_cfg: ObservationSpec | None = None,
+                 pth_cfg: ShugaPaths | None = None, *,
+                 chunks : dict | None = None,
+                 logger = None) -> None:
+        self.run_cfg = run_cfg
+        self.obs_cfg = obs_cfg or ObservationSpec()
+        self.pth_cfg = pth_cfg or ShugaPaths(run_cfg = run_cfg, cls_cfg = None, obs_cfg = self.obs_cfg)  # type: ignore[arg-type]
+        self.chunks  = chunks or {"time": 31}
+        self.logger  = logger or build_file_logger("shuga.obs_cfg.NSIDC", Path.home() / "logs" / "observations" / "shuga_NSIDC.log")
         self._cache: dict[tuple[str, str, str], xr.Dataset] = {}
 
     @staticmethod
@@ -33,14 +37,14 @@ class NSIDCObservations:
         return f"{hemi}25km_v1.1.nc"
 
     def area_file(self, hemisphere: str) -> Path:
-        return self.paths.nsidc_aux_root_path / f"NSIDC0771_CellArea_PS_{self._aux_suffix(hemisphere)}"
+        return self.pth_cfg.nsidc_aux_root_path / f"NSIDC0771_CellArea_PS_{self._aux_suffix(hemisphere)}"
 
     def latlon_file(self, hemisphere: str) -> Path:
-        return self.paths.nsidc_aux_root_path / f"NSIDC0771_LatLon_PS_{self._aux_suffix(hemisphere)}"
+        return self.pth_cfg.nsidc_aux_root_path / f"NSIDC0771_LatLon_PS_{self._aux_suffix(hemisphere)}"
 
     def daily_files(self, start_date: str, end_date: str, hemisphere: str) -> list[Path]:
         hemi = self.canonical_hemisphere(hemisphere)
-        root = self.paths.nsidc_root_path / hemi / "daily"
+        root = self.pth_cfg.nsidc_root_path / hemi / "daily"
         if not root.exists():
             raise FileNotFoundError(f"NSIDC daily directory does not exist: {root}")
         dates = pd.date_range(start_date, end_date, freq="D")
@@ -55,9 +59,9 @@ class NSIDCObservations:
         return files
 
     def load_daily(self, start_date: str | None = None, end_date: str | None = None, hemisphere: str | None = None) -> xr.Dataset:
-        start_date = start_date or self.run.start_date
-        end_date = end_date or self.run.end_date
-        hemi = self.canonical_hemisphere(hemisphere or self.run.hemisphere)
+        start_date = start_date or self.run_cfg.start_date
+        end_date = end_date or self.run_cfg.end_date
+        hemi = self.canonical_hemisphere(hemisphere or self.run_cfg.hemisphere)
         key = (start_date, end_date, hemi)
         if key in self._cache:
             return self._cache[key]
@@ -65,7 +69,7 @@ class NSIDCObservations:
         self.logger.info("Opening %s NSIDC daily files for %s hemisphere", len(files), hemi)
 
         def _prep(ds: xr.Dataset) -> xr.Dataset:
-            keep = [v for v in (self.observations.nsidc_sic_var,) if v in ds]
+            keep = [v for v in (self.obs_cfg.nsidc_sic_var,) if v in ds]
             return ds[keep] if keep else ds
         ds = xr.open_mfdataset(files, combine="by_coords", parallel=True, preprocess=_prep, chunks=self.chunks)
         latlon = xr.open_dataset(self.latlon_file(hemi))[["latitude", "longitude"]]
@@ -76,8 +80,8 @@ class NSIDCObservations:
 
     def compute_sia_sie(self, start_date: str | None = None, end_date: str | None = None, hemisphere: str | None = None, threshold: float | None = None) -> xr.Dataset:
         ds = self.load_daily(start_date=start_date, end_date=end_date, hemisphere=hemisphere)
-        sic = ds[self.observations.nsidc_sic_var].astype("float32")
-        mask = sic >= float(threshold if threshold is not None else self.observations.nsidc_threshold)
+        sic = ds[self.obs_cfg.nsidc_sic_var].astype("float32")
+        mask = sic >= float(threshold if threshold is not None else self.obs_cfg.nsidc_threshold)
         area = ds["cell_area"].astype("float64")
         sia = (sic.where(mask, 0.0) * area).sum(dim=("y", "x")) / 1e12
         sie = (mask.astype("float32") * area).sum(dim=("y", "x")) / 1e12
@@ -87,4 +91,4 @@ class NSIDCObservations:
         return out
 
 
-SeaIceNSIDC = NSIDCObservations
+SeaIceNSIDC = NSIDCObservations 

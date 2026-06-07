@@ -30,20 +30,20 @@ Implementation ownership:
 _CANONICAL_METHODS = ("raw", "binary-days", "rolling-mean")
 LOGGER             = resolve_logger(None, name="shuga.io.zarr_loading")
 
-def _with_current_context(run, classify, metrics, plotting, observations, paths, chunks):
+def _with_current_context(run_cfg, cls_cfg, met_cfg, plt_cfg, obs_cfg, pth_cfg, chunks):
     """
     Fill missing loader arguments from the active shuga context.
 
     Explicit arguments passed to the loader always win over the context.
     """
     ctx = get_current_context()
-    return (run          if run          is not None else ctx.run,
-            classify     if classify     is not None else ctx.classify,
-            metrics      if metrics      is not None else ctx.metrics,
-            plotting     if plotting     is not None else ctx.plotting,
-            observations if observations is not None else ctx.observations,
-            paths        if paths        is not None else ctx.paths,
-            chunks       if chunks       is not None else ctx.chunks)
+    return (run_cfg if run_cfg is not None else ctx.run_cfg,
+            cls_cfg if cls_cfg is not None else ctx.cls_cfg,
+            met_cfg if met_cfg is not None else ctx.met_cfg,
+            plt_cfg if plt_cfg is not None else ctx.plt_cfg,
+            obs_cfg if obs_cfg is not None else ctx.obs_cfg,
+            pth_cfg if pth_cfg is not None else ctx.pth_cfg,
+            chunks  if chunks  is not None else ctx.chunks)
 
 def _maybe_listify_variables(variables) -> list[str] | None:
     if variables is None:
@@ -95,7 +95,7 @@ def _apply_hemisphere_mask(ds: xr.Dataset, hemisphere: str | None) -> xr.Dataset
     mask = lat < 0 if hemi == "SH" else lat > 0
     return ds.where(mask)
 
-def _resolve_run_context(run: RunSpec | None = None, *,
+def _resolve_run_context(run_cfg: RunSpec | None = None, *,
                          sim_name: str | None = None,
                          dt0_str: str | None = None,
                          dtN_str: str | None = None,
@@ -104,18 +104,18 @@ def _resolve_run_context(run: RunSpec | None = None, *,
                          project: str | None = None,
                          user: str | None = None) -> tuple[RunSpec, str | None, str | None, str | None]:
     LOGGER.info("Resolving run context.")
-    if run is not None:
-        sim_name_eff       = sim_name or run.sim_name
-        dt0_eff            = dt0_str or run.start_date
-        dtN_eff            = dtN_str or run.end_date
-        hemisphere_eff     = hemisphere or run.hemisphere
-        project_eff        = project or run.project
-        user_eff           = user or run.user
-        iceh_frequency_eff = iceh_frequency or getattr(run, "iceh_frequency", "daily")
+    if run_cfg is not None:
+        sim_name_eff       = sim_name or run_cfg.sim_name
+        dt0_eff            = dt0_str or run_cfg.start_date
+        dtN_eff            = dtN_str or run_cfg.end_date
+        hemisphere_eff     = hemisphere or run_cfg.hemisphere
+        project_eff        = project or run_cfg.project
+        user_eff           = user or run_cfg.user
+        iceh_frequency_eff = iceh_frequency or getattr(run_cfg, "iceh_frequency", "daily")
     else:
         sim_name_eff = sim_name
         if sim_name_eff is None:
-            raise ValueError("A simulation context is required. Pass sim_name='...' or run=RunSpec(...).")
+            raise ValueError("A simulation context is required. Pass sim_name='...' or run_cfg=RunSpec(...).")
         dt0_eff            = dt0_str
         dtN_eff            = dtN_str
         hemisphere_eff     = hemisphere or _default_value(RunSpec, "hemisphere")
@@ -134,7 +134,7 @@ def _resolve_run_context(run: RunSpec | None = None, *,
                       iceh_frequency = iceh_frequency_eff)
     return run_eff, dt0_eff, dtN_eff, hemisphere_eff
 
-def _resolve_classify_context(classify: ClassificationSpec | None = None, *,
+def _resolve_classify_context(cls_cfg: ClassificationSpec | None = None, *,
                               classification: str | None = None,
                               grid_type: str | None = None,
                               ice_type: str | None = None,
@@ -143,7 +143,7 @@ def _resolve_classify_context(classify: ClassificationSpec | None = None, *,
                               bin_min_days: int | None = None,
                               roll_window: int | None = None) -> ClassificationSpec:
     LOGGER.info("Resolving classification context.")
-    classify_eff = classify or ClassificationSpec()
+    classify_eff = cls_cfg or ClassificationSpec()
     if isinstance(classify_eff.methods, str):
         methods = (classify_eff.methods,)
     else:
@@ -159,45 +159,43 @@ def _resolve_classify_context(classify: ClassificationSpec | None = None, *,
                    roll_window  = int(roll_window if roll_window is not None else classify_eff.roll_window),
                    methods      = methods)
 
-def _build_paths(*, run: RunSpec,
-                 classify: ClassificationSpec | None = None,
-                 metrics: MetricsSpec | None = None,
-                 plotting: PlottingSpec | None = None,
-                 observations: ObservationSpec | None = None,
-                 paths: ShugaPaths | None = None,
-                 afim_output_root: str | Path | None = None,
-                 graphics_root: str | Path | None = None,
-                 logs_root: str | Path | None = None,
-                 cice_store: str | Path | None = None,
-                 static_store: str | Path | None = None,
+def _build_paths(*, run_cfg: RunSpec,
+                 cls_cfg            : ClassificationSpec | None = None,
+                 met_cfg            : MetricsSpec | None = None,
+                 plt_cfg            : PlottingSpec | None = None,
+                 obs_cfg            : ObservationSpec | None = None,
+                 pth_cfg            : ShugaPaths | None = None,
+                 afim_output_root   : str | Path | None = None,
+                 graphics_root      : str | Path | None = None,
+                 logs_root          : str | Path | None = None,
+                 cice_store         : str | Path | None = None,
+                 static_store       : str | Path | None = None,
                  classification_root: str | Path | None = None) -> ShugaPaths:
     LOGGER.info("Building ShugaPaths.")
-    base_classify = classify or (paths.classify if paths is not None else ClassificationSpec())
-    return ShugaPaths(run                 = run,
-                      classify            = base_classify,
-                      metrics             = metrics or (paths.metrics if paths is not None else None),
-                      plotting            = plotting or (paths.plotting if paths is not None else None),
-                      observations        = observations or (paths.observations if paths is not None else None),
-                      wave_forcing        = (paths.wave_forcing if paths is not None else None),
-                      cice_grid           = (paths.cice_grid if paths is not None else None),
-                      lateral_drag        = (paths.lateral_drag if paths is not None else None),
-                      afim_output_root    = afim_output_root if afim_output_root is not None else (paths.afim_output_root if paths is not None else None),
-                      graphics_root       = graphics_root if graphics_root is not None else (paths.graphics_root if paths is not None else None),
-                      logs_root           = logs_root if logs_root is not None else (paths.logs_root if paths is not None else None),
-                      cice_store          = cice_store if cice_store is not None else (paths.cice_store if paths is not None else None),
-                      static_store        = static_store if static_store is not None else (paths.static_store if paths is not None else None),
-                      classification_root = (classification_root
-                                             if classification_root is not None
-                                             else (paths.classification_root if paths is not None else None)),
-                      archive_root        = (paths.archive_root if paths is not None else None))
+    base_cls_cfg = cls_cfg or (pth_cfg.cls_cfg if pth_cfg is not None else ClassificationSpec())
+    return ShugaPaths(run_cfg             = run_cfg,
+                      cls_cfg             = base_cls_cfg,
+                      met_cfg             = met_cfg or (pth_cfg.met_cfg if pth_cfg is not None else None),
+                      plt_cfg             = plt_cfg or (pth_cfg.plt_cfg if pth_cfg is not None else None),
+                      obs_cfg             = obs_cfg or (pth_cfg.obs_cfg if pth_cfg is not None else None),
+                      wave_frcg_cfg       = (pth_cfg.wave_frcg_cfg if pth_cfg is not None else None),
+                      G_cice_cfg          = (pth_cfg.G_cice_cfg if pth_cfg is not None else None),
+                      LD_cfg              = (pth_cfg.LD_cfg if pth_cfg is not None else None),
+                      afim_output_root    = afim_output_root if afim_output_root is not None else (pth_cfg.afim_output_root if pth_cfg is not None else None),
+                      graphics_root       = graphics_root if graphics_root is not None else (pth_cfg.graphics_root if pth_cfg is not None else None),
+                      logs_root           = logs_root if logs_root is not None else (pth_cfg.logs_root if pth_cfg is not None else None),
+                      cice_store          = cice_store if cice_store is not None else (pth_cfg.cice_store if pth_cfg is not None else None),
+                      static_store        = static_store if static_store is not None else (pth_cfg.static_store if pth_cfg is not None else None),
+                      classification_root = (classification_root if classification_root is not None else (pth_cfg.classification_root if pth_cfg is not None else None)),
+                      archive_root        = (pth_cfg.archive_root if pth_cfg is not None else None))
 
-def _method_candidates(classify: ClassificationSpec, explicit_classification: str | None) -> list[str]:
+def _method_candidates(cls_cfg: ClassificationSpec, explicit_classification: str | None) -> list[str]:
     if explicit_classification is not None:
         return [normalize_method(explicit_classification)]
-    if isinstance(classify.methods, str):
-        methods = (classify.methods,)
+    if isinstance(cls_cfg.methods, str):
+        methods = (cls_cfg.methods,)
     else:
-        methods = tuple(classify.methods or ())
+        methods = tuple(cls_cfg.methods or ())
     if len(methods) == 1:
         return [normalize_method(methods[0])]
     if len(methods) > 1:
@@ -205,17 +203,17 @@ def _method_candidates(classify: ClassificationSpec, explicit_classification: st
     return list(_CANONICAL_METHODS)
 
 def _resolved_store_to_dict(resolved: ResolvedStore) -> dict[str, Any]:
-    return {"sim_name": resolved.sim_name,
-            "method": resolved.method,
+    return {"sim_name"      : resolved.sim_name,
+            "method"        : resolved.method,
             "classification": resolved.method,  # backwards-compatible key
-            "grid_type": resolved.grid_type,
-            "store_kind": resolved.store_kind,
-            "path": resolved.path}
+            "grid_type"     : resolved.grid_type,
+            "store_kind"    : resolved.store_kind,
+            "path"          : resolved.path}
 
-def _resolve_store_with_method_candidates(*, locator: CICEStoreLocator, sim_name: str, classify: ClassificationSpec,
+def _resolve_store_with_method_candidates(*, locator: CICEStoreLocator, sim_name: str, cls_cfg: ClassificationSpec,
                                           classification: str | None, store_kind: str, selection: StoreSelection,
                                           project: str | None, user: str | None) -> ResolvedStore:
-    methods = _method_candidates(classify, classification)
+    methods = _method_candidates(cls_cfg, classification)
     matches: list[ResolvedStore] = []
     not_found: list[str] = []
     for method in methods:
@@ -242,20 +240,24 @@ def _resolve_store_with_method_candidates(*, locator: CICEStoreLocator, sim_name
                      "grid_type='Tb'/'Tc'.\n"
                      f"{match_lines}")
 
-def load_cice(run: RunSpec | None = None, classify: ClassificationSpec | None = None, metrics: MetricsSpec | None = None,
-              plotting: PlottingSpec | None = None, observations: ObservationSpec | None = None, paths: ShugaPaths | None = None, *,
-              sim_name: str | None = None,
-              dt0_str: str | None = None,
-              dtN_str: str | None = None,
+def load_cice(run_cfg         : RunSpec | None = None,
+              cls_cfg         : ClassificationSpec | None = None,
+              met_cfg         : MetricsSpec | None = None,
+              plt_cfg         : PlottingSpec | None = None,
+              obs_cfg         : ObservationSpec | None = None,
+              pth_cfg         : ShugaPaths | None = None, *,
+              sim_name        : str | None = None,
+              dt0_str         : str | None = None,
+              dtN_str         : str | None = None,
               variables = None,
-              hemisphere: str | None = None,
-              project: str | None = None,
-              user: str | None = None,
-              iceh_frequency: str | None = None,
+              hemisphere      : str | None = None,
+              project         : str | None = None,
+              user            : str | None = None,
+              iceh_frequency  : str | None = None,
               afim_output_root: str | Path | None = None,
-              cice_store: str | Path | None = None,
-              static_store: str | Path | None = None,
-              chunks: dict | None = None) -> xr.Dataset:
+              cice_store      : str | Path | None = None,
+              static_store    : str | Path | None = None,
+              chunks          : dict | None = None) -> xr.Dataset:
     """
     Load CICE history through IceHistoryLoader.
 
@@ -263,11 +265,11 @@ def load_cice(run: RunSpec | None = None, classify: ClassificationSpec | None = 
     loading, static/dynamic variable splitting, static-store merging, and final
     CICE-history variable subsetting are owned by IceHistoryLoader.
     """
-    run, classify, metrics, plotting, observations, paths, chunks = _with_current_context(run, classify, metrics, plotting, observations, paths, chunks)
+    run_cfg, cls_cfg, met_cfg, plt_cfg, obs_cfg, pth_cfg, chunks = _with_current_context(run_cfg, cls_cfg, met_cfg, plt_cfg, obs_cfg, pth_cfg, chunks)
     variables_list = _maybe_listify_variables(variables)
     if variables_list is None:
         LOGGER.warning("load_cice() called with variables=None; this can be expensive for long periods.")
-    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run,
+    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run_cfg,
                                                                      sim_name       = sim_name,
                                                                      dt0_str        = dt0_str,
                                                                      dtN_str        = dtN_str,
@@ -275,17 +277,17 @@ def load_cice(run: RunSpec | None = None, classify: ClassificationSpec | None = 
                                                                      iceh_frequency = iceh_frequency,
                                                                      project        = project,
                                                                      user           = user)
-    classify_eff = classify or (paths.classify if paths is not None else ClassificationSpec())
-    paths_eff = _build_paths(run              = run_eff,
-                             classify         = classify_eff,
-                             metrics          = metrics,
-                             plotting         = plotting,
-                             observations     = observations,
-                             paths            = paths,
-                             afim_output_root = afim_output_root,
-                             cice_store       = cice_store,
-                             static_store     = static_store)
-    loader = IceHistoryLoader(paths_eff, logger=LOGGER)
+    classify_eff = cls_cfg or (pth_cfg.cls_cfg if pth_cfg is not None else ClassificationSpec())
+    paths_eff    = _build_paths(run_cfg          = run_eff,
+                                cls_cfg          = classify_eff,
+                                met_cfg          = met_cfg,
+                                plt_cfg          = plt_cfg,
+                                obs_cfg          = obs_cfg,
+                                pth_cfg          = pth_cfg,
+                                afim_output_root = afim_output_root,
+                                cice_store       = cice_store,
+                                static_store     = static_store)
+    loader       = IceHistoryLoader(paths_eff, logger = LOGGER)
     return loader.load(dt0_str      = dt0_eff,
                        dtN_str      = dtN_eff,
                        variables    = variables_list,
@@ -294,12 +296,12 @@ def load_cice(run: RunSpec | None = None, classify: ClassificationSpec | None = 
                        static_store = static_store,
                        chunks       = chunks)
 
-def load_classified(run                : RunSpec | None = None,
-                    classify           : ClassificationSpec | None = None,
-                    metrics            : MetricsSpec | None = None,
-                    plotting           : PlottingSpec | None = None,
-                    observations       : ObservationSpec | None = None,
-                    paths              : ShugaPaths | None = None, *,
+def load_classified(run_cfg            : RunSpec | None = None,
+                    cls_cfg            : ClassificationSpec | None = None,
+                    met_cfg            : MetricsSpec | None = None,
+                    plt_cfg            : PlottingSpec | None = None,
+                    obs_cfg            : ObservationSpec | None = None,
+                    pth_cfg            : ShugaPaths | None = None, *,
                     classification     : str | None = None,
                     sim_name           : str | None = None,
                     dt0_str            : str | None = None,
@@ -324,50 +326,50 @@ def load_classified(run                : RunSpec | None = None,
 
     Store discovery is delegated to CICES
     """
-    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run,
-                                                                     sim_name=sim_name,
-                                                                     dt0_str=dt0_str,
-                                                                     dtN_str=dtN_str,
-                                                                     hemisphere=hemisphere,
-                                                                     project=project,
-                                                                     user=user)
+    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run_cfg,
+                                                                     sim_name   = sim_name,
+                                                                     dt0_str    = dt0_str,
+                                                                     dtN_str    = dtN_str,
+                                                                     hemisphere = hemisphere,
+                                                                     project    = project,
+                                                                     user       = user)
     variables_list = _maybe_listify_variables(variables)
-    grid_type_eff = (grid_type_map or {}).get(run_eff.sim_name, grid_type)
-    classify_eff = _resolve_classify_context(classify or (paths.classify if paths is not None else None),
-                                             classification=classification,
-                                             grid_type=grid_type_eff,
-                                             ice_type=ice_type,
-                                             ispd_thresh=ispd_thresh,
-                                             bin_window=bin_window,
-                                             bin_min_days=bin_min_days,
-                                             roll_window=roll_window)
-    paths_eff = _build_paths(run=run_eff,
-                             classify=classify_eff,
-                             metrics=metrics,
-                             plotting=plotting,
-                             observations=observations,
-                             paths=paths,
-                             afim_output_root=afim_output_root,
-                             classification_root=classification_root)
-    locator = CICEStoreLocator(run=run_eff,
-                               classify=classify_eff,
-                               metrics=metrics,
-                               plotting=plotting,
-                               observations=observations,
-                               paths=paths_eff,
-                               logger=LOGGER)
-    selection = StoreSelection(grid_type=grid_type, grid_type_map=grid_type_map)
-    resolved = _resolve_store_with_method_candidates(locator=locator,
-                                                     sim_name=run_eff.sim_name,
-                                                     classify=classify_eff,
-                                                     classification=classification,
-                                                     store_kind="classification",
-                                                     selection=selection,
-                                                     project=project,
-                                                     user=user)
+    grid_type_eff  = (grid_type_map or {}).get(run_eff.sim_name, grid_type)
+    classify_eff   = _resolve_classify_context(cls_cfg or (pth_cfg.cls_cfg if pth_cfg is not None else None),
+                                               classification = classification,
+                                               grid_type      = grid_type_eff,
+                                               ice_type       = ice_type,
+                                               ispd_thresh    = ispd_thresh,
+                                               bin_window     = bin_window,
+                                               bin_min_days   = bin_min_days,
+                                               roll_window    = roll_window)
+    paths_eff      = _build_paths(run_cfg             = run_eff,
+                                  cls_cfg             = classify_eff,
+                                  met_cfg             = met_cfg,
+                                  plt_cfg             = plt_cfg,
+                                  obs_cfg             = obs_cfg,
+                                  pth_cfg             = pth_cfg,
+                                  afim_output_root    = afim_output_root,
+                                  classification_root = classification_root)
+    locator        = CICEStoreLocator(run_cfg = run_eff,
+                                      cls_cfg = classify_eff,
+                                      met_cfg = met_cfg,
+                                      plt_cfg = plt_cfg,
+                                      obs_cfg = obs_cfg,
+                                      pth_cfg = paths_eff,
+                                      logger  = LOGGER)
+    selection      = StoreSelection(grid_type = grid_type, grid_type_map = grid_type_map)
+    resolved       = _resolve_store_with_method_candidates(locator        = locator,
+                                                           sim_name       = run_eff.sim_name,
+                                                           cls_cfg        = classify_eff,
+                                                           classification = classification,
+                                                           store_kind     = "classification",
+                                                           selection      = selection,
+                                                           project        = project,
+                                                           user           = user)
     LOGGER.info("Opening classified store for %s [%s/%s]: %s", run_eff.sim_name, resolved.grid_type, resolved.method, resolved.path)
-    ds = xr.open_zarr(resolved.path, consolidated=False, chunks=chunks)
-    domain = str(classify_eff.ice_type).strip().upper()
+    ds            = xr.open_zarr(resolved.path, consolidated = False, chunks = chunks)
+    domain        = str(classify_eff.ice_type).strip().upper()
     expected_mask = f"{domain}_mask"
     # Backward-compatible rename only when there is a single anonymous/legacy var.
     if expected_mask not in ds.data_vars and len(ds.data_vars) == 1:
@@ -392,31 +394,31 @@ def load_classified(run                : RunSpec | None = None,
         return ds, _resolved_store_to_dict(resolved)
     return ds
 
-def load_metrics(run: RunSpec | None = None,
-                 classify: ClassificationSpec | None = None,
-                 metrics: MetricsSpec | None = None,
-                 plotting: PlottingSpec | None = None,
-                 observations: ObservationSpec | None = None,
-                 paths: ShugaPaths | None = None, *,
-                 classification: str | None = None,
-                 sim_name: str | None = None,
-                 dt0_str: str | None = None,
-                 dtN_str: str | None = None,
-                 variables=None,
-                 hemisphere: str | None = None,
-                 project: str | None = None,
-                 user: str | None = None,
-                 grid_type: str | None = None,
-                 grid_type_map: dict[str, str] | None = None,
-                 ice_type: str | None = None,
-                 ispd_thresh: float | None = None,
-                 bin_window: int | None = None,
-                 bin_min_days: int | None = None,
-                 roll_window: int | None = None,
-                 afim_output_root: str | Path | None = None,
+def load_metrics(run_cfg            : RunSpec | None = None,
+                 cls_cfg            : ClassificationSpec | None = None,
+                 met_cfg            : MetricsSpec | None = None,
+                 plt_cfg            : PlottingSpec | None = None,
+                 obs_cfg            : ObservationSpec | None = None,
+                 pth_cfg            : ShugaPaths | None = None, *,
+                 classification     : str | None = None,
+                 sim_name           : str | None = None,
+                 dt0_str            : str | None = None,
+                 dtN_str            : str | None = None,
+                 variables = None,
+                 hemisphere         : str | None = None,
+                 project            : str | None = None,
+                 user               : str | None = None,
+                 grid_type          : str | None = None,
+                 grid_type_map      : dict[str, str] | None = None,
+                 ice_type           : str | None = None,
+                 ispd_thresh        : float | None = None,
+                 bin_window         : int | None = None,
+                 bin_min_days       : int | None = None,
+                 roll_window        : int | None = None,
+                 afim_output_root   : str | Path | None = None,
                  classification_root: str | Path | None = None,
-                 chunks: dict | None = None,
-                 return_resolved: bool = False):
+                 chunks             : dict | None = None,
+                 return_resolved    : bool = False):
     """
     Load method-specific metrics from mets.zarr.
 
@@ -424,72 +426,54 @@ def load_metrics(run: RunSpec | None = None,
     overlap-aware because rolling/windowed metrics can have different available
     bounds from the requested run window.
     """
-    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(
-        run,
-        sim_name=sim_name,
-        dt0_str=dt0_str,
-        dtN_str=dtN_str,
-        hemisphere=hemisphere,
-        project=project,
-        user=user,
-    )
+    run_eff, dt0_eff, dtN_eff, hemisphere_eff = _resolve_run_context(run_cfg,
+                                                                     sim_name   = sim_name,
+                                                                     dt0_str    = dt0_str,
+                                                                     dtN_str    = dtN_str,
+                                                                     hemisphere = hemisphere,
+                                                                     project    = project,
+                                                                     user       = user)
     variables_list = _maybe_listify_variables(variables)
-    grid_type_eff = (grid_type_map or {}).get(run_eff.sim_name, grid_type)
-    classify_eff = _resolve_classify_context(
-        classify or (paths.classify if paths is not None else None),
-        classification=classification,
-        grid_type=grid_type_eff,
-        ice_type=ice_type,
-        ispd_thresh=ispd_thresh,
-        bin_window=bin_window,
-        bin_min_days=bin_min_days,
-        roll_window=roll_window,
-    )
-    paths_eff = _build_paths(
-        run=run_eff,
-        classify=classify_eff,
-        metrics=metrics,
-        plotting=plotting,
-        observations=observations,
-        paths=paths,
-        afim_output_root=afim_output_root,
-        classification_root=classification_root,
-    )
-    locator = CICEStoreLocator(
-        run=run_eff,
-        classify=classify_eff,
-        metrics=metrics,
-        plotting=plotting,
-        observations=observations,
-        paths=paths_eff,
-        logger=LOGGER,
-    )
-    selection = StoreSelection(grid_type=grid_type, grid_type_map=grid_type_map)
-    resolved = _resolve_store_with_method_candidates(
-        locator=locator,
-        sim_name=run_eff.sim_name,
-        classify=classify_eff,
-        classification=classification,
-        store_kind="metrics",
-        selection=selection,
-        project=project,
-        user=user,
-    )
-    LOGGER.info(
-        "Opening metrics store for %s [%s/%s]: %s",
-        run_eff.sim_name,
-        resolved.grid_type,
-        resolved.method,
-        resolved.path,
-    )
+    grid_type_eff  = (grid_type_map or {}).get(run_eff.sim_name, grid_type)
+    classify_eff   = _resolve_classify_context(cls_cfg or (pth_cfg.cls_cfg if pth_cfg is not None else None),
+                                               classification = classification,
+                                               grid_type      = grid_type_eff,
+                                               ice_type       = ice_type,
+                                               ispd_thresh    = ispd_thresh,
+                                               bin_window     = bin_window,
+                                               bin_min_days   = bin_min_days,
+                                               roll_window    = roll_window)
+
+    paths_eff      = _build_paths(run_cfg             = run_eff,
+                                  cls_cfg             = classify_eff,
+                                  met_cfg             = met_cfg,
+                                  plt_cfg             = plt_cfg,
+                                  obs_cfg             = obs_cfg,
+                                  pth_cfg             = pth_cfg,
+                                  afim_output_root    = afim_output_root,
+                                  classification_root = classification_root)
+    locator        = CICEStoreLocator(run_cfg = run_eff,
+                                      cls_cfg = classify_eff,
+                                      met_cfg = met_cfg,
+                                      plt_cfg = plt_cfg,
+                                      obs_cfg = obs_cfg,
+                                      pth_cfg = paths_eff,
+                                      logger  = LOGGER)
+    selection      = StoreSelection(grid_type = grid_type, grid_type_map = grid_type_map)
+    resolved       = _resolve_store_with_method_candidates(locator        = locator,
+                                                           sim_name       = run_eff.sim_name,
+                                                           cls_cfg        = classify_eff,
+                                                           classification = classification,
+                                                           store_kind     = "metrics",
+                                                           selection      = selection,
+                                                           project        = project,
+                                                           user           = user)
+    LOGGER.info("Opening metrics store for %s [%s/%s]: %s", run_eff.sim_name, resolved.grid_type, resolved.method, resolved.path)
     ds = xr.open_zarr(resolved.path, consolidated=False, chunks=chunks)
     if variables_list is not None:
         keep = [v for v in variables_list if v in ds.data_vars or v in ds.coords]
         if not keep:
-            raise ValueError(
-                f"None of the requested metrics variables were found in "
-                f"{resolved.path}: {variables_list}"
-            )
+            raise ValueError(f"None of the requested metrics variables were found in {resolved.path}: {variables_list}")
         ds = ds[keep]
     ds = _apply_hemisphere_mask(ds, hemisphere_eff)
     ds = _slice_time_overlap(ds, dt0_eff, dtN_eff)

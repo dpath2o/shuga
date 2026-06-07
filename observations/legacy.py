@@ -27,23 +27,27 @@ class SeaIceObservations:
     ``NSIDCObservations`` directly.
     """
 
-    def __init__(self, run: RunSpec, observations: ObservationSpec | None = None, paths: ShugaPaths | None = None, *,
-                 chunks: dict | None = None, logger = None) -> None:
-        self.run          = run
-        self.observations = observations or ObservationSpec()
-        self.paths        = paths or ShugaPaths(run=run, classify=None, observations=self.observations)  # type: ignore[arg-type]
-        self.chunks       = chunks or {"time": 31}
-        self.logger       = logger or build_file_logger("shuga.observations.legacy", Path.home() / "logs" / "observations" / "shuga_observations_legacy.log")
-        self.nsidc        = NSIDCObservations(run          = self.run,
-                                              observations = self.observations,
-                                              paths        = self.paths,
-                                              chunks       = self.chunks,
-                                              logger       = self.logger)
-        self.af2020       = AF2020Observations(run          = self.run,
-                                               observations = self.observations,
-                                               paths        = self.paths,
-                                               chunks       = self.chunks,
-                                               logger       = self.logger)
+    def __init__(self,
+                 run_cfg: RunSpec,
+                 obs_cfg: ObservationSpec | None = None,
+                 pth_cfg: ShugaPaths | None = None, *,
+                 chunks : dict | None = None,
+                 logger = None) -> None:
+        self.run_cfg = run_cfg
+        self.obs_cfg = obs_cfg or ObservationSpec()
+        self.pth_cfg = pth_cfg or ShugaPaths(run_cfg = run_cfg, classify = None, obs_cfg = self.obs_cfg)  # type: ignore[arg-type]
+        self.chunks  = chunks or {"time": 31}
+        self.logger  = logger or build_file_logger("shuga.observations.legacy", Path.home() / "logs" / "observations" / "shuga_observations_legacy.log")
+        self.nsidc   = NSIDCObservations(run_cfg = self.run_cfg,
+                                         obs_cfg = self.obs_cfg,
+                                         pth_cfg = self.pth_cfg,
+                                         chunks  = self.chunks,
+                                         logger  = self.logger)
+        self.af2020  = AF2020Observations(run_cfg = self.run_cfg,
+                                          obs_cfg = self.obs_cfg,
+                                          pth_cfg = self.pth_cfg,
+                                          chunks  = self.chunks,
+                                          logger  = self.logger)
         # Preserve the old cache attribute names for any external callers that
         # inspect them. The delegated classes hold the actual NSIDC cache.
         self._nsidc_cache = self.nsidc._cache
@@ -109,7 +113,7 @@ class SeaIceObservations:
     def load_af2020_regridded(self) -> xr.Dataset:
         key = "af2020_regridded"
         if key not in self._af2020_cache:
-            path = self.paths.fi_obs_root_path / self.observations.af2020_regridded_store
+            path = self.pth_cfg.fi_obs_root_path / self.obs_cfg.af2020_regridded_store
             if not path.exists():
                 raise FileNotFoundError(f"AF2020 regridded store does not exist: {path}")
             self._af2020_cache[key] = xr.open_zarr(path, consolidated = False, chunks = self.chunks)
@@ -118,7 +122,7 @@ class SeaIceObservations:
     def load_af2020_climatology(self) -> xr.Dataset:
         key = "af2020_clim"
         if key not in self._af2020_cache:
-            path = self.paths.fi_obs_root_path / self.observations.af2020_climatology_store
+            path = self.pth_cfg.fi_obs_root_path / self.obs_cfg.af2020_climatology_store
             if not path.exists():
                 raise FileNotFoundError(f"AF2020 climatology store does not exist: {path}")
             self._af2020_cache[key] = xr.open_zarr(path, consolidated=True if (path / ".zmetadata").exists() else False, chunks = self.chunks)
@@ -131,12 +135,12 @@ class SeaIceObservations:
     def compute_af2020_fia_from_regridded(self, area: xr.DataArray, var_name: str | None = None) -> xr.Dataset:
         ds       = self.load_af2020_regridded()
         area2d   = self._ensure_2d_area(area)
-        var_name = var_name or self.observations.af2020_regridded_var
+        var_name = var_name or self.obs_cfg.af2020_regridded_var
         if var_name not in ds:
             raise KeyError(f"Variable {var_name!r} not found in AF2020 regridded store.")
         da = ds[var_name]
-        if self.observations.af2020_time_var in da.dims:
-            da = da.rename({self.observations.af2020_time_var: "time"})
+        if self.obs_cfg.af2020_time_var in da.dims:
+            da = da.rename({self.obs_cfg.af2020_time_var: "time"})
         mask         = da > 0
         spatial_dims = [d for d in mask.dims if d != "time"]
         fia          = (mask.astype("float32") * area2d).sum(dim=spatial_dims, skipna=True) / 1e9
@@ -160,8 +164,8 @@ class SeaIceObservations:
         This is copied from the previous mixed SeaIceObservations API because
         some plotting paths used it generically for observation climatologies.
         """
-        start_date = start_date or self.run.start_date
-        end_date   = end_date or self.run.end_date
+        start_date = start_date or self.run_cfg.start_date
+        end_date   = end_date or self.run_cfg.end_date
         if clim.name == "FIA_clim" or clim.attrs.get("long_name", "").startswith("Observed Fast Ice Area"):
             t = pd.date_range(start_date, end_date, freq="D")
             if "doy" not in clim.dims and "doy" not in clim.coords:

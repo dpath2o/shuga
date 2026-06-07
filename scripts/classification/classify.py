@@ -38,19 +38,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bin-min-days", type=int, default=9)
     p.add_argument("--roll-window", type=int, default=15)
     p.add_argument("--aice-thresh", type=float, default=0.15)
-    p.add_argument("--iceh-frequency",
-                   choices=["daily", "hourly"],
-                   default="daily",
-                   help="CICE history frequency. daily -> iceh_daily.zarr/YYYY-MM; hourly -> iceh_hourly.zarr/YYYY_MM_DD.")
-    p.add_argument("--hourly-root",
-                   default=None,
-                   help="Optional root containing hourly CICE NetCDF files, e.g. ~/AFIM_archive/SIM/history/hourly.")
-    p.add_argument("--chunks-time",
-                   type=int,
-                   default=None,
-                   help="Time chunk size for conversion/loading. Defaults to 31 for daily and 24 for hourly.")
+    p.add_argument("--iceh-frequency", choices = ["daily", "hourly"], default = "daily",
+                   help = "CICE history frequency. daily -> iceh_daily.zarr/YYYY-MM; hourly -> iceh_hourly.zarr/YYYY_MM_DD.")
+    p.add_argument("--hourly-root", default = None,
+                   help = "Optional root containing hourly CICE NetCDF files, e.g. ~/AFIM_archive/SIM/history/hourly.")
+    p.add_argument("--chunks-time", type = int, default = None,
+                   help = "Time chunk size for conversion/loading. Defaults to 31 for daily and 24 for hourly.")
     p.add_argument("--skip-history-conversion",
-                   action="store_true",
+                   action = "store_true",
                    help="Skip NetCDF-to-Zarr conversion and classify from existing iceh_daily/hourly.zarr stores.")
     p.add_argument("--grid-file", default=None)
     p.add_argument("--kmt-file", default=None)
@@ -80,40 +75,40 @@ def main() -> None:
         raise ValueError("The classification workflow must be run with --ice-type FI. "
                          "It writes both FI and PI classification stores from the FI parent mask. "
                          "Use --ice-type PI only in the metrics workflow.")
-    methods      = [normalize_method(m) for m in _comma_split(args.methods)]
-    run          = RunSpec(sim_name       = args.sim_name,
-                           start_date     = args.start_date,
-                           end_date       = args.end_date,
-                           hemisphere     = args.hemisphere,
-                           project        = args.project,
-                           user           = args.user,
-                           iceh_frequency = args.iceh_frequency)
-    classify     = ClassificationSpec(ice_type     = args.ice_type,
-                                      grid_type    = args.grid_type,
-                                      ispd_thresh  = args.ispd_thresh,
-                                      aice_thresh  = args.aice_thresh,
-                                      methods      = tuple(methods),
-                                      bin_window   = args.bin_window,
-                                      bin_min_days = args.bin_min_days,
-                                      roll_window  = args.roll_window)
-    cice_grid    = CICEGridSpec(grid_file       = args.grid_file,
-                                kmt_file        = args.kmt_file,
-                                bathymetry_file = args.bathymetry_file,
-                                f2_file         = args.f2_file,
-                                gridcpl_file    = args.gridcpl_file,
-                                ice_in_file     = args.ice_in_file)
-    paths        = ShugaPaths(run                 = run,
-                              classify            = classify,
-                              afim_output_root    = args.afim_output_root,
-                              cice_store          = args.cice_store,
-                              static_store        = args.static_store,
-                              cice_grid           = cice_grid,
-                              classification_root = args.classification_root,
-                              logs_root           = args.logs_root,
-                              archive_root        = args.archive_root)
-    logger = build_file_logger("shuga.classify", paths.classification_log_path(), level=args.log_level)
-    logger.info("Logging to: %s", paths.classification_log_path())
-    static_store = paths.resolve_static_store()
+    methods    = [normalize_method(m) for m in _comma_split(args.methods)]
+    run_cfg    = RunSpec(sim_name       = args.sim_name,
+                         start_date     = args.start_date,
+                         end_date       = args.end_date,
+                         hemisphere     = args.hemisphere,
+                         project        = args.project,
+                         user           = args.user,
+                         iceh_frequency = args.iceh_frequency)
+    cls_cfg    = ClassificationSpec(ice_type     = args.ice_type,
+                                    grid_type    = args.grid_type,
+                                    ispd_thresh  = args.ispd_thresh,
+                                    aice_thresh  = args.aice_thresh,
+                                    methods      = tuple(methods),
+                                    bin_window   = args.bin_window,
+                                    bin_min_days = args.bin_min_days,
+                                    roll_window  = args.roll_window)
+    G_cice_cfg = CICEGridSpec(grid_file       = args.grid_file,
+                              kmt_file        = args.kmt_file,
+                              bathymetry_file = args.bathymetry_file,
+                              f2_file         = args.f2_file,
+                              gridcpl_file    = args.gridcpl_file,
+                              ice_in_file     = args.ice_in_file)
+    pth_cfg    = ShugaPaths(run_cfg           = run_cfg,
+                            cls_cfg             = cls_cfg,
+                            afim_output_root    = args.afim_output_root,
+                            cice_store          = args.cice_store,
+                            static_store        = args.static_store,
+                            G_cice_cfg          = G_cice_cfg,
+                            classification_root = args.classification_root,
+                            logs_root           = args.logs_root,
+                            archive_root        = args.archive_root)
+    logger = build_file_logger("shuga.cls_cfg", pth_cfg.classification_log_path(), level=args.log_level)
+    logger.info("Logging to: %s", pth_cfg.classification_log_path())
+    static_store = pth_cfg.resolve_static_store()
     if static_store is None:
         logger.warning("No CICE static store resolved. Classification may fail if TLON/TLAT "
                        "or other static fields have been stripped from grouped history zarr.")
@@ -126,12 +121,12 @@ def main() -> None:
                                                            args.gridcpl_file,
                                                            args.ice_in_file))
     if args.persist_grid_assets and has_explicit_grid_assets:
-        cfg = paths.persist_cice_grid_assets(grid_spec=cice_grid, overwrite=True)
+        cfg = pth_cfg.persist_cice_grid_assets(grid_spec=G_cice_cfg, overwrite=True)
         logger.info("Persisted CICE grid assets: %s", cfg)
     elif args.persist_grid_assets:
         logger.warning("--persist-grid-assets requested but no explicit grid assets were provided; "
                        "leaving any existing config unchanged.")
-    grid_assets = paths.resolve_cice_grid_assets()
+    grid_assets = pth_cfg.resolve_cice_grid_assets()
     if grid_assets is None:
         raise RuntimeError("resolve_cice_grid_assets() returned None")
     logger.info("Resolved CICE grid file: %s", grid_assets["grid_file"])
@@ -142,10 +137,10 @@ def main() -> None:
     chunks = {"time": chunks_time}
     if args.skip_history_conversion:
         logger.info("--skip-history-conversion requested; using existing CICE Zarr/static stores.")
-        logger.info("Resolved CICE store target: %s", paths.resolve_cice_store())
-        logger.info("Resolved static store    : %s", paths.resolve_static_store())
+        logger.info("Resolved CICE store target: %s", pth_cfg.resolve_cice_store())
+        logger.info("Resolved static store    : %s", pth_cfg.resolve_static_store())
     else:
-        converter = NC2Zarr(paths         = paths,
+        converter = NC2Zarr(pth_cfg       = pth_cfg,
                             logger        = logger,
                             chunks        = chunks,
                             netcdf_engine = args.netcdf_engine)
@@ -167,13 +162,12 @@ def main() -> None:
                     conv.months_skipped,
                     conv.daily_files_seen,
                     conv.daily_files_used)
-    logger.info("Resolved classification root: %s", paths.classification_root_path)
-    runner = CICEClassifier(run      = run,
-                            classify = classify,
-                            paths    = paths,
-                            chunks   = chunks,
-                            logger   = logger)
-    # runner  = CICEClassifier(run=run, classify=classify, paths=paths, logger=logger)
+    logger.info("Resolved classification root: %s", pth_cfg.classification_root_path)
+    runner = CICEClassifier(run_cfg = run_cfg,
+                            cls_cfg = cls_cfg,
+                            pth_cfg = pth_cfg,
+                            chunks  = chunks,
+                            logger  = logger)
     outputs = runner.run_methods(methods=methods, overwrite=args.overwrite)
     for method, path in outputs.items():
         logger.info("Wrote %s classification: %s", method, path)

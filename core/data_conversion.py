@@ -17,7 +17,6 @@ __all__         = ["NC2Zarr", "NC2ZarrResult"]
 _MONTH_RE       = re.compile(r"^\d{4}-\d{2}$")
 _DATE_RE        = re.compile(r"(\d{4}-\d{2}-\d{2})\.nc$")
 _HOURLY_FILE_RE = re.compile(r"^iceh(?:_inst|_\d{2}h)?\.(\d{4}-\d{2}-\d{2})-(\d{5})\.nc$")
-# _HOURLY_FILE_RE = re.compile(r"^iceh(?:_inst)?\.(\d{4}-\d{2}-\d{2})-(\d{5})\.nc$")
 _DAY_GROUP_RE   = re.compile(r"^\d{4}_\d{2}_\d{2}$")
 
 @dataclass(slots=True)
@@ -40,20 +39,20 @@ class NC2Zarr:
     mask, and geometry fields are written once to ``iceh_static.zarr`` and are
     intended to be merged back in at read time by ``shuga.io.zarr_loading``.
     """
-    def __init__(self, paths: ShugaPaths, *,
+    def __init__(self, pth_cfg: ShugaPaths, *,
                  logger       : logging.Logger | None = None,
                  chunks       : dict           | None = None,
-                 netcdf_engine:                   str = "scipy") -> None:
-        self.paths  = paths
-        self.logger = logger or logging.getLogger(__name__)
-        self.chunks = chunks
+                 netcdf_engine: str = "scipy") -> None:
+        self.pth_cfg        = pth_cfg
+        self.logger        = logger or logging.getLogger(__name__)
+        self.chunks        = chunks
         self.netcdf_engine = netcdf_engine
 
     # ------------------------------------------------------------------
     # helpers:
     # ------------------------------------------------------------------
     def _iceh_frequency(self) -> str:
-        freq = str(getattr(self.paths, "iceh_frequency", getattr(self.paths.run, "iceh_frequency", "daily"))).lower()
+        freq = str(getattr(self.pth_cfg, "iceh_frequency", getattr(self.pth_cfg.run_cfg, "iceh_frequency", "daily"))).lower()
         if freq not in {"daily", "hourly"}:
             raise ValueError(f"Unsupported iceh_frequency={freq!r}; expected 'daily' or 'hourly'.")
         return freq
@@ -200,13 +199,13 @@ class NC2Zarr:
     def _build_iceh_static_dataset_from_grid_assets(self, *,
                                                     assets: dict[str, Path | None],
                                                     metadata_file: Path) -> xr.Dataset:
-        return CICEStaticBuilder(self.paths,logger = self.logger).build_dataset_from_grid_assets(assets = assets, metadata_file = metadata_file)
+        return CICEStaticBuilder(self.pth_cfg,logger = self.logger).build_dataset_from_grid_assets(assets = assets, metadata_file = metadata_file)
 
     def _build_iceh_static_zarr_from_grid_assets(self, *,
                                                  static_store: str | Path | None = None,
                                                  overwrite: bool = False) -> Path | None:
         try:
-            return CICEStaticBuilder(self.paths, logger = self.logger).write_zarr_from_resolved_assets(static_store     = static_store,
+            return CICEStaticBuilder(self.pth_cfg, logger = self.logger).write_zarr_from_resolved_assets(static_store     = static_store,
                                                                                                        overwrite        = overwrite,
                                                                                                        require_metadata = True)
         except Exception as exc:
@@ -316,7 +315,7 @@ class NC2Zarr:
         """
         from shuga.grid.cice import CICEGridwork
 
-        return CICEGridwork(paths=self.paths, logger=self.logger).load_cice_static(P_cice_static_store = static_store,
+        return CICEGridwork(pth_cfg=self.pth_cfg, logger=self.logger).load_cice_static(P_cice_static_store = static_store,
                                                                                    require             = (),
                                                                                    variables           = None,
                                                                                    consolidated        = False,
@@ -412,9 +411,9 @@ class NC2Zarr:
         shifted back by one day.
         """
         engine       = netcdf_engine or self.netcdf_engine
-        hourly_dir   = self.paths.resolve_hourly_iceh_root(hourly_root)
-        cice_store   = self.paths.resolve_cice_store_target()
-        static_store = self.paths.resolve_static_store_target()
+        hourly_dir   = self.pth_cfg.resolve_hourly_iceh_root(hourly_root)
+        cice_store   = self.pth_cfg.resolve_cice_store_target()
+        static_store = self.pth_cfg.resolve_static_store_target()
         result       = NC2ZarrResult(cice_store=cice_store, static_store=static_store)
         cice_store.mkdir(parents=True, exist_ok=True)
         source_files = self._select_hourly_files_between_dates(hourly_dir, dt0_str, dtN_str)
@@ -492,9 +491,9 @@ class NC2Zarr:
           ``overwrite=True``.
         """
         engine       = netcdf_engine or self.netcdf_engine
-        daily_dir    = self.paths.resolve_daily_iceh_root(daily_root)
-        cice_store   = self.paths.resolve_cice_store_target()
-        static_store = self.paths.resolve_static_store_target()
+        daily_dir    = self.pth_cfg.resolve_daily_iceh_root(daily_root)
+        cice_store   = self.pth_cfg.resolve_cice_store_target()
+        static_store = self.pth_cfg.resolve_static_store_target()
         result       = NC2ZarrResult(cice_store=cice_store, static_store=static_store)
         cice_store.mkdir(parents=True, exist_ok=True)
         source_files = self._select_daily_files_between_dates(daily_dir, dt0_str, dtN_str)
@@ -567,7 +566,7 @@ class NC2Zarr:
         2. build from the first matching NetCDF source file;
         3. build a minimal static store from resolved CICE grid assets.
         """
-        static_store = self.paths.resolve_static_store_target()
+        static_store = self.pth_cfg.resolve_static_store_target()
         freq = self._iceh_frequency()
         if static_store.exists() and not overwrite:
             self.logger.info("Static store already exists, skipping: %s", static_store)
@@ -575,7 +574,7 @@ class NC2Zarr:
         if static_store.exists() and overwrite:
             self.logger.info("Overwriting static store: %s", static_store)
             shutil.rmtree(static_store)
-        cice_store = self.paths.resolve_cice_store_target()
+        cice_store = self.pth_cfg.resolve_cice_store_target()
         if cice_store.exists():
             built = self.build_iceh_static_zarr_from_grouped_iceh(cice_store           = cice_store,
                                                                   static_store         = static_store,
@@ -587,14 +586,14 @@ class NC2Zarr:
                 return built
         if freq == "hourly":
             try:
-                source_dir = self.paths.resolve_hourly_iceh_root(hourly_root)
+                source_dir = self.pth_cfg.resolve_hourly_iceh_root(hourly_root)
                 source_files = self._select_hourly_files_between_dates(source_dir, dt0_str, dtN_str)
             except FileNotFoundError as exc:
                 self.logger.warning("Could not inspect hourly NetCDF files for static fields: %s", exc)
                 source_files = []
         else:
             try:
-                source_dir = self.paths.resolve_daily_iceh_root(daily_root)
+                source_dir = self.pth_cfg.resolve_daily_iceh_root(daily_root)
                 source_files = self._select_daily_files_between_dates(source_dir, dt0_str, dtN_str)
             except FileNotFoundError as exc:
                 self.logger.warning("Could not inspect daily NetCDF files for static fields: %s", exc)
@@ -636,8 +635,8 @@ class NC2Zarr:
         if freq not in {"daily", "hourly"}:
             raise ValueError(f"Unsupported frequency={freq!r}")
         group_re     = _DAY_GROUP_RE if freq == "hourly" else _MONTH_RE
-        cice_store   = Path(cice_store).expanduser() if cice_store is not None else self.paths.resolve_cice_store_target()
-        static_store = Path(static_store).expanduser() if static_store is not None else self.paths.resolve_static_store_target()
+        cice_store   = Path(cice_store).expanduser() if cice_store is not None else self.pth_cfg.resolve_cice_store_target()
+        static_store = Path(static_store).expanduser() if static_store is not None else self.pth_cfg.resolve_static_store_target()
         if not cice_store.exists():
             raise FileNotFoundError(f"Grouped CICE store not found: {cice_store}")
         groups = sorted(p.name for p in cice_store.iterdir() if p.is_dir() and group_re.fullmatch(p.name))

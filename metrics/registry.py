@@ -1,5 +1,6 @@
 from __future__ import annotations
 from collections.abc import Iterable
+
 CORE_BASE_NAMES    = ["IA",      #Ice Area
                       "IV",      #Ice Volume
                       "IT",      #Ice Thickness
@@ -162,7 +163,7 @@ def as_list(value: str | Iterable[str] | None) -> list[str]:
         return [v.strip() for v in value.split(",") if v.strip()]
     return [str(v).strip() for v in value if str(v).strip()]
 
-def expand_metric_names(metric_names=None, metric_groups=None, *, default_group: str = "default") -> list[str]:
+def expand_metric_names(metric_names = None, metric_groups = None, *, default_group: str = "default") -> list[str]:
     explicit = as_list(metric_names)
     groups   = as_list(metric_groups)
     if not explicit and not groups:

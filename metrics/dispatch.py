@@ -16,6 +16,22 @@ PRIMARY_METRIC_NAMES = ["FIA", "FIV", "FIT", "FIP", "FIS", "FITVR", "FIMVR", "FI
                         "SIA_by_region", "SIT_by_region"]
 PRIMARY_METRIC_SET   = set(PRIMARY_METRIC_NAMES)
 
+# ------------------------------------------------------------------
+def needs_classified_masks(requested: Iterable[str], fipsi_names: set[str]) -> bool:
+    """
+    Return True when requested metrics require classified FI/PI masks.
+    """
+    return any(name.startswith("FI") or name.startswith("PI")
+               or name.startswith("FIA_") or name.startswith("FIT_")
+               or name in fipsi_names for name in requested)
+
+# ------------------------------------------------------------------
+def needs_fast_ice_mask(requested: Iterable[str], fipsi_names: set[str]) -> bool:
+    """
+    Return True when the requested metric set needs mask is loaded 
+    """
+    return needs_classified_masks(requested, fipsi_names)
+
 @dataclass(slots=True)
 class MetricDispatchContext:
     """
@@ -40,9 +56,9 @@ class MetricDispatcher:
     This replaces the large if/elif block previously embedded inside
     CICEMetrics._compute_requested_metrics().
     """
-    context: MetricDispatchContext
+    context   : MetricDispatchContext
     calculator: object
-    memo: dict[str, xr.DataArray] = field(default_factory=dict)
+    memo      : dict[str, xr.DataArray] = field(default_factory=dict)
 
     def get(self, name: str) -> xr.DataArray | None:
         if name in self.memo:
@@ -212,16 +228,3 @@ class MetricDispatcher:
             return self.memo.get(name)
         return None
 
-def needs_classified_masks(requested: Iterable[str], fipsi_names: set[str]) -> bool:
-    """
-    Return True when requested metrics require classified FI/PI masks.
-    """
-    return any(name.startswith("FI") or name.startswith("PI")
-               or name.startswith("FIA_") or name.startswith("FIT_")
-               or name in fipsi_names for name in requested)
-
-def needs_fast_ice_mask(requested: Iterable[str], fipsi_names: set[str]) -> bool:
-    """
-    Return True when the requested metric set needs mask is loaded 
-    """
-    return needs_classified_masks(requested, fipsi_names)

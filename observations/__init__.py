@@ -18,7 +18,6 @@ NSIDCObs = NSIDCObservations
 # Optional shorter legacy alias, if useful
 SeaIceObs = SeaIceObservations
 
-
 __all__ = [
     "AF2020Spec",
     "AF2020Observations",

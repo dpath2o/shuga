@@ -143,8 +143,8 @@ class SimulationStatusReport:
 # primary function/API of this module:
 #-----------------------------------------------------------------------------------
 def report_sim_status(sim_name        : str | None = None, *,
-                      run             : RunSpec | None = None,
-                      classify        : ClassificationSpec | None = None,
+                      run_cfg             : RunSpec | None = None,
+                      cls_cfg        : ClassificationSpec | None = None,
                       hemisphere      : str | None = None,
                       project         : str | None = None,
                       user            : str | None = None,
@@ -160,50 +160,50 @@ def report_sim_status(sim_name        : str | None = None, *,
 
     This is intended as a lightweight Jupyter-friendly diagnostic entry point.
     """
-    if run is None and not sim_name:
-        raise ValueError("report_sim_status() requires sim_name=... or run=RunSpec(...).")
-    if run is None:
-        run = RunSpec(sim_name   = str(sim_name),
-                      start_date = "1900-01-01",
-                      end_date   = "1900-01-01",
-                      hemisphere = hemisphere or "SH",
-                      project    = project or RunSpec.__dataclass_fields__["project"].default,
-                      user       = user or RunSpec.__dataclass_fields__["user"].default)
+    if run_cfg is None and not sim_name:
+        raise ValueError("report_sim_status() requires sim_name=... or run_cfg=RunSpec(...).")
+    if run_cfg is None:
+        run_cfg = RunSpec(sim_name   = str(sim_name),
+                          start_date = "1900-01-01",
+                          end_date   = "1900-01-01",
+                          hemisphere = hemisphere or "SH",
+                          project    = project or RunSpec.__dataclass_fields__["project"].default,
+                          user       = user or RunSpec.__dataclass_fields__["user"].default)
     else:
-        if sim_name is not None and sim_name != run.sim_name:
-            run = RunSpec(sim_name   = sim_name,
-                          start_date = run.start_date,
-                          end_date   = run.end_date,
-                          hemisphere = hemisphere or run.hemisphere,
-                          project    = project or run.project,
-                          user       = user or run.user)
+        if sim_name is not None and sim_name != run_cfg.sim_name:
+            run_cfg = RunSpec(sim_name   = sim_name,
+                              start_date = run_cfg.start_date,
+                              end_date   = run_cfg.end_date,
+                              hemisphere = hemisphere or run_cfg.hemisphere,
+                              project    = project or run_cfg.project,
+                              user       = user or run_cfg.user)
         elif hemisphere is not None or project is not None or user is not None:
-            run = RunSpec(sim_name   = run.sim_name,
-                          start_date = run.start_date,
-                          end_date   = run.end_date,
-                          hemisphere = hemisphere or run.hemisphere,
-                          project    = project or run.project,
-                          user       = user or run.user)
-    classify_eff = classify or ClassificationSpec()
-    paths        = ShugaPaths(run=run, classify=classify_eff, afim_output_root=afim_output_root)
+            run_cfg = RunSpec(sim_name   = run_cfg.sim_name,
+                              start_date = run_cfg.start_date,
+                              end_date   = run_cfg.end_date,
+                              hemisphere = hemisphere or run_cfg.hemisphere,
+                              project    = project or run_cfg.project,
+                              user       = user or run_cfg.user)
+    classify_eff = cls_cfg or ClassificationSpec()
+    pth_cfg        = ShugaPaths(run_cfg = run_cfg, cls_cfg = classify_eff, afim_output_root = afim_output_root)
     try:
-        cice_store = paths.resolve_cice_store()
+        cice_store = pth_cfg.resolve_cice_store()
         cice_exists = cice_store.exists()
     except FileNotFoundError:
-        cice_store = paths.zarr_root / "iceh_daily.zarr"
+        cice_store = pth_cfg.zarr_root / "iceh_daily.zarr"
         cice_exists = False
-    static_store    = paths.resolve_static_store()
+    static_store    = pth_cfg.resolve_static_store()
     cice_status     = CICEStoreStatus(path          = str(cice_store),
                                       exists        = cice_exists,
                                       coverage      = _infer_grouped_store_coverage(cice_store) if cice_exists else None,
                                       static_store  = str(static_store) if static_store is not None else None,
                                       static_exists = static_store.exists() if static_store is not None else None)
-    classifications = _discover_classifications(paths, classify=classify_eff, logger=logger)
-    ice_in          = _discover_ice_in_json(paths, run.sim_name)
-    report          = SimulationStatusReport(sim_name        = run.sim_name,
-                                             hemisphere      = paths.hemisphere,
-                                             output_root     = str(paths.output_root),
-                                             zarr_root       = str(paths.zarr_root),
+    classifications = _discover_classifications(pth_cfg, cls_cfg=classify_eff, logger=logger)
+    ice_in          = _discover_ice_in_json(pth_cfg, run_cfg.sim_name)
+    report          = SimulationStatusReport(sim_name        = run_cfg.sim_name,
+                                             hemisphere      = pth_cfg.hemisphere,
+                                             output_root     = str(pth_cfg.output_root),
+                                             zarr_root       = str(pth_cfg.zarr_root),
                                              cice            = cice_status,
                                              classifications = classifications,
                                              ice_in_json     = ice_in)
@@ -258,12 +258,12 @@ def _infer_grouped_store_coverage(zarr_root: Path) -> TimeCoverage | None:
                         n_time=None,
                         n_groups=len(groups))
 
-def _discover_ice_in_json(paths: ShugaPaths, sim_name: str) -> IceInStatus:
+def _discover_ice_in_json(pth_cfg: ShugaPaths, sim_name: str) -> IceInStatus:
     filename   = f"ice_in_AFIM_subset_{sim_name}.json"
-    candidates = [paths.output_root / filename,
-                  paths.output_root / "config" / filename,
-                  paths.output_root / "configs" / filename,
-                  paths.output_root.parent / filename,
+    candidates = [pth_cfg.output_root / filename,
+                  pth_cfg.output_root / "config" / filename,
+                  pth_cfg.output_root / "configs" / filename,
+                  pth_cfg.output_root.parent / filename,
                   Path.home() / "AFIM" / filename]
     found      = next((p for p in candidates if p.exists()), None)
     if found is None:
@@ -339,8 +339,8 @@ def _metrics_health(metrics_store: Path) -> StoreHealth:
                        variables_present=present,
                        variables_missing=missing)
 
-def _discover_classifications(paths: ShugaPaths, classify: ClassificationSpec | None = None, logger=None) -> list[ClassificationStatus]:
-    hemi_root = paths.zarr_root / paths.hemisphere
+def _discover_classifications(pth_cfg: ShugaPaths, cls_cfg: ClassificationSpec | None = None, logger=None) -> list[ClassificationStatus]:
+    hemi_root = pth_cfg.zarr_root / pth_cfg.hemisphere
     if not hemi_root.exists():
         return []
     statuses: list[ClassificationStatus] = []
@@ -365,7 +365,7 @@ def _discover_classifications(paths: ShugaPaths, classify: ClassificationSpec | 
                     if key in seen:
                         continue
                     seen.add(key)
-                    meta = _parse_store_metadata_from_path(class_store, fallback_classify=classify)
+                    meta = _parse_store_metadata_from_path(class_store, fallback_classify=cls_cfg)
                     coverage = _maybe_open_time_coverage(class_store)
                     metrics_store = method_dir / "mets.zarr"
                     health = _metrics_health(metrics_store) if metrics_store.exists() else None

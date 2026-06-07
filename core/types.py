@@ -26,8 +26,7 @@ class RunSpec:
                    "inst"         : "hourly",
                    "instantaneous": "hourly"}
         if token not in aliases:
-            raise ValueError(f"Unsupported iceh_frequency={self.iceh_frequency!r}. "
-                             "Use 'daily' or 'hourly'.")
+            raise ValueError(f"Unsupported iceh_frequency={self.iceh_frequency!r}. Use 'daily' or 'hourly'.")
         self.iceh_frequency = aliases[token]
 
 @dataclass(slots=True)
