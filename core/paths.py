@@ -569,6 +569,9 @@ class ShugaPaths:
                 f"_BW{cls_cfg.bin_window}_BM{cls_cfg.bin_min_days}_roll{cls_cfg.roll_window}.log")
         return self.logs_root_path / "metrics" / stem
 
+    def lateral_drag_log_path(self) -> Path:
+        return self.logs_root_path / "LD-form-factor" / "lateral_drag_form_factor_construction.log"
+
     def figure_root(self, region: str | None = None, *, sim_name: str | None = None) -> Path:
         sim   = sim_name or self._require_run("figure_root").sim_name
         parts = [self.graphics_root_path, sim]

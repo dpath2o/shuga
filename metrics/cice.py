@@ -2,6 +2,7 @@ from __future__            import annotations
 import shutil
 from pathlib               import Path
 from datetime              import datetime
+from dataclasses           import replace
 import numpy               as np
 import pandas              as pd
 import xarray              as xr
@@ -20,7 +21,8 @@ from shuga.metrics.registry import (CORE_FI, CORE_SI, CORE_PI,
                                     FIA_SEASONAL_NAMES, FIT_SEASONAL_NAMES,
                                     PIA_SEASONAL_NAMES, PIT_SEASONAL_NAMES,
                                     SIA_SEASONAL_NAMES, SIT_SEASONAL_NAMES,
-                                    expand_metric_names)
+                                    expand_metric_names,
+                                    bucket_metric_names_by_domain)
 from shuga.metrics.skill import skill_stats
 from shuga.metrics.temporal import (month_window_bounds,
                                     linear_rate_per_day,
@@ -410,6 +412,32 @@ class CICEMetrics:
             raise ValueError(f"cls_cfg.ice_type={domain!r} but requested metrics are for "
                              f"{sorted(requested_domains)}. Use --ice-type {next(iter(requested_domains))}.")
 
+
+    def _domain_runner(self, ice_type: str) -> "CICEMetrics":
+        """
+        Return a metrics runner pointing at the requested FI/PI/SI output tree.
+
+        The returned runner shares the same run/met config and logger, but has
+        domain-correct cls_cfg and pth_cfg so classification_store() and
+        metrics_store() resolve to the correct tree.
+        """
+        domain = str(ice_type).strip().upper()
+        active = str(self.cls_cfg.ice_type).strip().upper()
+        if domain == active:
+            return self
+        cls_cfg = replace(self.cls_cfg, ice_type=domain)
+        pth_cfg = self.pth_cfg.with_ice_type(domain)
+        runner = type(self)(run_cfg = self.run_cfg,
+                            cls_cfg = cls_cfg,
+                            met_cfg = self.met_cfg,
+                            pth_cfg = pth_cfg,
+                            chunks  = self.chunks,
+                            logger  = self.logger)
+        # Avoid reopening the full CICE store if this parent/child has already
+        # loaded it in the current process.
+        runner._cice_cache = self._cice_cache
+        return runner
+
     #----------------------------------------------------------------------------------
     # the following functions are the backbone of this module
     # essentially, _compute_requested_metrics does all the heavy lifting for batch
@@ -750,7 +778,7 @@ class CICEMetrics:
                         metric_names              : str | Iterable[str] | None = None,
                         metric_groups             : str | Iterable[str] | None = None,
                         update_missing_only       : bool                       = True,
-                        rebuild_on_index_mismatch : bool                       = False) -> str:
+                        rebuild_on_index_mismatch : bool                       = False) -> str | dict[str, str]:
         """
         Compute, merge, and write requested metrics for a classification method.
 
@@ -813,8 +841,43 @@ class CICEMetrics:
         - Successful writes refresh the in-memory metrics cache for the requested
           method.
         """
+        norm    = normalize_method(method)
+        buckets = bucket_metric_names_by_domain(metric_names  = metric_names, metric_groups = metric_groups)
+        if not buckets:
+            raise ValueError("No metrics requested.")
+        outputs: dict[str, str] = {}
+        for domain, names in buckets.items():
+            runner = self._domain_runner(domain)
+            runner.logger.info("Computing %s-domain metrics for %s: %s", domain, norm, ", ".join(sorted(names)))
+            outputs[domain] = runner._compute_metrics_single_domain(norm,
+                                                                    requested_names            = names,
+                                                                    overwrite                  = overwrite,
+                                                                    update_missing_only        = update_missing_only,
+                                                                    rebuild_on_index_mismatch  = rebuild_on_index_mismatch)
+            # If a child loaded the CICE cache first, keep it available to the
+            # parent for subsequent domain batches.
+            if self._cice_cache is None and runner._cice_cache is not None:
+                self._cice_cache = runner._cice_cache
+        if len(outputs) == 1:
+            return next(iter(outputs.values()))
+        return outputs
+
+    def _compute_metrics_single_domain(self, method: str, *,
+                                       requested_names            : Iterable[str],
+                                       overwrite                  : bool = False,
+                                       update_missing_only        : bool = True,
+                                       rebuild_on_index_mismatch  : bool = False) -> str:
+        """
+        Compute, merge, and write metrics for one already-resolved ice domain.
+
+        This is the old single-domain compute_metrics() body. The public
+        compute_metrics() wrapper is responsible for expanding metric groups and
+        splitting requests into FI/PI/SI batches before calling this method.
+        """
         norm      = normalize_method(method)
-        requested = set(self._expand_metric_names(metric_names=metric_names, metric_groups=metric_groups))
+        requested = {str(name).strip() for name in requested_names if str(name).strip()}
+        if not requested:
+            raise ValueError("No metrics requested.")
         self._validate_metric_domain(requested)
         self.logger.info("Resolved class store for %s: %s", norm, self.pth_cfg.classification_store(norm))
         self.logger.info("Resolved metrics store for %s: %s", norm, self.pth_cfg.metrics_store(norm))

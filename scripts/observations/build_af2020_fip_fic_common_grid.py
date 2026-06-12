@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-
 import argparse
 import shutil
 import sys
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import xarray as xr
-
 repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))

@@ -714,11 +714,11 @@ class CICEPlotter:
                 if colorbar_frame is not None:
                     frame = list(colorbar_frame)
                 elif is_diff:
-                    frame = ['xaf+l"FIP difference (model - AF2020)"']
+                    frame = ['xaf+lFIP difference (model - AF2020)']
                 elif is_cat:
-                    frame = ['+l"FIP difference category"']
+                    frame = ['+lFIP difference category']
                 else:
-                    frame = ['xaf+l"Fast ice persistence"']
+                    frame = ['xaf+lpersistence']
                 fig.colorbar(position = colorbar_position, frame = frame, cmap = str(cmap) if is_cat else None)
             fig.savefig(path)
             if show:

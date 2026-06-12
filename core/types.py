@@ -152,14 +152,14 @@ class WaveForcingSpec:
 
 @dataclass(slots=True)
 class LateralDragSpec:
-    f2_map_method                     : str = "max"
+    FF_map_method                     : str   = "max"
     lat_subset_max                    : float = -30.0
-    proj_crs                          : str = "EPSG:3031"
+    proj_crs                          : str   = "EPSG:3031"
     max_assign_km                     : float = 50.0
-    coast_buffer_cells                : int = 1
-    use_coastal_ocean_kdtree          : bool = True
-    chunk_segments                    : int = 2_000_000
-    netcdf_compression                : int = 4
+    coast_buffer_cells                : int   = 1
+    use_coastal_ocean_kdtree          : bool  = True
+    chunk_segments                    : int   = 2_000_000
+    netcdf_compression                : int   = 2
     grounded_iceberg_file             : str | Path | None = None
     high_res_coast_file               : str | Path | None = None
     coast_form_factors_file           : str | Path | None = None

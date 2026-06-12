@@ -156,6 +156,74 @@ FIT_SEASONAL_NAMES = {f"F{name}" for name in IT_SEASONAL_NAMES}
 PIT_SEASONAL_NAMES = {f"P{name}" for name in IT_SEASONAL_NAMES}
 SIT_SEASONAL_NAMES = {f"S{name}" for name in IT_SEASONAL_NAMES}
 
+DOMAIN_ORDER   = ("FI", "PI", "SI")
+
+def _build_metric_domain_map() -> dict[str, str]:
+    """
+    Build a concrete metric-name -> ice-domain lookup table.
+
+    This avoids fragile prefix-only parsing and keeps domain ownership tied
+    to the canonical registry definitions.
+    """
+    out: dict[str, str] = {}
+    def register(domain: str, names: Iterable[str]) -> None:
+        for name in names:
+            previous = out.get(name)
+            if previous is not None and previous != domain:
+                raise ValueError(f"Metric {name!r} is registered to both {previous!r} and {domain!r}.")
+            out[name] = domain
+    register("FI", CORE_FI)
+    register("FI", ["FIA_by_region", "FIT_by_region"])
+    register("FI", SPATIAL_FI)
+    register("FI", SUMMARY_FI)
+    register("FI", STRESS_FI)
+    register("FI", FI_DIAGS)
+    register("FI", FI_SPECIFIC)
+    register("PI", CORE_PI)
+    register("PI", ["PIA_by_region", "PIT_by_region"])
+    register("PI", SPATIAL_PI)
+    register("PI", SUMMARY_PI)
+    register("PI", STRESS_PI)
+    register("PI", PI_DIAGS)
+    register("SI", CORE_SI)
+    register("SI", ["SIA_by_region", "SIT_by_region"])
+    register("SI", SPATIAL_SI)
+    register("SI", SUMMARY_SI)
+    register("SI", STRESS_SI)
+    register("SI", SI_DIAGS)
+    return out
+
+METRIC_DOMAINS = _build_metric_domain_map()
+
+def metric_domain(metric_name: str) -> str:
+    """
+    Return the ice domain for a concrete metric name.
+    """
+    token = str(metric_name).strip()
+    try:
+        return METRIC_DOMAINS[token]
+    except KeyError as exc:
+        raise ValueError(f"Cannot infer ice domain for metric {metric_name!r}. Add it to the metric registry/domain map.") from exc
+
+def bucket_metric_names_by_domain(metric_names = None, metric_groups = None, *, default_group: str = "default") -> dict[str, list[str]]:
+    """
+    Expand metric names/groups and bucket concrete metrics by ice domain.
+
+    Examples
+    --------
+    - metric_groups='pi_core' -> {'PI': [...]}
+    - metric_names='SITAR' -> {'SI': ['SITAR']}
+    - metric_groups=['fi_core', 'pi_core', 'si_core'] -> all three buckets
+    """
+    expanded = expand_metric_names(metric_names  = metric_names,
+                                   metric_groups = metric_groups,
+                                   default_group = default_group)
+    buckets: dict[str, list[str]] = {domain: [] for domain in DOMAIN_ORDER}
+    for name in expanded:
+        domain = metric_domain(name)
+        buckets[domain].append(name)
+    return {domain: names for domain, names in buckets.items() if names}
+
 def as_list(value: str | Iterable[str] | None) -> list[str]:
     if value is None:
         return []
