@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -P gv90
+#PBS -P jk72
 #PBS -q normalbw
 #PBS -l walltime=08:00:00
 #PBS -l ncpus=24
@@ -12,7 +12,7 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-25.12
+module load conda/analysis3-26.02
 
 #------------------------------------------------------------------------
 # DEFAULTS
