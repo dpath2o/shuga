@@ -236,66 +236,56 @@ def add_lonlat_from_epsg3031(ds: xr.Dataset | xr.DataArray, *, wrap: str = "0-36
 # Fast-ice persistence/FIC comparison helpers
 # -----------------------------------------------------------------------------
 def fip_difference_dataset(mod_fip: xr.DataArray, obs_fip: xr.DataArray, *,
-                           tol               : float = 1e-8,
+                           tol : float = 1e-8,
                            category_threshold: float = 0.5,
-                           name_mod          : str = "mod",
-                           name_obs          : str = "obs") -> xr.Dataset:
+                           name_mod : str = "mod",
+                           name_obs : str = "obs") -> xr.Dataset:
     """
     Return a continuous and categorical FIP difference dataset on a shared grid.
 
-    This intentionally follows the AFIM notebook convention:
-
-        diff = mod - obs
-
-    with:
-      - FIP['diff'] continuous in [-1, 1];
-      - cells where both model and observation are zero masked before differencing;
-      - FIP['diff_cat'] retained as an optional plotting/statistics aid.
+    diff = mod - obs
 
     Category codes:
-      - 0: agreement,           -threshold <= diff <= threshold
-      - 1: simulation-dominant,  diff > threshold
-      - 2: observation-dominant, diff < -threshold
-      - NaN: both zero, non-finite, or exactly outside (-1, 1) category range.
+    - 0: agreement, -threshold <= diff <= threshold
+    - 1: simulation-dominant, diff > threshold
+    - 2: observation-dominant, diff < -threshold
+    - NaN: both zero or non-finite.
     """
     mod, obs  = xr.align(mod_fip.astype("float32").rename(name_mod), obs_fip.astype("float32").rename(name_obs), join = "exact")
-    both_zero = (xr.apply_ufunc(np.isclose, mod, 0.0, kwargs={"atol": tol}) & xr.apply_ufunc(np.isclose, obs, 0.0, kwargs={"atol": tol}))
+    both_zero = (np.abs(mod) <= float(tol)) & (np.abs(obs) <= float(tol))
     finite    = np.isfinite(mod) & np.isfinite(obs)
-    diff      = (mod - obs)
-    diff      = diff.where(~both_zero)
-    diff      = diff.where(finite)
-    diff      = diff.clip(min=-1.0, max=1.0)
+    diff      = (mod - obs).where(~both_zero).where(finite)
+    diff      = diff.clip(min = -1.0, max = 1.0)
     diff      = diff.astype("float32").rename("diff")
-    diff.attrs.update(long_name       = "Fast ice persistence difference",
-                      units           = "1",
+    diff.attrs.update(long_name = "Fast ice persistence difference",
+                      units = "1",
                       sign_convention = "model minus observation",
-                      valid_min       = -1.0,
-                      valid_max       = 1.0,
-                      comment         = "Continuous FIP difference. Cells where model and observation are both zero are masked before differencing.")
-    th  = float(category_threshold)
-    cat = xr.full_like(diff, np.nan, dtype="float32")
-    valid_for_cat = (diff > -1.0) & (diff < 1.0)
+                      valid_min = -1.0,
+                      valid_max = 1.0,
+                      comment = "Continuous FIP difference. Cells where model and observation are both zero are masked before differencing.")
+    th = float(category_threshold)
+    valid_for_cat = finite & ~both_zero
+    cat = xr.full_like(diff, np.nan, dtype = "float32")
     cat = xr.where(valid_for_cat & (diff < -th), 2.0, cat)
     cat = xr.where(valid_for_cat & (diff >= -th) & (diff <= th), 0.0, cat)
     cat = xr.where(valid_for_cat & (diff > th), 1.0, cat)
     cat = cat.rename("diff_cat")
-    cat.attrs.update(long_name          = "FIP difference category",
-                     units              = "1",
-                     flag_values        = "0 1 2",
-                     flag_meanings      = "agreement simulation_dominant observation_dominant",
+    cat.attrs.update(long_name = "FIP difference category",
+                     units = "1",
+                     flag_values = "0 1 2",
+                     flag_meanings = "agreement simulation_dominant observation_dominant",
                      category_threshold = th,
-                     comment            = ("Edges at -threshold and +threshold are included in agreement. "
-                                           "Values exactly <= -1 or >= 1 remain NaN, matching the AFIM notebook."))
+                     comment = "Edges at -threshold and +threshold are included in agreement. Pure model-only or observation-only cells are retained as dominant categories.")
     ds = xr.Dataset({name_mod: mod, name_obs: obs, "diff": diff, "diff_cat": cat})
     for coord in ("lon", "lat", "x", "y"):
         if coord in mod.coords and coord not in ds.coords:
             ds = ds.assign_coords({coord: mod.coords[coord]})
         elif coord in obs.coords and coord not in ds.coords:
             ds = ds.assign_coords({coord: obs.coords[coord]})
-    ds.attrs.update(description           = "Fast ice persistence comparison on a shared grid",
+    ds.attrs.update(description = "Fast ice persistence comparison on a shared grid",
                     difference_convention = "diff = mod - obs",
-                    diff_is_continuous    = "true",
-                    category_codes        = "0 agreement; 1 simulation_dominant; 2 observation_dominant")
+                    diff_is_continuous = "true",
+                    category_codes = "0 agreement; 1 simulation_dominant; 2 observation_dominant")
     return ds
 
 def fip_weight(FIP: xr.Dataset, *, mode: str = "max", t: float = 0.10, gamma: float = 1.2) -> xr.DataArray:
@@ -328,7 +318,6 @@ def _region_mask(lon, lat, region: Sequence[float]) -> xr.DataArray:
         mlon = (lon_m >= lon_min) | (lon_m <= lon_max)
     return mlon & (lat >= lat_min) & (lat <= lat_max)
 
-
 def compute_fipdiff_stats_weighted(FIP: xr.Dataset, *,
                                    pixel_size_m         : float = 5_000.0,
                                    regions              : dict | None = None,
@@ -347,11 +336,11 @@ def compute_fipdiff_stats_weighted(FIP: xr.Dataset, *,
     if clip01:
         mod = mod.clip(0.0, 1.0)
         obs = obs.clip(0.0, 1.0)
-    overlap = xr.apply_ufunc(np.minimum, mod, obs)
-    model_excess = xr.apply_ufunc(np.maximum, mod - obs, 0.0)
-    obs_excess = xr.apply_ufunc(np.maximum, obs - mod, 0.0)
-    lon = FIP["lon"] if "lon" in FIP else FIP.coords["lon"]
-    lat = FIP["lat"] if "lat" in FIP else FIP.coords["lat"]
+    overlap       = xr.where(mod <= obs, mod, obs)
+    model_excess  = (mod - obs).clip(min = 0.0)
+    obs_excess    = (obs - mod).clip(min = 0.0)
+    lon           = FIP["lon"] if "lon" in FIP else FIP.coords["lon"]
+    lat           = FIP["lat"] if "lat" in FIP else FIP.coords["lat"]
     cell_area_km2 = (float(pixel_size_m) * float(pixel_size_m)) / 1e6
     if gi_mask is not None:
         valid = ~gi_mask.astype(bool).broadcast_like(mod)
@@ -359,12 +348,12 @@ def compute_fipdiff_stats_weighted(FIP: xr.Dataset, *,
         valid = xr.ones_like(mod, dtype=bool)
     rows = []
     for rname, rdict in regions.items():
-        geo = rdict.get("plot_region", rdict.get("geo_region"))
-        R = _region_mask(lon, lat, geo) & valid
-        A_km2 = float((overlap * R).sum(skipna=True)) * cell_area_km2
-        M_km2 = float((model_excess * R).sum(skipna=True)) * cell_area_km2
-        O_km2 = float((obs_excess * R).sum(skipna=True)) * cell_area_km2
-        tot = A_km2 + M_km2 + O_km2
+        geo     = rdict.get("plot_region", rdict.get("geo_region"))
+        R       = _region_mask(lon, lat, geo) & valid
+        A_km2   = float((overlap * R).sum(skipna=True)) * cell_area_km2
+        M_km2   = float((model_excess * R).sum(skipna=True)) * cell_area_km2
+        O_km2   = float((obs_excess * R).sum(skipna=True)) * cell_area_km2
+        tot     = A_km2 + M_km2 + O_km2
         MOD_km2 = float((mod * R).sum(skipna=True)) * cell_area_km2
         OBS_km2 = float((obs * R).sum(skipna=True)) * cell_area_km2
         rows.append(dict(region                    = rname,

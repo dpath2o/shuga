@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--start-date", required=True)
     p.add_argument("--end-date", required=True)
     p.add_argument("--hemisphere", default="SH")
-    p.add_argument("--project", default="gv90")
+    p.add_argument("--project", default="jk72")
     p.add_argument("--user", default="da1339")
     p.add_argument("--ice-type", default="FI")
     p.add_argument("--grid-type", "--BorC2T-type", dest="grid_type", default="Tc")

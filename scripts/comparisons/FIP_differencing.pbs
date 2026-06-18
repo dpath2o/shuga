@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#PBS -P gv90
+#PBS -P jk72
 #PBS -q normalbw
 #PBS -l walltime=04:00:00
 #PBS -l ncpus=8
@@ -18,9 +18,9 @@ module load conda/analysis3-25.12
 
 : "${SIM_NAME:?Set SIM_NAME, e.g. qsub -v SIM_NAME=LD-blend-base FIP_differencing.pbs}"
 : "${START_DATE:=2000-01-01}"
-: "${END_DATE:=2003-12-31}"
+: "${END_DATE:=2005-12-31}"
 : "${FIP_START:=2000-04-01}"
-: "${FIP_END:=2003-06-30}"
+: "${FIP_END:=2005-12-30}"
 : "${CLASSIFICATION:=binary-days}"
 : "${GRID_TYPE:=Tc}"
 : "${AF2020_STORE:=/g/data/gv90/da1339/SeaIce/FI_obs/AF-FI-2020db_common-5km_pyresample.zarr}"

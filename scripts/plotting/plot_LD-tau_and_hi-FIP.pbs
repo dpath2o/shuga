@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#PBS -P jk72
+#PBS -q normalbw
+#PBS -l walltime=10:00:00
+#PBS -l ncpus=24
+#PBS -l mem=96GB
+#PBS -l storage=gdata/gv90+scratch/gv90+gdata/xp65+gdata/jk72
+#PBS -j oe
+#PBS -N plot_LD-tau
+
+set -euo pipefail
+
+cd /g/data/gv90/da1339/src/mawsons-chest/shuga/scripts/plotting/
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+python -u plot_LD-tau_and_hi-FIP.py

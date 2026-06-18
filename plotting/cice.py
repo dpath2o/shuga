@@ -609,18 +609,18 @@ class CICEPlotter:
                               chunks         = self.chunks)
             if "FIP" not in ds:
                 raise KeyError(f"Could not find FIP in metrics store for {target_sim}/{norm}/{target_grid}.")
-            da        = ds["FIP"].squeeze(drop=True)
-            static_ds = self._load_static_lonlat(sim_name=target_sim)
+            da        = ds["FIP"].squeeze(drop = True) / 100
+            static_ds = self._load_static_lonlat(sim_name = target_sim)
             lon, lat  = self._detect_lonlat(static_ds)
             label     = target_sim
         elif source_l == "af2020":
             if af2020_store is None:
                 raise ValueError("source='af2020' requires af2020_store=...")
-            ods = xr.open_zarr(Path(af2020_store).expanduser(), consolidated=False, chunks=self.chunks)
+            ods = xr.open_zarr(Path(af2020_store).expanduser(), consolidated = False, chunks=self.chunks)
             if af2020_start is not None or af2020_end is not None:
                 if "FIC" not in ods:
                     raise KeyError("AF2020 store does not contain FIC; cannot compute period-specific AF2020 FIP.")
-                da = ods["FIC"].sel(time=slice(af2020_start, af2020_end)).mean("time", skipna=True).rename("FIP")
+                da = ods["FIC"].sel(time = slice(af2020_start, af2020_end)).mean("time", skipna = True).rename("FIP")
                 da.attrs.update(long_name  = "AF2020 fast ice persistence",
                                 units      = "1",
                                 time_start = str(pd.Timestamp(af2020_start).date()) if af2020_start else str(pd.Timestamp(ods.time.values[0]).date()),
@@ -641,7 +641,7 @@ class CICEPlotter:
                 if isinstance(dataset, xr.Dataset):
                     ds = dataset
                 else:
-                    p = Path(dataset).expanduser()
+                    p  = Path(dataset).expanduser()
                     ds = xr.open_zarr(p, consolidated = False, chunks = self.chunks) if p.suffix == ".zarr" or p.is_dir() else xr.open_dataset(p, chunks = self.chunks)
                 if field_l not in ds:
                     raise KeyError(f"{field_l!r} not found in supplied dataset. Available variables: {list(ds.data_vars)}")

@@ -467,13 +467,15 @@ class CICEMetrics:
         fi_mask       = None
         pi_mask       = None
         if domain == "FI":
-            ds_mask = self._get_classified(method)
-            fi_mask = ds_mask["FI_mask"].astype(bool)
+            ds_mask           = self._get_classified(method)
+            fi_mask           = ds_mask["FI_mask"].astype(bool)
             aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
+            ds                = ds.sel(time=aice.time)
         elif domain == "PI":
-            ds_mask = self._get_classified(method)
-            pi_mask = ds_mask["PI_mask"].astype(bool)
+            ds_mask           = self._get_classified(method)
+            pi_mask           = ds_mask["PI_mask"].astype(bool)
             aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
+            ds                = ds.sel(time=aice.time)
         elif domain == "SI":
             pass
         else:

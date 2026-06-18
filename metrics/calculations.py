@@ -13,6 +13,26 @@ def _align_mask(mask: xr.DataArray | None, field: xr.DataArray) -> xr.DataArray 
         return None
 
 # ------------------------------------------------------------------
+def _align_time_inner(*arrays: xr.DataArray | None) -> tuple[xr.DataArray | None, ...]:
+    """
+    Align DataArrays on their common time coordinate, preserving None entries.
+
+    This is needed because classified masks and CICE tendency fields can have
+    slightly different time labels or lengths after rolling/binary filtering,
+    grouped monthly zarr loading, or legacy store creation.
+    """
+    indexed = [(i, arr) for i, arr in enumerate(arrays)
+               if arr is not None and "time" in arr.dims]
+    if len(indexed) < 2:
+        return arrays
+    positions, valid = zip(*indexed)
+    aligned = xr.align(*valid, join="inner")
+    out = list(arrays)
+    for pos, arr in zip(positions, aligned):
+        out[pos] = arr
+    return tuple(out)
+
+# ------------------------------------------------------------------
 def _masked_weighted_field(field: xr.DataArray, area: xr.DataArray,
                             mask: xr.DataArray | None = None) -> xr.DataArray:
     area2d   = ensure_2d_static(area)
@@ -163,7 +183,11 @@ def compute_volume_rate(tendency: xr.DataArray, sic: xr.DataArray, area: xr.Data
     The tendency is converted to m day^-1, multiplied by concentration and
     area, then summed spatially.
     """
-    rate  = convert_thickness_tendency_to_m_per_day(tendency)
+    rate = convert_thickness_tendency_to_m_per_day(tendency)
+    if mask is not None:
+        rate, sic, mask = _align_time_inner(rate, sic, mask)
+    else:
+        rate, sic = xr.align(rate, sic, join="inner")
     field = rate * sic
     if mask is not None:
         field = field.where(mask, 0.0)
@@ -183,7 +207,8 @@ def compute_area_rate(tendency: xr.DataArray, area: xr.DataArray,
     """
     field = tendency
     if mask is not None:
-        field = field.where(mask, 0.0)
+        field, mask = _align_time_inner(field, mask)
+        field       = field.where(mask, 0.0)
     da = (field * ensure_2d_static(area)).sum(dim=spatial_dims(field))
     da = da.rename(name)
     da.attrs.update({"long_name": long_name, "units": "m^2 day^-1"})
@@ -201,7 +226,8 @@ def compute_spatial_rate_year(tendency: xr.DataArray, mask: xr.DataArray, *, nam
     """
     field = convert_thickness_tendency_to_m_per_day(tendency)
     if mask is not None:
-        field = field.where(mask)
+        field, mask = _align_time_inner(field, mask)
+        field       = field.where(mask)
     if area is not None:
         field = field * ensure_2d_static(area)
         units = "m^2 day^-1"

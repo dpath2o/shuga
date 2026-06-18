@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SIM="blend-strain-eps-low"
+SIM="blend-strain-high"
 START="1995-01-01"
 END="2005-12-31"
 METHODS="binary-days,rolling-mean"
 GRID="Tc"
 
-PROJECT="${PROJECT:-gv90}"
+PROJECT="${PROJECT:-jk72}"
 RUN_USER="${RUN_USER:-da1339}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

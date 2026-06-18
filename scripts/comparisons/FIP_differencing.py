@@ -65,7 +65,7 @@ def _comparison_window(args: argparse.Namespace) -> tuple[str, str]:
     return use0.strftime("%Y-%m-%d"), use1.strftime("%Y-%m-%d")
 
 def _open_static_grid(sim_name: str) -> xr.Dataset:
-    path = Path.home() / "AFIM_archive" / sim_name / "zarr" / "iceh_static.zarr"
+    path = Path.home() / "AFIM_archive" / "CICE_0p25_Cgrid_coords.zarr"
     if not path.exists():
         raise FileNotFoundError(path)
     ds = xr.open_zarr(path, consolidated=False)
@@ -80,22 +80,22 @@ def _metric_fip_is_compatible(da: xr.DataArray, fip_start: str, fip_end: str) ->
     return pd.Timestamp(t0).date() == pd.Timestamp(fip_start).date() and pd.Timestamp(t1).date() == pd.Timestamp(fip_end).date()
 
 def _load_or_compute_sim_fip(args        : argparse.Namespace,
-                             run         : RunSpec,
-                             classify    : ClassificationSpec,
-                             metrics     : MetricsSpec,
-                             plotting    : PlottingSpec,
-                             observations: ObservationSpec,
-                             paths       : ShugaPaths,
+                             run_cfg     : RunSpec,
+                             cls_cfg     : ClassificationSpec,
+                             met_cfg     : MetricsSpec,
+                             plt_cfg     : PlottingSpec,
+                             obs_cfg     : ObservationSpec,
+                             pth_cfg     : ShugaPaths,
                              fip_start   : str,
                              fip_end     : str) -> xr.DataArray:
     if args.sim_fip_source in ("auto", "metrics"):
         try:
-            ds_met = load_metrics(run            = run,
-                                  classify       = classify,
-                                  metrics        = metrics,
-                                  plotting       = plotting,
-                                  observations   = observations,
-                                  paths          = paths,
+            ds_met = load_metrics(run_cfg        = run_cfg,
+                                  cls_cfg        = cls_cfg,
+                                  met_cfg        = met_cfg,
+                                  plt_cfg        = plt_cfg,
+                                  obs_cfg        = obs_cfg,
+                                  pth_cfg        = pth_cfg,
                                   classification = args.classification,
                                   variables      = ["FIP"],
                                   hemisphere     = args.hemisphere,
@@ -112,12 +112,12 @@ def _load_or_compute_sim_fip(args        : argparse.Namespace,
             if args.sim_fip_source == "metrics":
                 raise
             print(f"[info] could not use metrics FIP; recomputing from classification: {exc}")
-    cls = load_classified(run            = run,
-                          classify       = classify,
-                          metrics        = metrics,
-                          plotting       = plotting,
-                          observations   = observations,
-                          paths          = paths,
+    cls = load_classified(run_cfg        = run_cfg,
+                          cls_cfg        = cls_cfg,
+                          met_cfg        = met_cfg,
+                          plt_cfg        = plt_cfg,
+                          obs_cfg        = obs_cfg,
+                          pth_cfg        = pth_cfg,
                           classification = args.classification,
                           variables      = [f"{args.ice_type.upper()}_mask"],
                           hemisphere     = args.hemisphere,
@@ -138,27 +138,27 @@ def _load_or_compute_sim_fip(args        : argparse.Namespace,
     return out
 
 def main() -> None:
-    args = parse_args()
+    args               = parse_args()
     fip_start, fip_end = _comparison_window(args)
-    run_cfg = RunSpec(sim_name   = args.sim_name,
-                      start_date = args.start_date,
-                      end_date   = args.end_date,
-                      hemisphere = args.hemisphere,
-                      project    = args.project,
-                      user       = args.user)
-    cls_cfg = ClassificationSpec(ice_type     = args.ice_type,
-                                 grid_type    = args.grid_type,
-                                 ispd_thresh  = args.ispd_thresh,
-                                 methods      = (args.classification,),
-                                 bin_window   = args.bin_window,
-                                 bin_min_days = args.bin_min_days,
-                                 roll_window  = args.roll_window)
-    met_cfg = MetricsSpec(methods = (args.classification))
-    plt_cfg = PlottingSpec()
-    obs_cfg = ObservationSpec()
-    pth_cfg = ShugaPaths(run = run_cfg, classify = cls_cfg, metrics = met_cfg, plotting = plt_cfg, observations = obs_cfg)
-    af_store = Path(args.af2020_store).expanduser()
-    af       = xr.open_zarr(af_store, consolidated = False, chunks = {"time": args.chunks_time})
+    run_cfg            = RunSpec(sim_name   = args.sim_name,
+                                 start_date = args.start_date,
+                                 end_date   = args.end_date,
+                                 hemisphere = args.hemisphere,
+                                 project    = args.project,
+                                 user       = args.user)
+    cls_cfg            = ClassificationSpec(ice_type     = args.ice_type,
+                                            grid_type    = args.grid_type,
+                                            ispd_thresh  = args.ispd_thresh,
+                                            methods      = (args.classification,),
+                                            bin_window   = args.bin_window,
+                                            bin_min_days = args.bin_min_days,
+                                            roll_window  = args.roll_window)
+    met_cfg            = MetricsSpec(methods = (args.classification,))
+    plt_cfg            = PlottingSpec()
+    obs_cfg            = ObservationSpec()
+    pth_cfg            = ShugaPaths(run_cfg = run_cfg, cls_cfg = cls_cfg, met_cfg = met_cfg, plt_cfg = plt_cfg, obs_cfg = obs_cfg)
+    af_store           = Path(args.af2020_store).expanduser()
+    af                 = xr.open_zarr(af_store, consolidated = False, chunks = {"time": args.chunks_time})
     if "FIC" not in af:
         raise KeyError(f"AF2020 store must contain FIC to compute period-specific FIP: {af_store}")
     obs_fip = af["FIC"].sel(time=slice(fip_start, fip_end)).mean("time", skipna=True).astype("float32").rename("obs")
@@ -199,7 +199,7 @@ def main() -> None:
     stats.to_csv(stats_csv)
     print(f"[done] wrote stats: {stats_csv}")
     if args.plot:
-        plotter   = CICEPlotter(run = run_cfg, classify = cls_cfg, metrics = met_cfg, plotting = plt_cfg, observations =obs_cfg, paths = pth_cfg)
+        plotter   = CICEPlotter(run_cfg = run_cfg, cls_cfg = cls_cfg, met_cfg = met_cfg, plt_cfg = plt_cfg, obs_cfg =obs_cfg, pth_cfg = pth_cfg)
         plot_root = Path(args.plot_root).expanduser() if args.plot_root else out_store.parent / "figures"
         field     = "diff_cat" if args.plot_categorical else "diff"
         plotter.plot_fip(method      = args.classification,

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SIM_NAMES=(
-    "Cs-high-ktens-high"
+SIM_NAMES=("Cs-high-ktens-high"
     "Cs-high"
     "Cs-high-ktens-mid"
     "Cs-high-eDef"
@@ -16,9 +15,7 @@ SIM_NAMES=(
     "blend-strain-mid"
     "blend-strain-low"
     "blend-strain-high"
-    # "no-lateral-drag"
-    "no-slip-LFI"
-)
+    "no-slip-LFI")
 
 START_YEAR="1995"
 END_YEAR="2005"

@@ -1,16 +1,16 @@
 #!/bin/bash
-#PBS -P gv90
+#PBS -P jk72
 #PBS -q normalbw
 #PBS -l walltime=08:00:00
 #PBS -l ncpus=24
 #PBS -l mem=256GB
-#PBS -l jobfs=5GB
+#PBS -l jobfs=1GB
 #PBS -j oe
-#PBS -l storage=gdata/xp65+gdata/gv90+gdata/ik11+scratch/gv90
+#PBS -l storage=gdata/xp65+gdata/gv90+scratch/gv90
 
 set -euo pipefail
 
-PROJECT="${PROJECT:-gv90}"
+PROJECT="${PROJECT:-jk72}"
 RUN_USER="${RUN_USER:-da1339}"
 SIM_NAME="${SIM_NAME:?SIM_NAME not set}"
 START_DATE="${START_DATE:?START_DATE not set}"
