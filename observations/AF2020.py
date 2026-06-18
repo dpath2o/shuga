@@ -2,12 +2,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
+import shutil
 import numpy as np
 import pandas as pd
 import xarray as xr
 from shuga.core.logging import build_file_logger
 from shuga.core.paths import ShugaPaths
+from shuga.core.regions import ANTARCTIC_8_REGIONS
 from shuga.core.types import ObservationSpec, RunSpec
+from shuga.metrics.regional import region_mask as build_region_mask
 
 @dataclass(slots=True)
 class AF2020Spec:
@@ -20,6 +23,7 @@ class AF2020Spec:
     D_org_nc : str | Path | None = "/g/data/jk72/af1544/fraser2020_data"
     D_reG    : str | Path | None = Path("/g/data/gv90/da1339/SeaIce/FI_obs")
     F_reG    : str = "AF-FI-2020db_common-5km_pyresample.zarr"
+    F_FIA_org: str = "AF-FI-2020db_FIA_from_original_dataset.zarr"
     threshold: float = 4.0
 
 class AF2020Observations:
@@ -168,6 +172,93 @@ class AF2020Observations:
         area = self._with_standard_spatial_dims(area).astype("float64").rename("AF_cell_area")
         area.attrs.update(long_name="AF2020 native cell area", units="m2")
         return area
+
+    def native_region_mask(self, ds: xr.Dataset | None = None, *,
+                           regions: Sequence[str] | None = None) -> xr.DataArray:
+        """
+        Return the eight Antarctic sector masks on the original AF2020 grid.
+
+        The mask is built directly from AF2020 native longitude/latitude fields;
+        no spatial regridding or temporal interpolation is performed.
+        """
+        ds = ds if ds is not None else (self._org_cache or self.open_org())
+        template = self.native_mask(ds).isel(time=0, drop=True)
+        if regions is None:
+            region_defs = ANTARCTIC_8_REGIONS
+        else:
+            missing = [r for r in regions if r not in ANTARCTIC_8_REGIONS]
+            if missing:
+                raise KeyError(f"Unknown Antarctic regions: {missing}. Available: {list(ANTARCTIC_8_REGIONS)}")
+            region_defs = {r: ANTARCTIC_8_REGIONS[r] for r in regions}
+        out = build_region_mask(template, template["lon"], template["lat"], region_defs)
+        out.attrs.update(long_name="AF2020 native Antarctic sector mask", units="1")
+        return out
+
+    def native_fia_timeseries(self, ds: xr.Dataset | None = None, *,
+                              start_date: str | None = None,
+                              end_date  : str | None = None,
+                              threshold : float | None = None,
+                              regions   : Sequence[str] | None = None,
+                              scale     : float = 1.0e9,
+                              name      : str = "FIA") -> xr.Dataset:
+        """
+        Compute AF2020 FIA on the original AF2020 projection and time axis.
+
+        Output variable ``FIA`` has dimensions ``time, region`` and uses units
+        of ``10^3 km^2`` when ``scale=1e9``. The first region is
+        ``circum_antarctic`` followed by the eight sector keys defined in
+        :mod:`shuga.core.regions`.
+        """
+        ds = ds if ds is not None else self.open_org(start_date, end_date)
+        if start_date is not None or end_date is not None:
+            ds = ds.sel(time=slice(start_date, end_date))
+        mask = self.native_mask(ds, threshold=threshold, name="AF_FI_mask")
+        area = self.native_area(ds)
+        if area is None:
+            raise KeyError(f"AF2020 area variable {self.af20_cfg.area!r} not found; cannot compute native-grid FIA.")
+        if regions is None:
+            region_names = ("circum_antarctic", *ANTARCTIC_8_REGIONS.keys())
+        else:
+            region_names = tuple(regions)
+        spatial_dims = [d for d in mask.dims if d != "time"]
+        series: list[xr.DataArray] = []
+        labels: list[str] = []
+        for region_name in region_names:
+            if region_name == "circum_antarctic":
+                weighted = mask.astype("float64") * area.astype("float64")
+            else:
+                rmask = self.native_region_mask(ds, regions=(region_name,)).sel(region=region_name)
+                weighted = mask.where(rmask, 0.0).astype("float64") * area.where(rmask, 0.0).astype("float64")
+            da = (weighted.sum(dim=spatial_dims, skipna=True) / float(scale)).rename(name)
+            series.append(da)
+            labels.append(region_name)
+        out = xr.concat(series, dim=pd.Index(labels, name="region")).transpose("time", "region").astype("float32")
+        out.attrs.update(long_name="AF2020 native-grid fast-ice area",
+                         units="10^3 km^2" if scale == 1.0e9 else f"m2/{scale:g}",
+                         source_projection="AF2020 original projection",
+                         temporal_sampling="native AF2020 timestamps",
+                         temporal_interpolation="none",
+                         spatial_regridding="none",
+                         threshold=float(self.af20_cfg.threshold if threshold is None else threshold))
+        ds_out = out.to_dataset(name=name)
+        ds_out.attrs.update(title="AF2020 FIA from original AF2020 dataset",
+                            source="Fraser et al. 2020 AF2020 gridded fast-ice product",
+                            note="FIA is computed on the original AF2020 grid and original timestamps; no interpolation/regridding.")
+        return ds_out
+
+    def write_native_fia_timeseries(self, *, out_store: str | Path | None = None,
+                                    overwrite : bool = False,
+                                    **kwargs) -> xr.Dataset:
+        """Compute and write native-projection AF2020 FIA to zarr."""
+        target = Path(out_store).expanduser() if out_store is not None else self.D_reG / self.af20_cfg.F_FIA_org
+        if target.exists():
+            if not overwrite:
+                raise FileExistsError(f"{target} exists. Pass overwrite=True to rebuild it.")
+            shutil.rmtree(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        ds_out = self.native_fia_timeseries(**kwargs)
+        ds_out.to_zarr(target, mode="w", consolidated=False)
+        return ds_out
 
     def daily_fic(self, mask: xr.DataArray | None = None, *,
                   start_date  : str | None = None,

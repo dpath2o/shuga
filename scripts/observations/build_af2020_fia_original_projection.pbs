@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#PBS -P gv90
+#PBS -q normalbw
+#PBS -l walltime=02:00:00
+#PBS -l ncpus=4
+#PBS -l mem=32GB
+#PBS -l storage=gdata/gv90+scratch/gv90+gdata/xp65+gdata/jk72
+#PBS -j oe
+#PBS -N AF2020_FIA_ORG
+
+set -euo pipefail
+
+cd "${PBS_O_WORKDIR:-$PWD}"
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-25.12
+
+: "${START_DATE:=2000-03-01}"
+: "${END_DATE:=2018-02-15}"
+: "${ORG_ROOT:=/g/data/jk72/af1544/fraser2020_data}"
+: "${OBS_ROOT:=/g/data/gv90/da1339/SeaIce/FI_obs}"
+: "${OUT_STORE:=/g/data/gv90/da1339/SeaIce/FI_obs/AF-FI-2020db_FIA_from_original_dataset.zarr}"
+: "${AF2020_THRESHOLD:=4.0}"
+: "${OVERWRITE:=0}"
+
+args=(build_af2020_fia_original_projection.py
+      --start-date "${START_DATE}"
+      --end-date "${END_DATE}"
+      --org-root "${ORG_ROOT}"
+      --obs-root "${OBS_ROOT}"
+      --out-store "${OUT_STORE}"
+      --af2020-threshold "${AF2020_THRESHOLD}"
+      --chunks-time "${CHUNKS_TIME:-48}")
+
+if [[ "${OVERWRITE}" == "1" ]]; then
+  args+=(--overwrite)
+fi
+
+python "${args[@]}"

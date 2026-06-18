@@ -47,7 +47,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pixel-size-m", type=float, default=5000.0)
     p.add_argument("--radius-of-influence-m", type=float, default=10000.0)
     p.add_argument("--cice-lon-shift-deg", type=float, default=0.25)
-    p.add_argument("--sim-fip-source", choices=("auto", "metrics", "classification"), default="auto")
     p.add_argument("--category-threshold", type=float, default=0.5)
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--plot", action="store_true", help="Plot FIP['diff'] for all 8 regions after writing numerics.")
@@ -70,72 +69,6 @@ def _open_static_grid(sim_name: str) -> xr.Dataset:
         raise FileNotFoundError(path)
     ds = xr.open_zarr(path, consolidated=False)
     return ds[["TLON", "TLAT"]]
-
-def _metric_fip_is_compatible(da: xr.DataArray, fip_start: str, fip_end: str) -> bool:
-    attrs = da.attrs
-    t0    = attrs.get("time_start") or attrs.get("start_date") or attrs.get("dt0_str")
-    t1    = attrs.get("time_end") or attrs.get("end_date") or attrs.get("dtN_str")
-    if t0 is None or t1 is None:
-        return False
-    return pd.Timestamp(t0).date() == pd.Timestamp(fip_start).date() and pd.Timestamp(t1).date() == pd.Timestamp(fip_end).date()
-
-def _load_or_compute_sim_fip(args        : argparse.Namespace,
-                             run_cfg     : RunSpec,
-                             cls_cfg     : ClassificationSpec,
-                             met_cfg     : MetricsSpec,
-                             plt_cfg     : PlottingSpec,
-                             obs_cfg     : ObservationSpec,
-                             pth_cfg     : ShugaPaths,
-                             fip_start   : str,
-                             fip_end     : str) -> xr.DataArray:
-    if args.sim_fip_source in ("auto", "metrics"):
-        try:
-            ds_met = load_metrics(run_cfg        = run_cfg,
-                                  cls_cfg        = cls_cfg,
-                                  met_cfg        = met_cfg,
-                                  plt_cfg        = plt_cfg,
-                                  obs_cfg        = obs_cfg,
-                                  pth_cfg        = pth_cfg,
-                                  classification = args.classification,
-                                  variables      = ["FIP"],
-                                  hemisphere     = args.hemisphere,
-                                  grid_type      = args.grid_type,
-                                  chunks         = {"time": args.chunks_time})
-            if "FIP" in ds_met:
-                da = ds_met["FIP"].squeeze(drop=True)
-                if args.sim_fip_source == "metrics" or _metric_fip_is_compatible(da, fip_start, fip_end):
-                    da = da.rename("SIM_FIP")
-                    da.attrs.update(source="shuga metrics store")
-                    return da
-                print("[info] metrics FIP date attrs do not match requested AF2020 overlap; recomputing from classification.")
-        except Exception as exc:
-            if args.sim_fip_source == "metrics":
-                raise
-            print(f"[info] could not use metrics FIP; recomputing from classification: {exc}")
-    cls = load_classified(run_cfg        = run_cfg,
-                          cls_cfg        = cls_cfg,
-                          met_cfg        = met_cfg,
-                          plt_cfg        = plt_cfg,
-                          obs_cfg        = obs_cfg,
-                          pth_cfg        = pth_cfg,
-                          classification = args.classification,
-                          variables      = [f"{args.ice_type.upper()}_mask"],
-                          hemisphere     = args.hemisphere,
-                          grid_type      = args.grid_type,
-                          chunks         = {"time": args.chunks_time})
-    mask_name = f"{args.ice_type.upper()}_mask"
-    if mask_name not in cls:
-        # fallback for older stores
-        if "FI_mask" in cls:
-            mask_name = "FI_mask"
-        else:
-            raise KeyError(f"No {args.ice_type.upper()}_mask/FI_mask found in classification store.")
-    fi = cls[mask_name].sel(time = slice(fip_start, fip_end))
-    if fi.sizes.get("time", 0) == 0:
-        raise ValueError(f"No simulation FI_mask data in {fip_start}..{fip_end}.")
-    out = compute_fip(fi, name = "SIM_FIP")
-    out.attrs.update(source = "computed from classification", time_start = fip_start, time_end = fip_end)
-    return out
 
 def main() -> None:
     args               = parse_args()
@@ -163,7 +96,22 @@ def main() -> None:
         raise KeyError(f"AF2020 store must contain FIC to compute period-specific FIP: {af_store}")
     obs_fip = af["FIC"].sel(time=slice(fip_start, fip_end)).mean("time", skipna=True).astype("float32").rename("obs")
     obs_fip.attrs.update(source="AF2020 common-grid FIC", time_start=fip_start, time_end=fip_end)
-    sim_fip_native = _load_or_compute_sim_fip(args, run_cfg, cls_cfg, met_cfg, plt_cfg, obs_cfg, pth_cfg, fip_start, fip_end)
+    ds_met = load_metrics(run_cfg        = run_cfg,
+                          cls_cfg        = cls_cfg,
+                          met_cfg        = met_cfg,
+                          plt_cfg        = plt_cfg,
+                          obs_cfg        = obs_cfg,
+                          pth_cfg        = pth_cfg,
+                          classification = args.classification,
+                          variables      = ["FIP"],
+                          hemisphere     = args.hemisphere,
+                          grid_type      = args.grid_type,
+                          chunks         = {"time": args.chunks_time})
+    if "FIP" not in ds_met:
+        raise KeyError(f"Metrics store does not contain FIP. Found variables: {list(ds_met.data_vars)}")
+    sim_fip_native = ds_met["FIP"].squeeze(drop=True).astype("float32").rename("SIM_FIP")
+    if sim_fip_native.ndim != 2:
+        raise ValueError(f"Expected 2-D FIP for resampling, got dims={sim_fip_native.dims}, shape={sim_fip_native.shape}")
     cice           = _open_static_grid(args.sim_name)
     area_def       = area_definition_from_xy(af["x"], af["y"], pixel_size = float(args.pixel_size_m), area_id = "AF2020_common_for_FIP_diff")
     mod_fip        = resample_swath_to_area(sim_fip_native, cice["TLAT"].values, cice["TLON"].values + float(args.cice_lon_shift_deg), area_def,

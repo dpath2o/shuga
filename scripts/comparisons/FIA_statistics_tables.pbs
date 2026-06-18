@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#PBS -P jk72
+#PBS -q normalbw
+#PBS -l walltime=03:00:00
+#PBS -l ncpus=4
+#PBS -l mem=48GB
+#PBS -l storage=gdata/gv90+scratch/gv90+gdata/xp65+gdata/jk72
+#PBS -j oe
+#PBS -N FIA_TABLES
+
+set -euo pipefail
+
+cd "${PBS_O_WORKDIR:-$PWD}"
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-25.12
+
+: "${SIM_NAMES:?Set SIM_NAMES, e.g. qsub -v SIM_NAMES='LD-blend-base LD-static-Cs1e-3' FIA_statistics_tables.pbs}"
+: "${START_DATE:=2000-01-01}"
+: "${END_DATE:=2005-12-31}"
+: "${CLASSIFICATION:=binary-days}"
+: "${GRID_TYPE:=Tc}"
+: "${ICE_TYPE:=FI}"
+: "${PROJECT:=gv90}"
+: "${USER_NAME:=da1339}"
+: "${AF2020_FIA_STORE:=/g/data/gv90/da1339/SeaIce/FI_obs/AF-FI-2020db_FIA_from_original_dataset.zarr}"
+: "${TABLE_ROOT:=/g/data/gv90/da1339/graphical/LD-pub-workspace/tables}"
+
+args=(FIA_statistics_tables.py
+      --sim-names "${SIM_NAMES}"
+      --start-date "${START_DATE}"
+      --end-date "${END_DATE}"
+      --classification "${CLASSIFICATION}"
+      --grid-type "${GRID_TYPE}"
+      --ice-type "${ICE_TYPE}"
+      --project "${PROJECT}"
+      --user "${USER_NAME}"
+      --af2020-fia-store "${AF2020_FIA_STORE}"
+      --table-root "${TABLE_ROOT}"
+      --chunks-time "${CHUNKS_TIME:-366}"
+      --min-rate-points "${MIN_RATE_POINTS:-3}"
+      --min-rate-months "${MIN_RATE_MONTHS:-2}")
+
+if [[ -n "${TAG:-}" ]]; then
+  args+=(--tag "${TAG}")
+fi
+if [[ -n "${MIN_EDGE_TRIM_DAYS:-}" ]]; then
+  args+=(--min-edge-trim-days "${MIN_EDGE_TRIM_DAYS}")
+fi
+
+python "${args[@]}"

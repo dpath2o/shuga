@@ -100,6 +100,7 @@ class ObservationSpec:
     af2020_root              : str | Path | None = None
     af2020_fia_daily_file    : str = "FIA_AF2020_daily.nc"
     af2020_fia_daily_var     : str = "AF2020"
+    af2020_fia_native_store  : str = "AF-FI-2020db_FIA_from_original_dataset.zarr"
     af2020_regridded_store   : str = "AF-FI-2020db_org-timestep_reG.zarr"
     af2020_climatology_store : str = "AF-FI-2020db_18yrAvg_gridded.zarr"
     af2020_regridded_var     : str = "FI"

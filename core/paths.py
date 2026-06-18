@@ -219,6 +219,15 @@ class ShugaPaths:
         return self.seaice_root_path / "FI_obs"
 
     @property
+    def af2020_fia_native_store_path(self) -> Path:
+        obs = self.obs_cfg or ObservationSpec()
+        return self.fi_obs_root_path / obs.af2020_fia_native_store
+
+    @property
+    def ld_pub_tables_root_path(self) -> Path:
+        return Path(f"/g/data/{self._project}/{self._user}/graphical/LD-pub-workspace/tables")
+
+    @property
     def nsidc_root_path(self) -> Path:
         obs = self.obs_cfg or ObservationSpec()
         if obs.nsidc_root is not None:
