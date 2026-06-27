@@ -83,6 +83,8 @@ class PlottingSpec:
     grid_style        : str               = "s0.1c"
     nsidc_pen         : str               = "1p,green"
     fip_cmap          : str | Path | None = None
+    fip_diff_con_cmap : str | Path | None = None
+    fip_diff_cat_cmap : str | Path | None = None
     colorbar_position : str               = "JMB+w8c/0.4c+o0.8c/0c"
     colorbar_xlabel   : str | None        = None
     colorbar_ylabel   : str | None        = None

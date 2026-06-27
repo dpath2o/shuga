@@ -161,17 +161,35 @@ class AF2020Observations:
         return mask
 
     def native_area(self, ds: xr.Dataset | None = None) -> xr.DataArray | None:
-        """Return native AF2020 cell area in m2 when present."""
-        ds = ds if ds is not None else (self._org_cache or self.open_org())
-        n  = self.af20_cfg
-        if n.area not in ds:
-            return None
-        area = ds[n.area]
-        if "time" in area.dims:
-            area = area.isel(time=0, drop=True)
-        area = self._with_standard_spatial_dims(area).astype("float64").rename("AF_cell_area")
-        area.attrs.update(long_name="AF2020 native cell area", units="m2")
-        return area
+            """
+            Return native AF2020 cell area in m2 when present.
+
+            The Fraser AF2020 native NetCDF files store ``area`` in km2:
+                area:units = "km2"
+            shuga FIA diagnostics use area in m2 and divide by 1e9 so that FIA is
+            reported in 10^3 km^2, matching the simulation metrics.
+            """
+            ds = ds if ds is not None else (self._org_cache or self.open_org())
+            n  = self.af20_cfg
+            if n.area not in ds:
+                return None
+            area = ds[n.area]
+            if "time" in area.dims:
+                area = area.isel(time = 0, drop = True)
+            src_units = str(area.attrs.get("units", "")).strip().lower().replace(" ", "")
+            area      = self._with_standard_spatial_dims(area).astype("float64")
+            if src_units in {"km2", "km^2", "square_kilometers", "squarekilometers", "square_kilometres", "squarekilometres"}:
+                area = area * 1.0e6
+            elif src_units in {"m2", "m^2", "square_meters", "squaremeters", "square_metres", "squaremetres"}:
+                pass
+            else:
+                raise ValueError(f"Cannot safely convert AF2020 area units {src_units!r} to m2. Expected km2/km^2 or m2/m^2.")
+            area = area.rename("AF_cell_area")
+            area.attrs.update(long_name       = "AF2020 native cell area",
+                              units           = "m2",
+                              source_units    = src_units or "unknown",
+                              conversion_note = "Converted to m^2 for SI-unit storage; FIA scale=1e9 then gives 10^3 km^2.")
+            return area
 
     def native_region_mask(self, ds: xr.Dataset | None = None, *,
                            regions: Sequence[str] | None = None) -> xr.DataArray:
@@ -221,18 +239,25 @@ class AF2020Observations:
         else:
             region_names = tuple(regions)
         spatial_dims = [d for d in mask.dims if d != "time"]
+        sector_names = tuple(r for r in region_names if r != "circum_antarctic")
+        sector_masks = self.native_region_mask(ds, regions=sector_names) if sector_names else None
         series: list[xr.DataArray] = []
         labels: list[str] = []
         for region_name in region_names:
             if region_name == "circum_antarctic":
                 weighted = mask.astype("float64") * area.astype("float64")
             else:
-                rmask = self.native_region_mask(ds, regions=(region_name,)).sel(region=region_name)
+                if sector_masks is None:
+                    raise ValueError("No regional sector masks were constructed.")
+                rmask = sector_masks.sel(region=region_name, drop=True)
                 weighted = mask.where(rmask, 0.0).astype("float64") * area.where(rmask, 0.0).astype("float64")
             da = (weighted.sum(dim=spatial_dims, skipna=True) / float(scale)).rename(name)
+            if "region" in da.coords and "region" not in da.dims:
+                da = da.reset_coords("region", drop=True)
             series.append(da)
             labels.append(region_name)
-        out = xr.concat(series, dim=pd.Index(labels, name="region")).transpose("time", "region").astype("float32")
+        region_coord = xr.DataArray(labels, dims=("region",), name="region")
+        out = xr.concat(series, dim=region_coord, coords="minimal", compat="override").transpose("time", "region").astype("float32")
         out.attrs.update(long_name="AF2020 native-grid fast-ice area",
                          units="10^3 km^2" if scale == 1.0e9 else f"m2/{scale:g}",
                          source_projection="AF2020 original projection",
@@ -257,7 +282,15 @@ class AF2020Observations:
             shutil.rmtree(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         ds_out = self.native_fia_timeseries(**kwargs)
-        ds_out.to_zarr(target, mode="w", consolidated=False)
+        # The native AF2020 source files can leave irregular dask chunks
+        # along time after open_mfdataset/xarray reductions, for example
+        # (20, 24, 24, ..., 4). Zarr requires uniform chunks except for the
+        # final chunk, so rechunk this compact output table explicitly.
+        if "time" in ds_out.sizes:
+            time_chunk   = min(64, int(ds_out.sizes["time"]))
+            region_chunk = int(ds_out.sizes.get("region", 1))
+            ds_out       = ds_out.chunk({"time": time_chunk, "region": region_chunk})
+        ds_out.to_zarr(target, mode = "w", consolidated = False)
         return ds_out
 
     def daily_fic(self, mask: xr.DataArray | None = None, *,

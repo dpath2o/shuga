@@ -208,8 +208,15 @@ class ShugaPaths:
 
     @property
     def fip_cmap(self) -> Path:
-        D_graph = self.graphics_root_path
-        return (D_graph / "CPTs" / "AF2020_YlGnBu.cpt")
+        return (self.graphics_root_path / "CPTs" / "AF2020_YlGnBu.cpt")
+
+    @property
+    def fip_diff_con_cmap(self) -> Path:
+        return (self.graphics_root_path / "CPTs" / "FIPdiff_green_orange_blue.cpt")
+
+    @property
+    def fip_diff_cat_cmap(self) -> Path:
+        return (self.graphics_root_path / "CPTs" / "FIP_diff_cat.cpt")
 
     @property
     def fi_obs_root_path(self) -> Path:
@@ -225,7 +232,7 @@ class ShugaPaths:
 
     @property
     def ld_pub_tables_root_path(self) -> Path:
-        return Path(f"/g/data/{self._project}/{self._user}/graphical/LD-pub-workspace/tables")
+        return Path(f"/g/data/{self._project}/{self._user}/GRAPHICAL/LD-pub-workspace/tables")
 
     @property
     def nsidc_root_path(self) -> Path:

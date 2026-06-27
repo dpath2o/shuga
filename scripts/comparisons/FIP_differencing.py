@@ -11,8 +11,10 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 from shuga.core.types import ClassificationSpec, MetricsSpec, ObservationSpec, PlottingSpec, RunSpec
 from shuga.core.paths import ShugaPaths
-from shuga.io import load_classified, load_metrics
-from shuga.plotting.cice import CICEPlotter, compute_fip
+from shuga.io import load_classified
+from shuga.metrics.calculations import compute_persistence_mask
+from shuga.plotting.cice import CICEPlotter
+from shuga.core.regions import ANTARCTIC_8_REGIONS
 from shuga.regridding.pyresample import (add_lonlat_from_epsg3031,
                                         area_definition_from_xy,
                                         compute_fipdiff_stats_weighted,
@@ -70,6 +72,56 @@ def _open_static_grid(sim_name: str) -> xr.Dataset:
     ds = xr.open_zarr(path, consolidated=False)
     return ds[["TLON", "TLAT"]]
 
+def _fip_range(label: str, da: xr.DataArray) -> None:
+    """Small runtime diagnostic to catch 0--100 vs 0--1 mistakes."""
+    mn = float(da.min(skipna=True).compute())
+    mx = float(da.max(skipna=True).compute())
+    print(f"[check] {label} range: {mn:.4f} .. {mx:.4f}")
+
+def _load_compute_sim_fip(args: argparse.Namespace,
+                          run_cfg: RunSpec,
+                          cls_cfg: ClassificationSpec,
+                          met_cfg: MetricsSpec,
+                          plt_cfg: PlottingSpec,
+                          obs_cfg: ObservationSpec,
+                          pth_cfg: ShugaPaths,
+                          fip_start: str,
+                          fip_end: str) -> xr.DataArray:
+    """
+    Compute simulation FIP on the fly from the classified FI mask.
+
+    This deliberately avoids the stored metrics FIP because older/current
+    metrics stores may use percent units. FIP differencing requires a
+    0--1 fraction to match AF2020 FIC.mean("time").
+    """
+    cls = load_classified(run_cfg        = run_cfg,
+                          cls_cfg        = cls_cfg,
+                          met_cfg        = met_cfg,
+                          plt_cfg        = plt_cfg,
+                          obs_cfg        = obs_cfg,
+                          pth_cfg        = pth_cfg,
+                          classification = args.classification,
+                          variables      = [f"{args.ice_type.upper()}_mask"],
+                          hemisphere     = args.hemisphere,
+                          grid_type      = args.grid_type,
+                          chunks         = {"time": args.chunks_time})
+    mask_name = f"{args.ice_type.upper()}_mask"
+    if mask_name not in cls:
+        if "FI_mask" in cls:
+            mask_name = "FI_mask"
+        else:
+            raise KeyError(f"No {args.ice_type.upper()}_mask/FI_mask found in classification store. Available variables: {list(cls.data_vars)}")
+    fi = cls[mask_name].sel(time=slice(fip_start, fip_end))
+    if fi.sizes.get("time", 0) == 0:
+        raise ValueError(f"No simulation {mask_name} data in {fip_start}..{fip_end}.")
+    sim_fip = compute_persistence_mask(fi, name = "SIM_FIP", long_name = "Fast Ice Persistence", percent = False)
+    sim_fip = sim_fip.astype("float32")
+    sim_fip.attrs.update(source     = "computed on the fly from classified mask",
+                         units      = "1",
+                         time_start = fip_start,
+                         time_end   = fip_end)
+    return sim_fip
+
 def main() -> None:
     args               = parse_args()
     fip_start, fip_end = _comparison_window(args)
@@ -94,24 +146,13 @@ def main() -> None:
     af                 = xr.open_zarr(af_store, consolidated = False, chunks = {"time": args.chunks_time})
     if "FIC" not in af:
         raise KeyError(f"AF2020 store must contain FIC to compute period-specific FIP: {af_store}")
-    obs_fip = af["FIC"].sel(time=slice(fip_start, fip_end)).mean("time", skipna=True).astype("float32").rename("obs")
+    obs_fip = af["FIC"].sel(time = slice(fip_start, fip_end)).mean("time", skipna = True).astype("float32").rename("obs")
     obs_fip.attrs.update(source="AF2020 common-grid FIC", time_start=fip_start, time_end=fip_end)
-    ds_met = load_metrics(run_cfg        = run_cfg,
-                          cls_cfg        = cls_cfg,
-                          met_cfg        = met_cfg,
-                          plt_cfg        = plt_cfg,
-                          obs_cfg        = obs_cfg,
-                          pth_cfg        = pth_cfg,
-                          classification = args.classification,
-                          variables      = ["FIP"],
-                          hemisphere     = args.hemisphere,
-                          grid_type      = args.grid_type,
-                          chunks         = {"time": args.chunks_time})
-    if "FIP" not in ds_met:
-        raise KeyError(f"Metrics store does not contain FIP. Found variables: {list(ds_met.data_vars)}")
-    sim_fip_native = ds_met["FIP"].squeeze(drop=True).astype("float32").rename("SIM_FIP")
+    _fip_range("AF2020 obs_fip", obs_fip)
+    sim_fip_native = _load_compute_sim_fip(args, run_cfg, cls_cfg, met_cfg, plt_cfg, obs_cfg, pth_cfg, fip_start, fip_end)
     if sim_fip_native.ndim != 2:
-        raise ValueError(f"Expected 2-D FIP for resampling, got dims={sim_fip_native.dims}, shape={sim_fip_native.shape}")
+        raise ValueError(f"Expected 2-D simulation FIP for resampling, got dims={sim_fip_native.dims}, shape={sim_fip_native.shape}")
+    _fip_range("simulation native sim_fip", sim_fip_native)
     cice           = _open_static_grid(args.sim_name)
     area_def       = area_definition_from_xy(af["x"], af["y"], pixel_size = float(args.pixel_size_m), area_id = "AF2020_common_for_FIP_diff")
     mod_fip        = resample_swath_to_area(sim_fip_native, cice["TLAT"].values, cice["TLON"].values + float(args.cice_lon_shift_deg), area_def,
@@ -119,6 +160,7 @@ def main() -> None:
                                             fill_value = np.nan,
                                             pixel_size = float(args.pixel_size_m),
                                             name       = "mod")
+    _fip_range("simulation common-grid mod_fip", mod_fip)
     FIP            = fip_difference_dataset(mod_fip, obs_fip, category_threshold = float(args.category_threshold), name_mod = "mod", name_obs = "obs")
     FIP            = FIP.assign_coords(lon = af["lon"], lat = af["lat"])
     FIP.attrs.update(sim_name              = args.sim_name,
@@ -147,16 +189,29 @@ def main() -> None:
     stats.to_csv(stats_csv)
     print(f"[done] wrote stats: {stats_csv}")
     if args.plot:
-        plotter   = CICEPlotter(run_cfg = run_cfg, cls_cfg = cls_cfg, met_cfg = met_cfg, plt_cfg = plt_cfg, obs_cfg =obs_cfg, pth_cfg = pth_cfg)
-        plot_root = Path(args.plot_root).expanduser() if args.plot_root else out_store.parent / "figures"
-        field     = "diff_cat" if args.plot_categorical else "diff"
-        plotter.plot_fip(method      = args.classification,
-                         source      = "dataset",
-                         field       = field,
-                         dataset     = FIP,
-                         output_root = plot_root,
-                         title       = f"{args.sim_name} - AF2020 {fip_start} to {fip_end}")
-        print(f"[done] wrote regional plots under: {plot_root}")
+        plotter = CICEPlotter(run_cfg = run_cfg,
+                              cls_cfg = cls_cfg,
+                              met_cfg = met_cfg,
+                              plt_cfg = plt_cfg,
+                              obs_cfg = obs_cfg,
+                              pth_cfg = pth_cfg)
+        if args.plot_root:
+            plot_base = Path(args.plot_root).expanduser()
+        else:
+            plot_base = (Path("/g/data/gv90/da1339/GRAPHICAL/LD-pub-workspace") / args.sim_name / "FIP_diff")
+        field = "diff_cat" if args.plot_categorical else "diff"
+        for reg_name, reg_def in ANTARCTIC_8_REGIONS.items():
+            plt_reg = reg_def["plot_region"]
+            out_png = (plot_base / reg_name / f"{fip_start}_{fip_end}_{args.sim_name}_{reg_name}.png")
+            out_png.parent.mkdir(parents = True, exist_ok = True)
+            plotter.plot_fip(method      = args.classification,
+                             source      = "dataset",
+                             field       = field,
+                             dataset     = FIP,
+                             regions     = {reg_name: plt_reg},
+                             output_path = out_png,
+                             title       = f"{args.sim_name} - AF2020 {fip_start} to {fip_end}")
+            print(f"[done] wrote regional plot: {out_png}")
 
 if __name__ == "__main__":
     main()
