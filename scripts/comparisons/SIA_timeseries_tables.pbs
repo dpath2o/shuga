@@ -1,0 +1,32 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q normal
+#PBS -l walltime=04:00:00
+#PBS -l ncpus=1
+#PBS -l mem=32GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -l wd
+#PBS -j oe
+#PBS -N sia_ts_cmp
+
+set -euo pipefail
+module use /g/data/xp65/public/modules
+module load conda/analysis3-25.12
+
+: "${SIM_NAMES:?Set SIM_NAMES as a space-separated list}"
+: "${START_DATE:?Set START_DATE=YYYY-MM-DD}"
+: "${END_DATE:?Set END_DATE=YYYY-MM-DD}"
+: "${NSIDC_SIA_STORE:?Set NSIDC_SIA_STORE=/path/to/nsidc_sia.zarr}"
+: "${OSISAF_SIA_STORE:=/g/data/gv90/da1339/observations/OSI-SAF-450/processed/OSI-SAF-450_SH_SIA.zarr}"
+: "${OUT_DIR:=/g/data/gv90/da1339/GRAPHICAL/AFIM/SIA_comparisons}"
+: "${SHUGA_ROOT:=/g/data/gv90/da1339/src/mawsons-chest}"
+
+cd "${SHUGA_ROOT}"
+python shuga/scripts/comparisons/SIA_timeseries_tables.py \
+  --sim-names ${SIM_NAMES} \
+  --start-date "${START_DATE}" \
+  --end-date "${END_DATE}" \
+  --nsidc-sia-store "${NSIDC_SIA_STORE}" \
+  --osisaf-sia-store "${OSISAF_SIA_STORE}" \
+  --out-dir "${OUT_DIR}" \
+  ${EXTRA_ARGS:-}

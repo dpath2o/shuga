@@ -1,0 +1,33 @@
+#!/bin/bash
+#PBS -P jk72
+#PBS -q copyq
+#PBS -l walltime=10:00:00
+#PBS -l ncpus=1
+#PBS -l mem=8GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -l wd
+#PBS -j oe
+#PBS -N osisaf450_sia
+
+set -euo pipefail
+module use /g/data/xp65/public/modules
+module load conda/analysis3-25.12
+
+: "${START_DATE:?Set START_DATE=YYYY-MM-DD}"
+: "${END_DATE:?Set END_DATE=YYYY-MM-DD}"
+: "${RAW_DIR:=/g/data/gv90/da1339/SeaIce/OSI-SAF-450/raw}"
+: "${PROCESSED_DIR:=/g/data/gv90/da1339/SeaIce/OSI-SAF-450/processed}"
+: "${DATASET_ID:=OSISAF-GLO-SEAICE_CONC_TIMESERIES-SH-LA-OBS}"
+: "${SHUGA_ROOT:=/g/data/gv90/da1339/src/mawsons-chest}"
+
+cd "${SHUGA_ROOT}"
+python shuga/scripts/downloading/download_OSI_SAF450.py \
+  --raw-dir "${RAW_DIR}" \
+  --processed-dir "${PROCESSED_DIR}" \
+  --start-date "${START_DATE}" \
+  --end-date "${END_DATE}" \
+  --dataset-id "${DATASET_ID}" \
+  --hemisphere SH \
+  --download \
+  --process \
+  ${OVERWRITE:+--overwrite}
