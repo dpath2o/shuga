@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SIM_NAMES=("Cs-high-ktens-high"
-    "Cs-high"
-    "Cs-high-ktens-mid"
-    "Cs-high-eDef"
-    "Cs-mid"
-    "Cs-low"
-    "Cq-high"
-    "Cq-mid"
-    "Cq-low"
-    "Cl-mid"
-    "Cl-low"
-    "blend-strain-mid"
-    "blend-strain-low"
-    "blend-strain-high"
-    "no-slip-LFI")
+SIM_NAMES=("cst-drag"
+	   "GIB-drag")
+    # 	   "Cs-high-ktens-high"
+    # "Cs-high"
+    # "Cs-high-ktens-mid"
+    # "Cs-high-eDef"
+    # "Cs-mid"
+    # "Cs-low"
+    # "Cq-high"
+    # "Cq-mid"
+    # "Cq-low"
+    # "Cl-mid"
+    # "Cl-low"
+    # "blend-strain-mid"
+    # "blend-strain-low"
+    # "blend-strain-high"
+    # "no-slip-LFI")
 
 START_YEAR="1995"
 END_YEAR="2005"

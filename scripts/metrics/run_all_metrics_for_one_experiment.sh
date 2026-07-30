@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SIM="blend-strain-high"
+SIM="Cs-high-roth-rhe-high"
 START="1995-01-01"
 END="2005-12-31"
 METHODS="binary-days,rolling-mean"

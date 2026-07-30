@@ -156,6 +156,91 @@ FIT_SEASONAL_NAMES = {f"F{name}" for name in IT_SEASONAL_NAMES}
 PIT_SEASONAL_NAMES = {f"P{name}" for name in IT_SEASONAL_NAMES}
 SIT_SEASONAL_NAMES = {f"S{name}" for name in IT_SEASONAL_NAMES}
 
+METRIC_INPUTS: dict[str, set[str]] = {
+    # Area
+    "FIA": {"aice", "tarea"},
+    "PIA": {"aice", "tarea"},
+    "SIA": {"aice", "tarea"},
+    # Volume and thickness
+    "FIV": {"aice", "hi", "tarea"},
+    "PIV": {"aice", "hi", "tarea"},
+    "SIV": {"aice", "hi", "tarea"},
+    "FIT": {"aice", "hi", "tarea"},
+    "PIT": {"aice", "hi", "tarea"},
+    "SIT": {"aice", "hi", "tarea"},
+    # Persistence
+    "FIP": set(),
+    "PIP": set(),
+    "SIP": {"aice"},
+    # Strength
+    "FIS": {"aice", "hi", "strength", "tarea"},
+    "PIS": {"aice", "hi", "strength", "tarea"},
+    "SIS": {"aice", "hi", "strength", "tarea"},
+    # Volume tendencies
+    "FITVR": {"aice", "dvidtt", "tarea"},
+    "FIMVR": {"aice", "dvidtd", "tarea"},
+    "PITVR": {"aice", "dvidtt", "tarea"},
+    "PIMVR": {"aice", "dvidtd", "tarea"},
+    "SITVR": {"aice", "dvidtt", "tarea"},
+    "SIMVR": {"aice", "dvidtd", "tarea"},
+    # Area tendencies
+    "FITAR": {"daidtt", "tarea"},
+    "FIMAR": {"daidtd", "tarea"},
+    "PITAR": {"daidtt", "tarea"},
+    "PIMAR": {"daidtd", "tarea"},
+    "SITAR": {"daidtt", "tarea"},
+    "SIMAR": {"daidtd", "tarea"},
+    # Spatial thickness
+    "FIHI": {"hi"},
+    "PIHI": {"hi"},
+    "SIHI": {"aice", "hi"},
+    # Spatial strength
+    "FIST": {"strength"},
+    "PIST": {"strength"},
+    "SIST": {"aice", "strength"},
+    # Regional metrics
+    "FIA_by_region": {"aice", "tarea", "TLON", "TLAT"},
+    "FIT_by_region": {"aice", "hi", "tarea", "TLON", "TLAT"},
+    "PIA_by_region": {"aice", "tarea", "TLON", "TLAT"},
+    "PIT_by_region": {"aice", "hi", "tarea", "TLON", "TLAT"},
+    "SIA_by_region": {"aice", "tarea", "TLON", "TLAT"},
+    "SIT_by_region": {"aice", "hi", "tarea", "TLON", "TLAT"}}
+
+SEASONAL_PARENT_GROUPS: dict[str, set[str]] = {
+    "FIA": FIA_SEASONAL_NAMES,
+    "FIT": FIT_SEASONAL_NAMES,
+    "PIA": PIA_SEASONAL_NAMES,
+    "PIT": PIT_SEASONAL_NAMES,
+    "SIA": SIA_SEASONAL_NAMES,
+    "SIT": SIT_SEASONAL_NAMES,
+}
+
+SEASONAL_PARENT_BY_NAME: dict[str, str] = {
+    seasonal_name: parent_name
+    for parent_name, seasonal_names in SEASONAL_PARENT_GROUPS.items()
+    for seasonal_name in seasonal_names
+}
+
+def seasonal_parent_metric(metric_name: str) -> str:
+    """
+    Return the primary time-series metric underlying a seasonal summary.
+
+    Non-seasonal metric names are returned unchanged.
+
+    Examples
+    --------
+    >>> seasonal_parent_metric("SIA_max_mean")
+    'SIA'
+    >>> seasonal_parent_metric("FIT_doy_min_std")
+    'FIT'
+    >>> seasonal_parent_metric("SIA")
+    'SIA'
+    """
+    token = str(metric_name).strip()
+    if not token:
+        raise ValueError("metric_name must be non-empty")
+    return SEASONAL_PARENT_BY_NAME.get(token, token)
+
 DOMAIN_ORDER   = ("FI", "PI", "SI")
 
 def _build_metric_domain_map() -> dict[str, str]:

@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -P jk72
+#PBS -P gv90
 #PBS -q copyq
 #PBS -l walltime=10:00:00
 #PBS -l ncpus=1

@@ -212,35 +212,51 @@ def process_downloaded_files(raw_dir: str | Path,
     LOGGER.info("Wrote %s", out_store)
     return out_store
 
-def download_with_copernicusmarine( output_dir: str | Path, start_date: str, end_date: str,
-                                    dataset_id: str = DEFAULT_DATASET_ID,
-                                    product_id: str = PRODUCT_ID,
-                                    variables: Sequence[str] | None = None,
-                                    username: str | None = None,
-                                    password: str | None = None,
-                                    overwrite: bool = False) -> None:
-    """Download OSI-SAF files using the Copernicus Marine Toolbox CLI.
+def download_with_copernicusmarine(output_dir: str | Path,
+                                   start_date: str,
+                                   end_date: str,
+                                   dataset_id: str = DEFAULT_DATASET_ID,
+                                   product_id: str = PRODUCT_ID,
+                                   variables: Sequence[str] | None = None,
+                                   username: str | None = None,
+                                   password: str | None = None,
+                                   overwrite: bool = False) -> None:
+    """Download OSI-SAF files using the Copernicus Marine Toolbox Python API.
 
-    Credentials are optional here. If omitted, the CLI uses its configured login
-    or COPERNICUSMARINE_SERVICE_USERNAME/PASSWORD environment variables.
+    Requires the `copernicusmarine` Python package. This intentionally avoids
+    calling the `copernicusmarine` command-line executable, which may not be on
+    PATH in Gadi batch jobs.
     """
+    try:
+        import copernicusmarine
+    except ImportError as exc:
+        raise ImportError("The Python package 'copernicusmarine' is required for OSI-SAF-450 "
+                          "downloads. Try:\n\n"
+                          "    module use /g/data/xp65/public/modules\n"
+                          "    module load conda/analysis3-26.02\n"
+                          "    python -c \"import copernicusmarine; print(copernicusmarine.__version__)\"\n\n"
+                          "If that fails, install it in your user environment with:\n\n"
+                          "    python -m pip install --user copernicusmarine\n") from exc
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    cmd = ["copernicusmarine", "subset", "--product-id", product_id, "--dataset-id", dataset_id,
-           "--start-datetime",f"{start_date}T00:00:00", "--end-datetime", f"{end_date}T23:59:59",
-           "--minimum-latitude", "-90", "--maximum-latitude", "0",
-           "--minimum-longitude", "-180", "--maximum-longitude", "180",
-           "--output-directory", str(output_dir)]
-    for var in variables or []:
-        cmd.extend(["--variable", var])
-    if overwrite:
-        cmd.append("--force-download")
+    output_dir.mkdir(parents = True, exist_ok = True)
+    subset_kwargs = dict(dataset_id = dataset_id,
+                         variables=list(variables) if variables else None,
+                         start_datetime=f"{start_date}T00:00:00",
+                         end_datetime=f"{end_date}T23:59:59",
+                         minimum_latitude=-90.0,
+                         maximum_latitude=0.0,
+                         minimum_longitude=-180.0,
+                         maximum_longitude=180.0,
+                         output_directory=str(output_dir),
+                         file_format="netcdf",
+                         service="timeseries",
+                         overwrite=overwrite)
     if username:
-        cmd.extend(["--username", username])
+        subset_kwargs["username"] = username
     if password:
-        cmd.extend(["--password", password])
-    LOGGER.info("Running: %s", " ".join(cmd[:12]) + " ...")
-    subprocess.run(cmd, check=True)
+        subset_kwargs["password"] = password
+    subset_kwargs = {k: v for k, v in subset_kwargs.items() if v is not None}
+    copernicusmarine.subset(**subset_kwargs)
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Download/process OSI-SAF-450 Antarctic SIA.")

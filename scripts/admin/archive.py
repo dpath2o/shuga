@@ -87,26 +87,10 @@ DEFAULT_ARCHIVE_ROOT = "/g/data/gv90/da1339/afim_output"
 #
 # This dictionary is authoritative. Any run directory not listed here is skipped.
 #
-MAPPED_CASES = {"free-slip"   : "Cs-high-ktens-mid",
-                "free-slip01" : "Cs-high",
-                "free-slip02" : "Cs-high-ktens-high",
-                "free-slip03" : "Cs-high-eDef",
-                "free-slip04" : "Cs-mid",
-                "free-slip05" : "Cs-low",
-                "free-slip06" : "Cq-high",
-                "free-slip07" : "Cq-mid",
-                "free-slip08" : "Cq-low",
-                "free-slip09" : "Cl-mid",
-                "free-slip10" : "Cl-low",
-                "free-slip11" : "blend-strain-mid",
-                "free-slip12" : "blend-strain-low",
-                "free-slip13" : "blend-strain-high",
-                "free-slip14" : "no-lateral-drag",
-                "no-slip-def" : "no-slip-def",
-                "no-slip-LFI" : "no-slip-LFI"}
-D_AVOIDS = {"CICE_0p25_Cgrid_coords.zarr", "future_work", "paper1", "paper3"}
-DATE_RE = re.compile(r"(?P<year>[12][0-9]{3})[-_](?P<month>[01][0-9])[-_](?P<day>[0-3][0-9])")
-MONTH_RE = re.compile(r"^[12][0-9]{3}_[01][0-9]$")
+MAPPED_CASES = {"free-slip"   : "Cs-high-hmix20"}
+D_AVOIDS     = {"CICE_0p25_Cgrid_coords.zarr", "future_work", "paper1", "paper3"}
+DATE_RE      = re.compile(r"(?P<year>[12][0-9]{3})[-_](?P<month>[01][0-9])[-_](?P<day>[0-3][0-9])")
+MONTH_RE     = re.compile(r"^[12][0-9]{3}_[01][0-9]$")
 
 ###########################################################################
 def natural_key(text):

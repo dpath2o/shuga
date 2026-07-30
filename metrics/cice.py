@@ -15,14 +15,13 @@ from shuga.io.zarr_loading import load_cice, load_classified
 from shuga.io.zarr_writing import sanitise_for_zarr_write
 from shuga.metrics.registry import (CORE_FI, CORE_SI, CORE_PI,
                                     REGIONAL, SPATIAL, SUMMARY, STRESS, DIAGS,
-                                    METRIC_GROUPS,
-                                    FIPSI_NAMES,
+                                    METRIC_GROUPS, FIPSI_NAMES,
                                     FIA_SKILL_NAMES, FIT_SKILL_NAMES,
                                     FIA_SEASONAL_NAMES, FIT_SEASONAL_NAMES,
                                     PIA_SEASONAL_NAMES, PIT_SEASONAL_NAMES,
                                     SIA_SEASONAL_NAMES, SIT_SEASONAL_NAMES,
-                                    expand_metric_names,
-                                    bucket_metric_names_by_domain)
+                                    METRIC_INPUTS, SEASONAL_PARENT_GROUPS, SEASONAL_PARENT_BY_NAME,
+                                    seasonal_parent_metric, expand_metric_names, bucket_metric_names_by_domain)
 from shuga.metrics.skill import skill_stats
 from shuga.metrics.temporal import (month_window_bounds,
                                     linear_rate_per_day,
@@ -320,25 +319,23 @@ class CICEMetrics:
         return backup_legacy_store(store, logger = self.logger)
 
     # ------------------------------------------------------------------
+    def required_cice_variables(self, metric_names) -> list[str]:
+        required: set[str] = set()
+        for name in metric_names:
+            parent = seasonal_parent_metric(name)
+            required.update(METRIC_INPUTS.get(parent, set()))
+        return sorted(required)
     # ------------------------------------------------------------------
-    def _get_cice(self) -> xr.Dataset:
-        if self._cice_cache is None:
-            requested = ["aice", "hi", "strength", "dvidtt", "dvidtd", "daidtt", "daidtd",
-                         "KuxE", "KuxN", "KuyE", "KuyN", "earea", "narea", "uarea",
-                         "tarea", "TLON", "TLAT", "ULON", "ULAT"]
-            requested = list(dict.fromkeys(requested + DIAGNOSTIC_INPUT_VARS))
-            self.logger.info("Resolved CICE store: %s", self.pth_cfg.resolve_cice_store())
-            static_store = self.pth_cfg.resolve_static_store()
-            if static_store is not None:
-                self.logger.info("Resolved static store: %s", static_store)
-            self._cice_cache = load_cice(run_cfg    = self.run_cfg,
-                                         cls_cfg    = self.cls_cfg,
-                                         met_cfg    = self.met_cfg,
-                                         pth_cfg    = self.pth_cfg,
-                                         variables  = requested,
-                                         hemisphere = self.run_cfg.hemisphere,
-                                         chunks     = self.chunks)
-        return self._cice_cache
+    def _get_cice(self, requested: set[str]) -> xr.Dataset:
+        variables = self.required_cice_variables(requested)
+        self.logger.info("Required CICE variables for requested metrics: %s, ",", ".join(variables))
+        return load_cice(run_cfg    = self.run_cfg,
+                         cls_cfg    = self.cls_cfg,
+                         met_cfg    = self.met_cfg,
+                         pth_cfg    = self.pth_cfg,
+                         variables  = variables,
+                         hemisphere = self.run_cfg.hemisphere,
+                         chunks     = self.chunks)
 
     # ------------------------------------------------------------------
     def _classified_variables_for_domain(self) -> list[str]:
@@ -457,30 +454,83 @@ class CICEMetrics:
         - running stress diagnostics;
         - attaching common metadata.
         """
-        ds            = self._get_cice()
-        aice          = ds["aice"]
-        hi            = ds["hi"]
-        area          = self._ensure_2d_static(ds["tarea"])
-        lon, lat      = self._detect_lonlat(ds)
-        regional_mask = self._region_mask(area, lon, lat)
-        domain        = str(self.cls_cfg.ice_type).strip().upper()
-        fi_mask       = None
-        pi_mask       = None
+        # ds            = self._get_cice(requested = requested)
+        # aice          = ds["aice"]
+        # hi            = ds["hi"]
+        # area          = self._ensure_2d_static(ds["tarea"])
+        # lon, lat      = self._detect_lonlat(ds)
+        # regional_mask = self._region_mask(area, lon, lat)
+        ds = self._get_cice(requested)
+        # ------------------------------------------------------------------
+        # Resolve only fields actually loaded for the requested metrics.
+        # ------------------------------------------------------------------
+        aice = ds.get("aice")
+        hi   = ds.get("hi")
+        area = ( self._ensure_2d_static(ds["tarea"]) if "tarea" in ds else None )
+        # Regional coordinates and masks are comparatively expensive and are
+        # unnecessary for non-regional metrics such as SIA.
+        needs_regional_mask = any(name.endswith("_by_region") for name in requested)
+        regional_mask       = None
+        if needs_regional_mask:
+            if area is None:
+                raise KeyError("Regional metrics require 'tarea', but it was not loaded.")
+            lon, lat      = self._detect_lonlat(ds)
+            regional_mask = self._region_mask(area, lon, lat)
+        domain  = str(self.cls_cfg.ice_type).strip().upper()
+        fi_mask = None
+        pi_mask = None
+        # ------------------------------------------------------------------
+        # Align an FI/PI mask with whichever dynamic fields are present.
+        # ------------------------------------------------------------------
+        def align_optional_fields_with_mask(mask: xr.DataArray) -> tuple[xr.DataArray | None, xr.DataArray | None, xr.DataArray]:
+            fields: list[xr.DataArray] = []
+            names: list[str]           = []
+            if aice is not None:
+                fields.append(aice)
+                names.append("aice")
+            if hi is not None:
+                fields.append(hi)
+                names.append("hi")
+            fields.append(mask)
+            names.append("mask")
+            aligned = xr.align(*fields, join="inner")
+            values  = dict(zip(names, aligned))
+            return (values.get("aice"), values.get("hi"), values["mask"])
+        # ------------------------------------------------------------------
         if domain == "FI":
             ds_mask           = self._get_classified(method)
             fi_mask           = ds_mask["FI_mask"].astype(bool)
-            aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
-            ds                = ds.sel(time=aice.time)
+            aice, hi, fi_mask = align_optional_fields_with_mask(fi_mask)
+            if "time" in fi_mask.coords:
+                ds = ds.sel(time=fi_mask.time)
         elif domain == "PI":
             ds_mask           = self._get_classified(method)
             pi_mask           = ds_mask["PI_mask"].astype(bool)
-            aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
-            ds                = ds.sel(time=aice.time)
+            aice, hi, pi_mask = align_optional_fields_with_mask(pi_mask)
+            if "time" in pi_mask.coords:
+                ds = ds.sel(time=pi_mask.time)
         elif domain == "SI":
             pass
         else:
             raise ValueError(f"Unsupported ice_type={domain!r}")
-        si_mask = self._si_mask(aice)
+        # Only metrics such as SIP, SIHI, and SI spatial rates need an
+        # explicit concentration-derived sea-ice mask.
+        si_mask = self._si_mask(aice) if aice is not None else None
+        # if domain == "FI":
+        #     ds_mask           = self._get_classified(method)
+        #     fi_mask           = ds_mask["FI_mask"].astype(bool)
+        #     aice, hi, fi_mask = xr.align(aice, hi, fi_mask, join="inner")
+        #     ds                = ds.sel(time=aice.time)
+        # elif domain == "PI":
+        #     ds_mask           = self._get_classified(method)
+        #     pi_mask           = ds_mask["PI_mask"].astype(bool)
+        #     aice, hi, pi_mask = xr.align(aice, hi, pi_mask, join="inner")
+        #     ds                = ds.sel(time=aice.time)
+        # elif domain == "SI":
+        #     pass
+        # else:
+        #     raise ValueError(f"Unsupported ice_type={domain!r}")
+        # si_mask = self._si_mask(aice)
         ctx     = MetricDispatchContext(ds           = ds,
                                         aice         = aice,
                                         hi           = hi,

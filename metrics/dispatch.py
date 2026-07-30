@@ -34,17 +34,14 @@ def needs_fast_ice_mask(requested: Iterable[str], fipsi_names: set[str]) -> bool
 
 @dataclass(slots=True)
 class MetricDispatchContext:
-    """
-    Shared metric-dispatch inputs for one simulation/method context.
-    """
     ds          : xr.Dataset
-    aice        : xr.DataArray
-    hi          : xr.DataArray
-    area        : xr.DataArray
-    region_mask : xr.DataArray
+    aice        : xr.DataArray | None
+    hi          : xr.DataArray | None
+    area        : xr.DataArray | None
+    region_mask : xr.DataArray | None
     fi_mask     : xr.DataArray | None
     pi_mask     : xr.DataArray | None
-    si_mask     : xr.DataArray
+    si_mask     : xr.DataArray | None
     area_scale  : float
     volume_scale: float
 
@@ -143,7 +140,7 @@ class MetricDispatcher:
         if name == "SIT":
             return calc.compute_thickness_series(aice, hi, area, None, name = "SIT", long_name = "Sea Ice Thickness")
         if name == "SIP":
-            return calc.compute_persistence_mask(None, name = "SIP", long_name = "Sea Ice Persistence")
+            return calc.compute_persistence_mask(si_mask, name = "SIP", long_name = "Sea Ice Persistence")
         if name == "SIS" and "strength" in ds:
             return calc.compute_strength_series(aice, hi, ds["strength"], area, None, name = "SIS", long_name = "Sea Ice Strength")
         if name == "SITVR" and "dvidtt" in ds:

@@ -40,31 +40,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bin-min-days", type=int, default=9)
     p.add_argument("--roll-window", type=int, default=15)
     p.add_argument("--iceh-frequency", choices = ["daily", "hourly"], default = "daily",
-                   help="CICE history frequency. daily -> iceh_daily.zarr/YYYY-MM; hourly -> iceh_hourly.zarr/YYYY_MM_DD.")
-    p.add_argument("--cice-store", default=None)
-    p.add_argument("--static-store", default=None)
-    p.add_argument("--classification-root", default=None)
-    p.add_argument("--afim-output-root", default=None)
-    p.add_argument("--graphics-root", default=None)
-    p.add_argument("--logs-root", default=None)
-    p.add_argument("--obs-metrics-store", default=None)
-    p.add_argument("--obs-fia-var", default="FIA")
-    p.add_argument("--obs-fit-var", default="FIT")
-    p.add_argument("--rebuild-on-index-mismatch", action="store_true")
-    p.add_argument("--coast-distance-var", default=None)
-    p.add_argument("--seaice-root", default=None)
-    p.add_argument("--nsidc-root", default=None)
-    p.add_argument("--nsidc-cellarea-root", default=None)
-    p.add_argument("--af2020-root", default=None)
-    p.add_argument("--metric-groups",
-                   default="default",
-                   help=("Comma-separated metric groups to compute/update. "
-                         "Use domain-specific groups with the new split stores: "
-                         "fi_core, fi_regional, fi_spatial, fi_summary, fi_stress, fi_diags, fi_all; "
-                         "pi_core, pi_regional, pi_spatial, pi_summary, pi_stress, pi_diags, pi_all; "
-                         "si_core, si_regional, si_spatial, si_summary, si_stress, si_diags, si_all. "
-                         "Cross-domain groups regional, spatial, summary, stress, diags, all are for diagnostics only "
-                         "and should not be used with split-domain metrics writing."))
+                   help = "CICE history frequency. daily -> iceh_daily.zarr/YYYY-MM; hourly -> iceh_hourly.zarr/YYYY_MM_DD.")
+    p.add_argument("--cice-store"               , default = None)
+    p.add_argument("--static-store"             , default = None)
+    p.add_argument("--classification-root"      , default = None)
+    p.add_argument("--afim-output-root"         , default = None)
+    p.add_argument("--graphics-root"            , default = None)
+    p.add_argument("--logs-root"                , default = None)
+    p.add_argument("--obs-metrics-store"        , default = None)
+    p.add_argument("--obs-fia-var"              , default = "FIA")
+    p.add_argument("--obs-fit-var"              , default = "FIT")
+    p.add_argument("--rebuild-on-index-mismatch", action  = "store_true")
+    p.add_argument("--coast-distance-var"       , default = None)
+    p.add_argument("--seaice-root"              , default = None)
+    p.add_argument("--nsidc-root"               , default = None)
+    p.add_argument("--nsidc-cellarea-root"      , default = None)
+    p.add_argument("--af2020-root"              , default = None)
+    p.add_argument("--metric-groups"            , default = None,
+                   help = ("Comma-separated metric groups. When neither --metric-groups nor "
+                           "--metric-names is supplied, the domain-specific core group is used."))
     p.add_argument("--metric-names",
                    default=None,
                    help="Comma-separated explicit metric names to compute/update in addition to metric-groups.")
@@ -88,6 +82,8 @@ def main() -> None:
     methods       = [normalize_method(m) for m in _comma_split(args.methods)]
     metric_groups = _comma_split(args.metric_groups)
     metric_names  = _comma_split(args.metric_names)
+    if not metric_groups and not metric_names:
+        metric_groups = [f"{args.ice_type.strip().lower()}_core"]
     run_cfg       = RunSpec(sim_name       = args.sim_name,
                             start_date     = args.start_date,
                             end_date       = args.end_date,

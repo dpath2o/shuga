@@ -27,7 +27,7 @@ ICEH_FREQUENCY="${ICEH_FREQUENCY:-daily}"
 OVERWRITE="${OVERWRITE:-false}"
 UPDATE_MISSING_ONLY="${UPDATE_MISSING_ONLY:-true}"
 REBUILD_ON_INDEX_MISMATCH="${REBUILD_ON_INDEX_MISMATCH:-false}"
-METRIC_GROUPS="${METRIC_GROUPS:-default}"
+METRIC_GROUPS="${METRIC_GROUPS:-}"
 METRIC_NAMES="${METRIC_NAMES:-}"
 PLOT_FIP="${PLOT_FIP:-false}"
 PLOT_FIA="${PLOT_FIA:-false}"
@@ -71,7 +71,6 @@ CMD=(
   --bin-min-days "$BIN_MIN_DAYS"
   --roll-window "$ROLL_WINDOW"
   --iceh-frequency "$ICEH_FREQUENCY"
-  --metric-groups "$METRIC_GROUPS"
   --log-level "$LOG_LEVEL"
   --obs-fia-var "$OBS_FIA_VAR"
   --obs-fit-var "$OBS_FIT_VAR"
@@ -81,22 +80,23 @@ CMD=(
 if [[ "${REBUILD_ON_INDEX_MISMATCH}" == "true" ]]; then
     CMD+=(--rebuild-on-index-mismatch)
 fi
-[[ -n "$METRIC_NAMES" ]] && CMD+=(--metric-names "$METRIC_NAMES")
-[[ -n "${CICE_STORE:-}" ]] && CMD+=(--cice-store "$CICE_STORE")
-[[ -n "${STATIC_STORE:-}" ]] && CMD+=(--static-store "$STATIC_STORE")
-[[ -n "${CLASSIFICATION_ROOT:-}" ]] && CMD+=(--classification-root "$CLASSIFICATION_ROOT")
-[[ -n "${AFIM_OUTPUT_ROOT:-}" ]] && CMD+=(--afim-output-root "$AFIM_OUTPUT_ROOT")
-[[ -n "${GRAPHICS_ROOT:-}" ]] && CMD+=(--graphics-root "$GRAPHICS_ROOT")
-[[ -n "${LOGS_ROOT:-}" ]] && CMD+=(--logs-root "$LOGS_ROOT")
-[[ -n "${OBS_METRICS_STORE:-}" ]] && CMD+=(--obs-metrics-store "$OBS_METRICS_STORE")
-[[ -n "${COAST_DISTANCE_VAR:-}" ]] && CMD+=(--coast-distance-var "$COAST_DISTANCE_VAR")
+[[ -n "$METRIC_GROUPS" ]]              && CMD+=(--metric-groups "$METRIC_GROUPS")
+[[ -n "$METRIC_NAMES"  ]]              && CMD+=(--metric-names "$METRIC_NAMES")
+[[ -n "${CICE_STORE:-}" ]]             && CMD+=(--cice-store "$CICE_STORE")
+[[ -n "${STATIC_STORE:-}" ]]           && CMD+=(--static-store "$STATIC_STORE")
+[[ -n "${CLASSIFICATION_ROOT:-}" ]]    && CMD+=(--classification-root "$CLASSIFICATION_ROOT")
+[[ -n "${AFIM_OUTPUT_ROOT:-}" ]]       && CMD+=(--afim-output-root "$AFIM_OUTPUT_ROOT")
+[[ -n "${GRAPHICS_ROOT:-}" ]]          && CMD+=(--graphics-root "$GRAPHICS_ROOT")
+[[ -n "${LOGS_ROOT:-}" ]]              && CMD+=(--logs-root "$LOGS_ROOT")
+[[ -n "${OBS_METRICS_STORE:-}" ]]      && CMD+=(--obs-metrics-store "$OBS_METRICS_STORE")
+[[ -n "${COAST_DISTANCE_VAR:-}" ]]     && CMD+=(--coast-distance-var "$COAST_DISTANCE_VAR")
 [[ "$UPDATE_MISSING_ONLY" == "true" ]] && CMD+=(--update-missing-only)
-[[ "$OVERWRITE" == "true" ]] && CMD+=(--overwrite)
-[[ "$PLOT_FIP" == "true" ]] && CMD+=(--plot-fip)
-[[ "$PLOT_FIA" == "true" ]] && CMD+=(--plot-fia)
-[[ "$PLOT_FIT" == "true" ]] && CMD+=(--plot-fit)
-[[ "$PLOT_SIA" == "true" ]] && CMD+=(--plot-sia)
-[[ "$PLOT_SIT" == "true" ]] && CMD+=(--plot-sit)
+[[ "$OVERWRITE" == "true" ]]           && CMD+=(--overwrite)
+[[ "$PLOT_FIP" == "true" ]]            && CMD+=(--plot-fip)
+[[ "$PLOT_FIA" == "true" ]]            && CMD+=(--plot-fia)
+[[ "$PLOT_FIT" == "true" ]]            && CMD+=(--plot-fit)
+[[ "$PLOT_SIA" == "true" ]]            && CMD+=(--plot-sia)
+[[ "$PLOT_SIT" == "true" ]]            && CMD+=(--plot-sit)
 
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"

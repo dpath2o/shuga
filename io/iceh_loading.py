@@ -240,8 +240,7 @@ class IceHistoryLoader:
                                               chunks      = chunks,
                                               allow_empty = False,
                                               logger      = self.logger)
-
-        ds_all = _merge_static(ds_all, self.pth_cfg, stat_eff, var_list, chunks = chunks, logger = self.logger)
+        ds_all = _merge_static(ds_all, self.pth_cfg, stat_eff, stat_req, chunks = chunks, logger = self.logger)
         ds_all = _apply_hemisphere_mask(ds_all, hemisphere or self.run_cfg.hemisphere)
         if var_list is not None:
             present = [v for v in var_list if v in ds_all.data_vars or v in ds_all.coords]

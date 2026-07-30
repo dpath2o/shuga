@@ -30,7 +30,7 @@ def load_cice_tgrid_for_xesmf(cice_grid_file: str | Path | None = None, *, lon_t
     pth_cfg   = ShugaPaths()
     grid_path = pth_cfg.resolve_cice_grid_file(cice_grid_file)
     grid_spec = CICEGridSpec(lon_type = lon_type)
-    gridwork  = CICEGridwork(pth_cfg = pth_cfg, grid_spec = grid_spec, logger = logger)
+    gridwork  = CICEGridwork(pth_cfg = pth_cfg, G_cice_cfg = grid_spec, logger = logger)
     bundle    = gridwork.load_cice_grid(P_grid = grid_path, build_faces = False)
     lon       = xr.DataArray(bundle.tgrid["TLON"].values, dims = ("ny", "nx"), name = "lon", attrs = {"units": "degrees_east"})
     lat       = xr.DataArray(bundle.tgrid["TLAT"].values, dims = ("ny", "nx"), name = "lat", attrs = {"units": "degrees_north"})

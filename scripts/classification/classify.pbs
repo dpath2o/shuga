@@ -6,7 +6,7 @@
 #PBS -l mem=190GB
 #PBS -l jobfs=5GB
 #PBS -j oe
-#PBS -l storage=gdata/xp65+gdata/gv90+gdata/ik11+scratch/gv90
+#PBS -l storage=gdata/xp65+gdata/gv90+gdata/ik11+scratch/jk72+scratch/gv90
 
 set -euo pipefail
 

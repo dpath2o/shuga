@@ -1,12 +1,12 @@
 #!/bin/bash
 #PBS -N ERA5-nccopy-fast
-#PBS -P gv90
+#PBS -P jk72
 #PBS -q normalbw
 #PBS -l ncpus=1
 #PBS -l mem=16GB
 #PBS -l jobfs=20GB
 #PBS -l walltime=06:00:00
-#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -l storage=gdata/gv90+gdata/xp65+scratch/jk72
 #PBS -j oe
 #PBS -M daniel.atwater@utas.edu.au
 #PBS -m abe
@@ -22,8 +22,8 @@ module load conda/analysis3-26.02
 # ---------------------------------------------------------------------
 ERA5_DIR="${ERA5_DIR:-/g/data/gv90/da1339/afim_input/ERA5/0p25/bilinear/monthly_cice6}"
 
-START_YM="${START_YM:-1993-01}"
-END_YM="${END_YM:-1994-12}"
+START_YM="${START_YM:-1996-01}"
+END_YM="${END_YM:-1996-12}"
 
 # If 1, files whose time dimension is already fixed-size are skipped.
 # This should skip your already-converted January file.
