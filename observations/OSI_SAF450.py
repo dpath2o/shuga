@@ -18,26 +18,19 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-LOGGER = logging.getLogger(__name__)
-
-PRODUCT_ID = "SEAICE_GLO_SEAICE_L4_REP_OBSERVATIONS_011_009"
-DEFAULT_DATASET_ID = "OSISAF-GLO-SEAICE_CONC_TIMESERIES-SH-LA-OBS"
-DEFAULT_CONT_DATASET_ID = "OSISAF-GLO-SEAICE_CONC_CONT_TIMESERIES-SH-LA-OBS"
-DEFAULT_AMSR_CDR_SH_DATASET_ID = "osisaf_obs-si_glo_phy_sic-south_my_amsr_cdr_P1D-m"
+LOGGER                          = logging.getLogger(__name__)
+EARTH_RADIUS_M                  = 6_371_008.8
+PRODUCT_ID                      = "SEAICE_GLO_SEAICE_L4_REP_OBSERVATIONS_011_009"
+DEFAULT_DATASET_ID              = "OSISAF-GLO-SEAICE_CONC_TIMESERIES-SH-LA-OBS"
+DEFAULT_CONT_DATASET_ID         = "OSISAF-GLO-SEAICE_CONC_CONT_TIMESERIES-SH-LA-OBS"
+DEFAULT_AMSR_CDR_SH_DATASET_ID  = "osisaf_obs-si_glo_phy_sic-south_my_amsr_cdr_P1D-m"
 DEFAULT_AMSR_ICDR_SH_DATASET_ID = "osisaf_obs-si_glo_phy_sic-south_my_amsr_icdr_P1D-m"
-
-CONC_CANDIDATES = ("ice_conc",
-                   "sea_ice_area_fraction",
-                   "siconc",
-                   "sic",
-                   "concentration",
-                   "cdr_seaice_conc")
-LAT_CANDIDATES  = ("lat", "latitude", "TLAT")
-LON_CANDIDATES  = ("lon", "longitude", "TLON")
-AREA_CANDIDATES = ("cell_area", "area", "areacello", "tarea", "cellarea")
-X_CANDIDATES    = ("xc", "x", "projection_x_coordinate")
-Y_CANDIDATES    = ("yc", "y", "projection_y_coordinate")
-
+CONC_CANDIDATES                 = ("ice_conc", "sea_ice_area_fraction", "siconc", "sic", "concentration", "cdr_seaice_conc")
+LAT_CANDIDATES                  = ("lat", "latitude", "TLAT")
+LON_CANDIDATES                  = ("lon", "longitude", "TLON")
+AREA_CANDIDATES                 = ("cell_area", "area", "areacello", "tarea", "cellarea")
+X_CANDIDATES                    = ("xc", "x", "projection_x_coordinate")
+Y_CANDIDATES                    = ("yc", "y", "projection_y_coordinate")
 
 @dataclass(frozen=True)
 class OSISAF450Config:
@@ -52,7 +45,47 @@ class OSISAF450Config:
     @property
     def sia_store(self) -> Path:
         hemi = self.hemisphere.upper()
-        return self.processed_dir / f"OSI-SAF-450_{hemi}_SIA.zarr"
+        return Path(self.processed_dir,f"OSI-SAF-450_{hemi}_SIA.zarr")
+
+def _coordinate_edges_1d(values: xr.DataArray, *, clip: tuple[float, float] | None = None) -> np.ndarray:
+    centres = np.asarray(values.values, dtype=float)
+    if centres.ndim != 1 or centres.size < 2:
+        raise ValueError("Coordinate centres must be one-dimensional with at least two values.")
+    if not np.all(np.diff(centres) > 0):
+        raise ValueError("Coordinate centres must be strictly increasing.")
+    edges       = np.empty(centres.size + 1, dtype=float)
+    edges[1:-1] = 0.5 * (centres[:-1] + centres[1:])
+    edges[0]    = centres[0] - 0.5 * (centres[1] - centres[0])
+    edges[-1]   = centres[-1] + 0.5 * (centres[-1] - centres[-2])
+    if clip is not None:
+        edges = np.clip(edges, clip[0], clip[1])
+    return edges
+
+def _regular_latlon_cell_area(ds: xr.Dataset, conc: xr.DataArray) -> xr.DataArray | None:
+    """Cell area for a rectilinear latitude/longitude grid on a sphere."""
+    lat_name = _first_name(ds, LAT_CANDIDATES)
+    lon_name = _first_name(ds, LON_CANDIDATES)
+    if lat_name is None or lon_name is None:
+        return None
+    lat = ds[lat_name]
+    lon = ds[lon_name]
+    if lat.ndim != 1 or lon.ndim != 1:
+        return None
+    if lat.dims[0] not in conc.dims or lon.dims[0] not in conc.dims:
+        return None
+    lat_edges = np.deg2rad(_coordinate_edges_1d(lat, clip=(-90.0, 90.0)))
+    lon_edges = np.deg2rad(_coordinate_edges_1d(lon))
+    lat_strip = np.abs(np.sin(lat_edges[1:]) - np.sin(lat_edges[:-1]))
+    dlon      = np.abs(np.diff(lon_edges))
+    area      = (EARTH_RADIUS_M ** 2) * lat_strip[:, None] * dlon[None, :]
+    out       = xr.DataArray(area,
+                             dims   = (lat.dims[0], lon.dims[0]),
+                             coords = {lat.dims[0]: lat, lon.dims[0]: lon},
+                             name   = "cell_area",
+                             attrs  = {"long_name"      : "spherical grid-cell area",
+                                       "units"          : "m2",
+                                       "earth_radius_m" : EARTH_RADIUS_M})
+    return out
 
 def _first_name(ds: xr.Dataset, candidates: Sequence[str]) -> str | None:
     for name in candidates:
@@ -84,13 +117,18 @@ def _find_concentration_name(ds: xr.Dataset) -> str:
     raise KeyError("Could not identify an OSI-SAF sea-ice concentration variable. Available variables: {list(ds.data_vars)}")
 
 def _normalise_fraction(conc: xr.DataArray) -> xr.DataArray:
-    """Return concentration as 0--1 fraction, preserving NaNs/masks."""
-    units = str(conc.attrs.get("units", "")).strip().lower()
+    """Return concentration as a 0--1 fraction, preserving NaNs."""
+    units = (str(conc.attrs.get("units", "")).strip().lower())
     valid = conc.where(np.isfinite(conc))
-    vmax = float(valid.max(skipna=True).compute()) if valid.size else np.nan
-    if units in {"%", "percent", "percentage"} or vmax > 1.5:
+    if units in {"%", "percent", "percentage"}:
+        return (valid / 100.0).clip(min = 0.0, max = 1.0)
+    if units in {"1", "fraction", "unitless", "dimensionless"}:
+        return valid.clip(min = 0.0, max = 1.0)
+    # Only inspect the values when the metadata are ambiguous.
+    vmax = (float(valid.max(skipna=True).compute()) if valid.size else np.nan)
+    if np.isfinite(vmax) and vmax > 1.5:
         valid = valid / 100.0
-    return valid.clip(min=0.0, max=1.0)
+    return valid.clip(min = 0.0, max = 1.0)
 
 def _infer_cell_area(ds: xr.Dataset, conc: xr.DataArray) -> xr.DataArray:
     """Infer grid-cell area in m2.
@@ -100,7 +138,10 @@ def _infer_cell_area(ds: xr.Dataset, conc: xr.DataArray) -> xr.DataArray:
       2. product grid x/y spacing in metres;
       3. OSI-SAF nominal 25 km grid-cell area fallback.
     """
-    area_name = _first_name(ds, AREA_CANDIDATES)
+    area_name    = _first_name(ds, AREA_CANDIDATES)
+    regular_area = _regular_latlon_cell_area(ds, conc)
+    if regular_area is not None:
+        return regular_area
     if area_name is not None:
         area = ds[area_name]
         units = str(area.attrs.get("units", "")).lower()
@@ -142,12 +183,21 @@ def _hemisphere_mask(ds: xr.Dataset, conc: xr.DataArray, hemisphere: str) -> xr.
 def open_osisaf_files(path_pattern: str | Path | Sequence[str | Path], chunks: dict | None = None) -> xr.Dataset:
     """Open downloaded OSI-SAF NetCDF files as one xarray Dataset."""
     if isinstance(path_pattern, (str, Path)):
-        paths = sorted(glob.glob(str(path_pattern)))
+        paths = sorted(glob.glob(str(path_pattern), recursive = True))
     else:
         paths = sorted(str(p) for p in path_pattern)
+    paths = [path for path in paths if Path(path).is_file()]
     if not paths:
         raise FileNotFoundError(f"No OSI-SAF NetCDF files matched {path_pattern!r}")
-    return xr.open_mfdataset(paths, combine="by_coords", chunks=chunks or {"time": 31})
+    LOGGER.info("Opening %d OSI-SAF NetCDF file(s); first file: %s", len(paths), paths[0])
+    return xr.open_mfdataset(paths,
+                             combine       = "by_coords",
+                             chunks        = chunks or {"time": 31},
+                             parallel      = False,
+                             data_vars     = "minimal",
+                             coords        = "minimal",
+                             compat        = "override",
+                             combine_attrs = "override")
 
 def compute_sia(ds: xr.Dataset, hemisphere: str = "SH", concentration_threshold: float = 15.0) -> xr.Dataset:
     """Compute daily sea-ice area from OSI-SAF concentration.
@@ -237,25 +287,63 @@ def download_with_copernicusmarine(output_dir: str | Path,
                           "    python -c \"import copernicusmarine; print(copernicusmarine.__version__)\"\n\n"
                           "If that fails, install it in your user environment with:\n\n"
                           "    python -m pip install --user copernicusmarine\n") from exc
+    from importlib.metadata import version
+    from packaging.version import Version
+    copernicusmarine_version = Version(version("copernicusmarine"))
+    zarr_version             = Version(version("zarr"))
+    LOGGER.info("Copernicus Marine Toolbox version: %s", copernicusmarine_version)
+    LOGGER.info("Zarr version: %s", zarr_version)
+    if (zarr_version.major >= 3 and copernicusmarine_version < Version("2.4.1")):
+        raise RuntimeError("This environment combines Zarr 3 with Copernicus Marine Toolbox "
+                           f"{copernicusmarine_version}. This combination can fail because the "
+                           "Copernicus CustomS3Stores3 is not opened read-only. Use "
+                           "copernicusmarine>=2.4.1 or a dedicated environment with zarr<3.")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents = True, exist_ok = True)
-    subset_kwargs = dict(dataset_id = dataset_id,
-                         variables=list(variables) if variables else None,
-                         start_datetime=f"{start_date}T00:00:00",
-                         end_datetime=f"{end_date}T23:59:59",
-                         minimum_latitude=-90.0,
-                         maximum_latitude=0.0,
-                         minimum_longitude=-180.0,
-                         maximum_longitude=180.0,
-                         output_directory=str(output_dir),
-                         file_format="netcdf",
-                         service="timeseries",
-                         overwrite=overwrite)
+    output_filename = (f"{dataset_id}_{start_date.replace('-', '')}_{end_date.replace('-', '')}.nc")
+    subset_kwargs = dict(dataset_id        = dataset_id,
+                         variables         = list(variables) if variables else None,
+                         start_datetime    = f"{start_date}T00:00:00",
+                         end_datetime      = f"{end_date}T23:59:59",
+                         minimum_latitude  = -90.0,
+                         maximum_latitude  = 0.0,
+                         minimum_longitude = -180.0,
+                         maximum_longitude = 180.0,
+                         output_directory  = str(output_dir),
+                         output_filename   = output_filename,
+                         file_format       = "netcdf",
+                         service           = "timeseries",
+                         overwrite         = overwrite,
+                         skip_existing     = not overwrite)
     if username:
         subset_kwargs["username"] = username
     if password:
         subset_kwargs["password"] = password
     subset_kwargs = {k: v for k, v in subset_kwargs.items() if v is not None}
+    def _patch_copernicusmarine_zarr3_read_only() -> None:
+        """
+        Temporary compatibility patch for older Copernicus Marine Toolbox
+        releases used with Zarr 3.
+
+        Remove this after requiring copernicusmarine >= 2.4.1.
+        """
+        import zarr
+        if not str(zarr.__version__).startswith("3"):
+            return
+        from copernicusmarine.core_functions.custom_s3_store_zarr_v3 import (CustomS3StoreZarrV3)
+        # Do not replace a native implementation supplied by a newer release.
+        if "with_read_only" in CustomS3StoreZarrV3.__dict__:
+            return
+        def with_read_only(self, read_only: bool = False) -> CustomS3StoreZarrV3:
+            return type(self)(endpoint                   = self._endpoint,
+                              bucket                     = self._bucket,
+                              root_path                  = self._root_path,
+                              copernicus_marine_username = (self._copernicus_marine_username),
+                              number_of_retries          = self.number_of_retries,
+                              initial_retry_wait_seconds = (self.initial_retry_wait_seconds),
+                              read_only                  = read_only)
+        CustomS3StoreZarrV3.with_read_only = with_read_only
+    _patch_copernicusmarine_zarr3_read_only()
     copernicusmarine.subset(**subset_kwargs)
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -285,28 +373,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         args.download = True
         args.process = True
     if args.download:
-        download_with_copernicusmarine(
-            output_dir=args.raw_dir,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            dataset_id=args.dataset_id,
-            product_id=args.product_id,
-            variables=args.variable,
-            username=args.username,
-            password=args.password,
-            overwrite=args.overwrite,
-        )
+        download_with_copernicusmarine(output_dir = args.raw_dir,
+                                       start_date = args.start_date,
+                                       end_date   = args.end_date,
+                                       dataset_id = args.dataset_id,
+                                       product_id = args.product_id,
+                                       variables  = args.variable,
+                                       username   = args.username,
+                                       password   = args.password,
+                                       overwrite  = args.overwrite)
     if args.process:
-        process_downloaded_files(
-            raw_dir=args.raw_dir,
-            processed_dir=args.processed_dir,
-            hemisphere=args.hemisphere,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            concentration_threshold=args.concentration_threshold,
-            overwrite=args.overwrite,
-            chunks_time=args.chunks_time,
-        )
+        process_downloaded_files(raw_dir                 = args.raw_dir,
+                                 processed_dir           = args.processed_dir,
+                                 hemisphere              = args.hemisphere,
+                                 start_date              = args.start_date,
+                                 end_date                = args.end_date,
+                                 concentration_threshold = args.concentration_threshold,
+                                 overwrite               = args.overwrite,
+                                 chunks_time             = args.chunks_time)
 
 if __name__ == "__main__":
     main()

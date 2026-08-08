@@ -62,15 +62,43 @@ def _find_lat_name(ds: xr.Dataset) -> str | None:
             return name
     return None
 
-def _apply_hemisphere_mask(ds: xr.Dataset, hemisphere: str | None) -> xr.Dataset:
+# def _apply_hemisphere_mask(ds: xr.Dataset, hemisphere: str | None) -> xr.Dataset:
+#     if hemisphere is None:
+#         return ds
+#     lat_name = _find_lat_name(ds)
+#     if lat_name is None:
+#         return ds
+#     lat = ds[lat_name]
+#     hemi = str(hemisphere).upper()
+#     mask = lat < 0 if hemi == "SH" else lat > 0
+#     return ds.where(mask)
+def _apply_hemisphere_mask(
+    ds: xr.Dataset,
+    hemisphere: str | None,
+) -> xr.Dataset:
     if hemisphere is None:
         return ds
+
     lat_name = _find_lat_name(ds)
+
     if lat_name is None:
-        return ds
+        raise KeyError(
+            "A hemisphere was requested but no latitude field was loaded. "
+            "Expected one of TLAT, ULAT, NLAT, ELAT, lat, or latitude."
+        )
+
     lat = ds[lat_name]
-    hemi = str(hemisphere).upper()
-    mask = lat < 0 if hemi == "SH" else lat > 0
+    hemi = str(hemisphere).strip().upper()
+
+    if hemi == "SH":
+        mask = lat < 0.0
+    elif hemi == "NH":
+        mask = lat > 0.0
+    else:
+        raise ValueError(
+            f"Unsupported hemisphere {hemisphere!r}; use 'SH' or 'NH'."
+        )
+
     return ds.where(mask)
 
 def _split_requested_variables(variables: list[str] | None, pth_cfg: ShugaPaths, static_store: Path | None, *,
@@ -213,39 +241,206 @@ class IceHistoryLoader:
             return {"time": 24}
         return {"time": 31}
 
-    def load(self, *,
-             dt0_str     : str | None = None,
-             dtN_str     : str | None = None,
-             variables                = None,
-             hemisphere  : str | None = None,
-             cice_store  : str | Path | None = None,
-             static_store: str | Path | None = None,
-             chunks      : dict | None = None) -> xr.Dataset:
-        chunks   = chunks or self.default_chunks()
-        var_list = _maybe_listify_variables(variables)
-        if var_list is None:
-            self.logger.warning("IceHistoryLoader.load() called with variables=None; this may be expensive.")
-        zarr_root         = (Path(cice_store).expanduser() if cice_store is not None else self.pth_cfg.resolve_cice_store())
-        stat_eff          = (Path(static_store).expanduser() if static_store is not None else self.pth_cfg.resolve_static_store())
-        dyn_req, stat_req = _split_requested_variables(var_list, self.pth_cfg, stat_eff, chunks = chunks, logger = self.logger)
-        only_stat_req     = var_list is not None and dyn_req is None and stat_req is not None
+    # def load(self, *,
+    #          dt0_str     : str | None = None,
+    #          dtN_str     : str | None = None,
+    #          variables                = None,
+    #          hemisphere  : str | None = None,
+    #          cice_store  : str | Path | None = None,
+    #          static_store: str | Path | None = None,
+    #          chunks      : dict | None = None) -> xr.Dataset:
+    #     var_list = _maybe_listify_variables(variables)
+    #     # if var_list is None:
+    #     #     self.logger.warning("IceHistoryLoader.load() called with variables=None; this may be expensive.")
+    #     # zarr_root         = (Path(cice_store).expanduser() if cice_store is not None else self.pth_cfg.resolve_cice_store())
+    #     # stat_eff          = (Path(static_store).expanduser() if static_store is not None else self.pth_cfg.resolve_static_store())
+    #     # dyn_req, stat_req = _split_requested_variables(var_list, self.pth_cfg, stat_eff, chunks = chunks, logger = self.logger)
+    #     chunks = chunks or self.default_chunks()
+    #     # Preserve the variables requested by the caller. Additional fields may be
+    #     # loaded internally and removed before returning the dataset.
+    #     requested_vars = _maybe_listify_variables(variables)
+    #     if requested_vars is None:
+    #         self.logger.warning(
+    #             "IceHistoryLoader.load() called with variables=None; "
+    #             "this may be expensive."
+    #         )
+    #         load_vars = None
+    #     else:
+    #         load_vars = list(requested_vars)
+    #     hemisphere_eff = hemisphere or self.run_cfg.hemisphere
+    #     # A latitude field is required to apply the hemisphere mask. SIA normally
+    #     # requests only aice and tarea, so TLAT must be loaded internally.
+    #     if load_vars is not None and hemisphere_eff is not None:
+    #         latitude_names = {
+    #             "TLAT",
+    #             "ULAT",
+    #             "NLAT",
+    #             "ELAT",
+    #             "lat",
+    #             "latitude",
+    #         }
+    #         if not any(name in latitude_names for name in load_vars):
+    #             load_vars.append("TLAT")
+    #     zarr_root = (
+    #         Path(cice_store).expanduser()
+    #         if cice_store is not None
+    #         else self.pth_cfg.resolve_cice_store()
+    #     )
+    #     stat_eff = (
+    #         Path(static_store).expanduser()
+    #         if static_store is not None
+    #         else self.pth_cfg.resolve_static_store()
+    #     )
+    #     dyn_req, stat_req = _split_requested_variables(
+    #         load_vars,
+    #         self.pth_cfg,
+    #         stat_eff,
+    #         chunks=chunks,
+    #         logger=self.logger,
+    #     )
+    #     only_stat_req     = var_list is not None and dyn_req is None and stat_req is not None
+    #     if only_stat_req:
+    #         ds_all = xr.Dataset()
+    #     else:
+    #         ds_all = _open_grouped_iceh_store(zarr_root,
+    #                                           frequency   = self.frequency,
+    #                                           dt0_str     = dt0_str or self.run_cfg.start_date,
+    #                                           dtN_str     = dtN_str or self.run_cfg.end_date,
+    #                                           variables   = dyn_req,
+    #                                           chunks      = chunks,
+    #                                           allow_empty = False,
+    #                                           logger      = self.logger)
+    #     ds_all = _merge_static(ds_all, self.pth_cfg, stat_eff, stat_req, chunks = chunks, logger = self.logger)
+    #     ds_all = _apply_hemisphere_mask(
+    #         ds_all,
+    #         hemisphere_eff,
+    #     )
+    #     # Remove internally loaded TLAT unless the caller explicitly requested it.
+    #     if requested_vars is not None:
+    #         present = [
+    #             variable
+    #             for variable in requested_vars
+    #             if variable in ds_all.data_vars
+    #             or variable in ds_all.coords
+    #         ]
+    #         if not present:
+    #             raise ValueError(
+    #                 "None of the requested variables were found after merging "
+    #                 f"static/dynamic stores: {requested_vars}"
+    #             )
+    #         ds_all = ds_all[present]
+    #     # ds_all = _apply_hemisphere_mask(ds_all, hemisphere or self.run_cfg.hemisphere)
+    #     if var_list is not None:
+    #         present = [v for v in var_list if v in ds_all.data_vars or v in ds_all.coords]
+    #         if not present:
+    #             raise ValueError(f"None of the requested variables were found after merging static/dynamic stores: {var_list}")
+    #         ds_all = ds_all[present]
+    #     return ds_all
+    def load(
+        self,
+        *,
+        dt0_str: str | None = None,
+        dtN_str: str | None = None,
+        variables=None,
+        hemisphere: str | None = None,
+        cice_store: str | Path | None = None,
+        static_store: str | Path | None = None,
+        chunks: dict | None = None,
+    ) -> xr.Dataset:
+        chunks = chunks or self.default_chunks()
+
+        # Preserve exactly what the caller requested. Additional variables may be
+        # loaded internally and removed before returning.
+        requested_vars = _maybe_listify_variables(variables)
+
+        if requested_vars is None:
+            self.logger.warning(
+                "IceHistoryLoader.load() called with variables=None; "
+                "this may be expensive."
+            )
+            load_vars = None
+        else:
+            load_vars = list(requested_vars)
+
+        hemisphere_eff = hemisphere or self.run_cfg.hemisphere
+
+        # Hemisphere masking requires latitude. Metrics such as SIA normally ask
+        # only for aice and tarea, so TLAT must be loaded internally.
+        if load_vars is not None and hemisphere_eff is not None:
+            latitude_names = {
+                "TLAT",
+                "ULAT",
+                "NLAT",
+                "ELAT",
+                "lat",
+                "latitude",
+            }
+
+            if not any(name in latitude_names for name in load_vars):
+                load_vars.append("TLAT")
+
+        zarr_root = (
+            Path(cice_store).expanduser()
+            if cice_store is not None
+            else self.pth_cfg.resolve_cice_store()
+        )
+
+        stat_eff = (
+            Path(static_store).expanduser()
+            if static_store is not None
+            else self.pth_cfg.resolve_static_store()
+        )
+
+        dyn_req, stat_req = _split_requested_variables(
+            load_vars,
+            self.pth_cfg,
+            stat_eff,
+            chunks=chunks,
+            logger=self.logger,
+        )
+        only_stat_req = (
+            load_vars is not None
+            and dyn_req is None
+            and stat_req is not None
+        )
         if only_stat_req:
             ds_all = xr.Dataset()
         else:
-            ds_all = _open_grouped_iceh_store(zarr_root,
-                                              frequency   = self.frequency,
-                                              dt0_str     = dt0_str or self.run_cfg.start_date,
-                                              dtN_str     = dtN_str or self.run_cfg.end_date,
-                                              variables   = dyn_req,
-                                              chunks      = chunks,
-                                              allow_empty = False,
-                                              logger      = self.logger)
-        ds_all = _merge_static(ds_all, self.pth_cfg, stat_eff, stat_req, chunks = chunks, logger = self.logger)
-        ds_all = _apply_hemisphere_mask(ds_all, hemisphere or self.run_cfg.hemisphere)
-        if var_list is not None:
-            present = [v for v in var_list if v in ds_all.data_vars or v in ds_all.coords]
+            ds_all = _open_grouped_iceh_store(
+                zarr_root,
+                frequency=self.frequency,
+                dt0_str=dt0_str or self.run_cfg.start_date,
+                dtN_str=dtN_str or self.run_cfg.end_date,
+                variables=dyn_req,
+                chunks=chunks,
+                allow_empty=False,
+                logger=self.logger,
+            )
+        ds_all = _merge_static(
+            ds_all,
+            self.pth_cfg,
+            stat_eff,
+            stat_req,
+            chunks=chunks,
+            logger=self.logger,
+        )
+        ds_all = _apply_hemisphere_mask(
+            ds_all,
+            hemisphere_eff,
+        )
+        # Remove internally loaded TLAT unless the caller requested it.
+        if requested_vars is not None:
+            present = [
+                variable
+                for variable in requested_vars
+                if variable in ds_all.data_vars
+                or variable in ds_all.coords
+            ]
             if not present:
-                raise ValueError(f"None of the requested variables were found after merging static/dynamic stores: {var_list}")
+                raise ValueError(
+                    "None of the requested variables were found after "
+                    f"merging static/dynamic stores: {requested_vars}"
+                )
             ds_all = ds_all[present]
         return ds_all
 

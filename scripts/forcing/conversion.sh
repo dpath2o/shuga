@@ -22,14 +22,14 @@ module load conda/analysis3-26.02
 # ---------------------------------------------------------------------
 ERA5_DIR="${ERA5_DIR:-/g/data/gv90/da1339/afim_input/ERA5/0p25/bilinear/monthly_cice6}"
 
-START_YM="${START_YM:-1996-01}"
-END_YM="${END_YM:-1996-12}"
+START_YM="${START_YM:-1999-01}"
+END_YM="${END_YM:-2005-12}"
 
-# If 1, files whose time dimension is already fixed-size are skipped.
-# This should skip your already-converted January file.
+# If files whose time dimension is already fixed-size are skipped.
+# This should skip already-converted January file.
 SKIP_FIXED_TIME="${SKIP_FIXED_TIME:-1}"
 
-# If 1, print actions but do not modify files.
+# If print actions but do not modify files.
 DRYRUN="${DRYRUN:-0}"
 
 # nccopy mode.

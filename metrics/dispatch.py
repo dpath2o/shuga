@@ -134,7 +134,9 @@ class MetricDispatcher:
         # all sea ice (primaries)
         #----------------------------------------------------------------------------------
         if name == "SIA":
-            return calc.compute_area_series(aice, area, None, name = "SIA", long_name = "Sea Ice Area", scale = ctx.area_scale)
+            if si_mask is None:
+                raise ValueError("SIA requires a concentration-derived sea-ice mask.")
+            return calc.compute_area_series(aice, area, si_mask, name = "SIA", long_name = "Sea Ice Area", scale = ctx.area_scale)
         if name == "SIV":
             return calc.compute_volume_series(aice, hi, area, None, name = "SIV", long_name = "Sea Ice Volume", scale = ctx.volume_scale)
         if name == "SIT":

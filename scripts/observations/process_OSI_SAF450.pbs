@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #PBS -P gv90
-#PBS -q copyq
-#PBS -l walltime=10:00:00
-#PBS -l ncpus=1
-#PBS -l mem=8GB
+#PBS -q normalbw
+#PBS -l walltime=06:00:00
+#PBS -l ncpus=4
+#PBS -l mem=64GB
+#PBS -l jobfs=20GB
 #PBS -l storage=gdata/gv90+gdata/xp65
 #PBS -l wd
 #PBS -j oe
-#PBS -N osisaf450_download
+#PBS -N osisaf450_process
 
 set -euo pipefail
 
@@ -19,32 +20,30 @@ module load conda/analysis3
 : "${END_DATE:?Set END_DATE=YYYY-MM-DD}"
 
 : "${RAW_DIR:=/g/data/gv90/da1339/SeaIce/OSI-SAF-450/raw}"
-: "${DATASET_ID:=OSISAF-GLO-SEAICE_CONC_TIMESERIES-SH-LA-OBS}"
+: "${PROCESSED_DIR:=/g/data/gv90/da1339/SeaIce/OSI-SAF-450/processed}"
+: "${CHUNKS_TIME:=8}"
 : "${OVERWRITE:=}"
 : "${SHUGA_ROOT:=/g/data/gv90/da1339/src/mawsons-chest}"
-: "${OSISAF_VENV:=/g/data/gv90/da1339/venvs/osisaf450}"
-
-export PYTHONNOUSERSITE=1
-
-source "${OSISAF_VENV}/bin/activate"
 
 cd "${SHUGA_ROOT}"
 export PYTHONPATH="${SHUGA_ROOT}:${PYTHONPATH:-}"
 
-# processed-dir is not used during a download-only invocation, but the
-# current CLI still declares it as required.
-UNUSED_PROCESSED_DIR="${RAW_DIR}/.unused_processed"
+python - <<'PY'
+import shuga.observations.OSI_SAF450 as module
+
+print("Using OSI-SAF module:", module.__file__)
+PY
 
 CMD=(
     python -u
     -m shuga.observations.OSI_SAF450
     --raw-dir "${RAW_DIR}"
-    --processed-dir "${UNUSED_PROCESSED_DIR}"
+    --processed-dir "${PROCESSED_DIR}"
     --start-date "${START_DATE}"
     --end-date "${END_DATE}"
-    --dataset-id "${DATASET_ID}"
     --hemisphere SH
-    --download
+    --chunks-time "${CHUNKS_TIME}"
+    --process
 )
 
 if [[ -n "${OVERWRITE}" ]]; then
@@ -56,3 +55,4 @@ printf ' %q' "${CMD[@]}"
 printf '\n'
 
 "${CMD[@]}"
+

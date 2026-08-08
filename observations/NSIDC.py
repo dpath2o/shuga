@@ -60,35 +60,33 @@ class NSIDCObservations:
 
     def load_daily(self, start_date: str | None = None, end_date: str | None = None, hemisphere: str | None = None) -> xr.Dataset:
         start_date = start_date or self.run_cfg.start_date
-        end_date = end_date or self.run_cfg.end_date
-        hemi = self.canonical_hemisphere(hemisphere or self.run_cfg.hemisphere)
-        key = (start_date, end_date, hemi)
+        end_date   = end_date or self.run_cfg.end_date
+        hemi       = self.canonical_hemisphere(hemisphere or self.run_cfg.hemisphere)
+        key        = (start_date, end_date, hemi)
         if key in self._cache:
             return self._cache[key]
         files = self.daily_files(start_date, end_date, hemi)
         self.logger.info("Opening %s NSIDC daily files for %s hemisphere", len(files), hemi)
-
         def _prep(ds: xr.Dataset) -> xr.Dataset:
             keep = [v for v in (self.obs_cfg.nsidc_sic_var,) if v in ds]
             return ds[keep] if keep else ds
-        ds = xr.open_mfdataset(files, combine="by_coords", parallel=True, preprocess=_prep, chunks=self.chunks)
+        ds     = xr.open_mfdataset(files, combine="by_coords", parallel=True, preprocess=_prep, chunks=self.chunks)
         latlon = xr.open_dataset(self.latlon_file(hemi))[["latitude", "longitude"]]
-        area = xr.open_dataset(self.area_file(hemi))[["cell_area"]]
-        ds = xr.merge([ds, latlon, area], compat="override", combine_attrs="drop_conflicts")
+        area   = xr.open_dataset(self.area_file(hemi))[["cell_area"]]
+        ds     = xr.merge([ds, latlon, area], compat="override", combine_attrs="drop_conflicts")
         self._cache[key] = ds
         return ds
 
     def compute_sia_sie(self, start_date: str | None = None, end_date: str | None = None, hemisphere: str | None = None, threshold: float | None = None) -> xr.Dataset:
-        ds = self.load_daily(start_date=start_date, end_date=end_date, hemisphere=hemisphere)
-        sic = ds[self.obs_cfg.nsidc_sic_var].astype("float32")
+        ds   = self.load_daily(start_date=start_date, end_date=end_date, hemisphere=hemisphere)
+        sic  = ds[self.obs_cfg.nsidc_sic_var].astype("float32")
         mask = sic >= float(threshold if threshold is not None else self.obs_cfg.nsidc_threshold)
         area = ds["cell_area"].astype("float64")
-        sia = (sic.where(mask, 0.0) * area).sum(dim=("y", "x")) / 1e12
-        sie = (mask.astype("float32") * area).sum(dim=("y", "x")) / 1e12
-        out = xr.Dataset({"SIA": sia, "SIE": sie})
+        sia  = (sic.where(mask, 0.0) * area).sum(dim=("y", "x")) / 1e12
+        sie  = (mask.astype("float32") * area).sum(dim=("y", "x")) / 1e12
+        out  = xr.Dataset({"SIA": sia, "SIE": sie})
         out["SIA"].attrs.update(long_name="Sea Ice Area", units="10^6 km^2")
         out["SIE"].attrs.update(long_name="Sea Ice Extent", units="10^6 km^2")
         return out
-
 
 SeaIceNSIDC = NSIDCObservations 

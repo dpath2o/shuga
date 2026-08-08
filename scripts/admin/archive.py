@@ -87,7 +87,9 @@ DEFAULT_ARCHIVE_ROOT = "/g/data/gv90/da1339/afim_output"
 #
 # This dictionary is authoritative. Any run directory not listed here is skipped.
 #
-MAPPED_CASES = {"free-slip"   : "Cs-high-hmix20"}
+MAPPED_CASES = {"free-slip"   : "Cs-high-hmix20",
+                "frcg-exp02"  : "Cs-high-snow-half"}
+
 D_AVOIDS     = {"CICE_0p25_Cgrid_coords.zarr", "future_work", "paper1", "paper3"}
 DATE_RE      = re.compile(r"(?P<year>[12][0-9]{3})[-_](?P<month>[01][0-9])[-_](?P<day>[0-3][0-9])")
 MONTH_RE     = re.compile(r"^[12][0-9]{3}_[01][0-9]$")
@@ -118,7 +120,7 @@ def list_run_dirs(runs_root):
         name = path.name
         if name.startswith("free-slip-tides"):
             continue
-        if name.startswith("free-slip") or name.startswith("no-slip"):
+        if name.startswith("free-slip") or name.startswith("no-slip") or name.startswith("frcg-exp"):
             run_dirs.append(path)
     return sorted(run_dirs, key = lambda p: natural_key(p.name))
 
