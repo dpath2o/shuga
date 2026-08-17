@@ -1,153 +1,31 @@
 #!/usr/bin/env bash
 #PBS -P jk72
 #PBS -q normalbw
-#PBS -l walltime=12:00:00
-#PBS -l ncpus=8
-#PBS -l mem=96GB
-#PBS -l jobfs=20GB
+#PBS -l walltime=01:00:00
+#PBS -l ncpus=2
+#PBS -l mem=16GB
+#PBS -l jobfs=5GB
 #PBS -l storage=gdata/gv90+gdata/xp65
 #PBS -l wd
 #PBS -j oe
 #PBS -N SIA_climatology
-
 set -euo pipefail
-
 module purge
 module use /g/data/xp65/public/modules
 module load conda/analysis3-25.12
-
 ROOT="/g/data/gv90/da1339"
 REPO="${ROOT}/src/mawsons-chest"
-MODEL_ROOT="${ROOT}/afim_output/paper1"
+MODEL_ROOT="${ROOT}/afim_output/GRAPHICAL/LD-pub-workspace/timeseries"
 SEAICE_ROOT="${ROOT}/SeaIce"
+NSIDC_STORE="${SEAICE_ROOT}/NSIDC/processed/NSIDC_G02202_V6_SH_SIA_SIE.zarr"
 OSISAF_STORE="${SEAICE_ROOT}/OSI-SAF-450/processed/OSI-SAF-450_SH_SIA.zarr"
-ORAS_STORE="${SEAICE_ROOT}/CMEMS/0p083/daily/ORAS_SH_SIA_1994-1999.nc"
-ORAS_CACHE="${SEAICE_ROOT}/CMEMS/0p083/daily/ORAS_SH_SIA_1994-1999.zarr"
-OUTPUT="${ROOT}/GRAPHICAL/LFI-sensitivity-pub/timeseries/SI/SIA_SH_climatology_1994-1999_with_OSISAF450.png"
-
+ORAS_STORE="${SEAICE_ROOT}/CMEMS/CMEMS_SIA_SIV_SIT_2000-2005.zarr"
+OUTPUT="${ROOT}/SIA_SH_climatology_2000-2005_with_OSISAF450.png"
 cd "${REPO}"
-
-# Force this repository checkout to take precedence over the second checkout
-# under ~/AFIM/src/mawsons-chest.
 export PYTHONNOUSERSITE=1
 export PYTHONPATH="${REPO}"
-
-# Avoid numerical libraries creating additional thread pools on every
-# allocated PBS CPU.
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
-
-mkdir -p "$(dirname "${OUTPUT}")"
-
-echo "============================================================"
-echo "Antarctic SIA climatology"
-echo "============================================================"
-echo "Repository   : ${REPO}"
-echo "Model root   : ${MODEL_ROOT}"
-echo "Sea-ice root : ${SEAICE_ROOT}"
-echo "OSI-SAF      : ${OSISAF_STORE}"
-echo "ORAS source  : ${ORAS_STORE}"
-echo "ORAS cache   : ${ORAS_CACHE}"
-echo "Output       : ${OUTPUT}"
-echo "PBS CPUs     : ${PBS_NCPUS:-unknown}"
-echo "============================================================"
-
-python - <<'PY'
-import sys
-import xarray
-import zarr
-import pygmt
-
-import shuga
-import shuga.observations.NSIDC
-import shuga.plotting.sia
-
-print("Python:", sys.executable)
-print("Xarray:", xarray.__version__)
-print("Zarr:", zarr.__version__)
-print("PyGMT:", pygmt.__version__)
-print("Shuga:", shuga.__file__)
-print("NSIDC:", shuga.observations.NSIDC.__file__)
-print("SIA plotting:", shuga.plotting.sia.__file__)
-PY
-
-# A previous failed Zarr write may have created an incomplete cache.
-# Keep a valid cache; remove an invalid one so it can be rebuilt.
-if [[ -e "${ORAS_CACHE}" ]]; then
-    if python - "${ORAS_CACHE}" <<'PY'
-import sys
-import xarray as xr
-
-path = sys.argv[1]
-
-ds = xr.open_zarr(
-    path,
-    consolidated=True,
-)
-
-assert "SIA" in ds
-assert "time" in ds["SIA"].dims
-assert ds.sizes.get("time", 0) > 0
-
-print(
-    "Valid existing ORAS cache:",
-    path,
-    "samples=",
-    ds.sizes["time"],
-)
-PY
-    then
-        echo "Reusing valid ORAS SIA cache."
-    else
-        echo "Removing incomplete ORAS cache: ${ORAS_CACHE}"
-        rm -rf "${ORAS_CACHE}"
-    fi
-fi
-
-CMD=(python -u shuga/scripts/plotting/plot_SIA_climatology.py
-
-    --model-root
-    "${MODEL_ROOT}"
-
-    --seaice-root
-    "${SEAICE_ROOT}"
-
-    --osisaf-store
-    "${OSISAF_STORE}"
-
-    --oras-store
-    "${ORAS_STORE}"
-
-    --oras-chunks-time
-    8
-
-    --start-date
-    1994-01-01
-
-    --end-date
-    1999-12-31
-
-    --envelope
-    minmax
-
-    --smooth-days
-    1
-
-    --output
-    "${OUTPUT}"
-)
-
-printf 'Running:'
-printf ' %q' "${CMD[@]}"
-printf '\n'
-
-"${CMD[@]}"
-
-echo
-echo "Completed successfully:"
-ls -lh \
-    "${ORAS_CACHE}" \
-    "${OUTPUT}" \
-    "${OUTPUT%.png}.csv"
+python -u shuga/scripts/plotting/plot_SIA_climatology.py \
+  --model-root "${MODEL_ROOT}" --seaice-root "${SEAICE_ROOT}" \
+  --nsidc-store "${NSIDC_STORE}" --osisaf-store "${OSISAF_STORE}" --oras-store "${ORAS_STORE}" \
+  --start-date 1994-01-01 --end-date 1999-12-31 --envelope minmax --smooth-days 1 --y-max 18 \
+  --output "${OUTPUT}"

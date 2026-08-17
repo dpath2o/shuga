@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#PBS -P jk72
+#PBS -q normalbw
+#PBS -l walltime=06:00:00
+#PBS -l ncpus=4
+#PBS -l mem=64GB
+#PBS -l jobfs=20GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -l wd
+#PBS -j oe
+#PBS -N nsidc_sia_sie
+set -euo pipefail
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3
+: "${START_DATE:?Set START_DATE=YYYY-MM-DD}"
+: "${END_DATE:?Set END_DATE=YYYY-MM-DD}"
+: "${SEAICE_ROOT:=/g/data/gv90/da1339/SeaIce}"
+: "${NSIDC_VERSION:=G02202_V6}"
+: "${HEMISPHERE:=SH}"
+: "${THRESHOLD:=0.15}"
+: "${CHUNKS_TIME:=31}"
+: "${OUTPUT_STORE:=}"
+: "${OVERWRITE:=}"
+: "${SHUGA_ROOT:=/g/data/gv90/da1339/src/mawsons-chest}"
+cd "${SHUGA_ROOT}"
+export PYTHONPATH="${SHUGA_ROOT}:${PYTHONPATH:-}"
+CMD=(python -u shuga/scripts/observations/process_NSIDC_SIA_SIE.py
+     --start-date "${START_DATE}" --end-date "${END_DATE}" --hemisphere "${HEMISPHERE}"
+     --seaice-root "${SEAICE_ROOT}" --nsidc-version "${NSIDC_VERSION}"
+     --threshold "${THRESHOLD}" --chunks-time "${CHUNKS_TIME}")
+[[ -n "${OUTPUT_STORE}" ]] && CMD+=(--output-store "${OUTPUT_STORE}")
+[[ -n "${OVERWRITE}" ]] && CMD+=(--overwrite)
+printf 'Running:'; printf ' %q' "${CMD[@]}"; printf '\n'
+"${CMD[@]}"

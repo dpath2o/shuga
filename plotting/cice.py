@@ -1,6 +1,6 @@
 from __future__           import annotations
 from importlib.resources  import files as resource_files
-from dataclasses          import replace
+from dataclasses          import replace, dataclass
 from pathlib              import Path
 from typing               import Mapping, Sequence
 import numpy              as np
@@ -16,6 +16,16 @@ from shuga.core.types     import ClassificationSpec, MetricsSpec, ObservationSpe
 from shuga.metrics.cice   import CICEMetrics
 from shuga.observations   import SeaIceObservations
 from shuga.plotting.cawcr import plot_regridded_hs_sic_panel
+
+@dataclass(frozen=True)
+class SIAStyle:
+    """Line and envelope styling for one SIA series."""
+    pen: str
+    fill: str
+
+DEFAULT_SIA_STYLES: dict[str, SIAStyle] = {"NSIDC"      : SIAStyle("2.4p,black"     , "gray40@82"),
+                                           "OSI-SAF-450": SIAStyle("2.4p,gray35,5_2", "gray65@82"),
+                                           "ORAS"       : SIAStyle("2.4p,#61D97B"   , "#61D97B@80")}
 
 def _any_not_none(*vals) -> bool:
     return any(v is not None for v in vals)
@@ -245,6 +255,159 @@ class CICEPlotter:
             raise ValueError(f"When add_f2020=True and f2020_mode='climatology', the requested window must be at least 15 days. "
                              f"Got {ndays} days ({dt0.strftime('%Y-%m-%d')} to {dtN.strftime('%Y-%m-%d')}).")
 
+    @staticmethod
+    def sia_to_million_km2(da: xr.DataArray) -> xr.DataArray:
+        units = str(da.attrs.get("units", "")).strip().lower().replace("²", "^2").replace(" ", "")
+        if units in {"m2", "m^2", "m**2"}:
+            out = da / 1.0e12
+        elif units in {"km2", "km^2", "km**2"}:
+            out = da / 1.0e6
+        elif any(token in units for token in ("10^3km^2", "10^3km2", "10^3*km^2", "10^3*km2")):
+            out = da / 1.0e3
+        elif any(token in units for token in ("10^6km^2", "10^6km2", "10^6*km^2", "10^6*km2")):
+            out = da
+        else:
+            raise ValueError(f"Unsupported/missing SIA units {da.attrs.get('units')!r} for {da.name!r}.")
+        out = out.rename(da.name)
+        out.attrs.update(da.attrs)
+        out.attrs["units"] = "10^6 km^2"
+        return out
+
+    @staticmethod
+    def dataarray_to_series(da: xr.DataArray, name: str) -> pd.Series:
+        if "time" not in da.dims or [d for d in da.dims if d != "time"]:
+            raise ValueError(f"{name}: expected a one-dimensional time series; got {da.dims}")
+        values = da.compute().to_series()
+        values.index = pd.DatetimeIndex(values.index)
+        values = values[~values.index.duplicated(keep="first")].sort_index()
+        values.name = name
+        return values.astype(float)
+
+    @staticmethod
+    def _open_sia_dataset(path: str | Path, chunks: dict | None = None) -> xr.Dataset:
+        path = Path(path).expanduser()
+        if not path.exists():
+            raise FileNotFoundError(path)
+        if path.is_dir() or path.suffix == ".zarr":
+            try:
+                return xr.open_zarr(path, consolidated=True, chunks=chunks)
+            except (KeyError, ValueError, FileNotFoundError):
+                return xr.open_zarr(path, consolidated=False, chunks=chunks)
+        return xr.open_dataset(path, chunks=chunks)
+
+    @classmethod
+    def load_sia_store(cls, path : str | Path, *,
+                       label      : str,
+                       start_date : str | None = None,
+                       end_date   : str | None = None,
+                       variable   : str | None = None,
+                       candidates : Sequence[str] = ("SIA", "sia", "sea_ice_area"),
+                       units_override: str | None = None) -> pd.Series:
+        """
+        Load a one-dimensional SIA time series from NetCDF or Zarr.
+
+        Parameters
+        ----------
+        path
+            NetCDF or Zarr store.
+        label
+            Output pandas Series name.
+        start_date, end_date
+            Optional inclusive time subset.
+        variable
+            Explicit SIA variable name. If omitted, ``candidates`` are searched.
+        candidates
+            Candidate SIA variable names.
+        units_override
+            Explicit source units when the stored variable does not carry reliable
+            units metadata. The override is applied before conversion to
+            ``10^6 km^2``.
+
+            This should only be used when the source units are independently known.
+        """
+        path = Path(path).expanduser()
+        if not path.exists():
+            raise FileNotFoundError(path)
+        if path.is_dir() or path.suffix == ".zarr":
+            try:
+                ds = xr.open_zarr(path, consolidated = True)
+            except (KeyError, ValueError, FileNotFoundError):
+                ds = xr.open_zarr(path, consolidated = False)
+        else:
+            ds = xr.open_dataset(path)
+        if variable is not None:
+            if variable not in ds:
+                raise KeyError(f"{label}: variable {variable!r} not found in {path}. Available variables: {list(ds.data_vars)}")
+            var = variable
+        else:
+            var = next( (name for name in candidates if name in ds), None)
+            if var is None:
+                raise KeyError(f"{label}: could not identify an SIA variable in {path}. Available variables: {list(ds.data_vars)}")
+
+        da = ds[var]
+
+        if "time" not in da.dims:
+            raise ValueError(
+                f"{label}: expected {var!r} to contain a time dimension; "
+                f"got {da.dims}"
+            )
+
+        if start_date is not None or end_date is not None:
+            da = da.sel(
+                time=slice(start_date, end_date)
+            )
+
+        if da.sizes.get("time", 0) == 0:
+            raise ValueError(
+                f"{label}: no SIA data between "
+                f"{start_date or 'start'} and {end_date or 'end'}"
+            )
+
+        if units_override is not None:
+            da = da.copy()
+            da.attrs["units"] = units_override
+
+        return cls.dataarray_to_series(
+            cls.sia_to_million_km2(da),
+            label,
+        )
+
+    @staticmethod
+    def _noleap_doy(index: pd.DatetimeIndex) -> np.ndarray:
+        ref = pd.DatetimeIndex(pd.to_datetime({"year": np.full(len(index), 2001, dtype=int), "month": index.month, "day": index.day}))
+        return ref.dayofyear.to_numpy()
+
+    @staticmethod
+    def _circular_rolling(values: pd.Series, window: int) -> pd.Series:
+        window = int(window)
+        if window <= 1: return values.copy()
+        if window % 2 == 0: raise ValueError("smooth_days must be odd")
+        pad = window // 2; arr = values.to_numpy(dtype=float)
+        ext = np.concatenate([arr[-pad:], arr, arr[:pad]])
+        sm = pd.Series(ext).rolling(window=window, center=True, min_periods=1).mean().iloc[pad:pad+len(arr)].to_numpy()
+        return pd.Series(sm, index=values.index, name=values.name)
+
+    @classmethod
+    def daily_climatology_envelopes(cls, df: pd.DataFrame, *, start_date: str, end_date: str,
+                                    envelope: str = "minmax", smooth_days: int = 1) -> dict[str, pd.DataFrame]:
+        subset = df.loc[pd.Timestamp(start_date):pd.Timestamp(end_date)].copy()
+        subset = subset[~((subset.index.month == 2) & (subset.index.day == 29))]
+        if subset.empty: raise ValueError("No SIA data overlap requested period")
+        subset["__doy__"] = cls._noleap_doy(subset.index)
+        full = pd.Index(np.arange(1,366), name="doy"); key = envelope.lower()
+        out = {}
+        for name in df.columns:
+            grp = subset.groupby("__doy__")[name]; mean = grp.mean().reindex(full)
+            if key == "minmax": lower, upper = grp.min().reindex(full), grp.max().reindex(full)
+            elif key == "std":
+                std = grp.std(ddof=1).reindex(full); lower, upper = mean-std, mean+std
+            elif key in {"p10-p90","p10p90"}: lower, upper = grp.quantile(.1).reindex(full), grp.quantile(.9).reindex(full)
+            else: raise ValueError("envelope must be minmax, std, or p10-p90")
+            if smooth_days > 1:
+                mean, lower, upper = (cls._circular_rolling(v, smooth_days) for v in (mean, lower, upper))
+            out[name] = pd.DataFrame({"doy": full.to_numpy(int), "mean": mean.to_numpy(float), "lower": lower.to_numpy(float), "upper": upper.to_numpy(float)})
+        return out
+
     # ------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------
@@ -414,6 +577,67 @@ class CICEPlotter:
     # ------------------------------------------------------------
     # primary APIs
     # ------------------------------------------------------------
+    def plot_sia_daily_climatology_envelope(self, df: pd.DataFrame, out_file: str | Path, *,
+                                            start_date: str,
+                                            end_date: str,
+                                            envelope: str="minmax",
+                                            smooth_days: int=1,
+                                            order: Sequence[str] | None=None,
+                                            styles: Mapping[str, SIAStyle] | None=None,
+                                            colors: Mapping[str,str] | None=None,
+                                            y_min: float=0.0,
+                                            y_max: float=20.0,
+                                            title: str | None=None,
+                                            projection: str="X20c/14c",
+                                            legend_position: str="JTL+jTL+o0.2c",
+                                            write_csv: bool=True):
+        pygmt        = self._require_pygmt();
+        out_file     = Path(out_file); out_file.parent.mkdir(parents=True, exist_ok=True)
+        clim         = self.daily_climatology_envelopes(df, start_date=start_date, end_date=end_date, envelope=envelope, smooth_days=smooth_days)
+        series_order = [n for n in (list(order) if order is not None else list(df.columns)) if n in clim]
+        style_map    = dict(DEFAULT_SIA_STYLES)
+        if styles: style_map.update(styles)
+        if colors:
+            for name, color in colors.items():
+                if name in {"NSIDC", "OSI-SAF-450", "ORAS"}: continue
+                style_map[name] = SIAStyle(f"2.4p,{color}", f"{color}@80")
+        month_starts = np.array([1,32,60,91,121,152,182,213,244,274,305,335,366]);
+        month_mids   = .5*(month_starts[:-1]+month_starts[1:]-1)
+        frame        = ["WSen","x0","ya2f1+lSea Ice Area (10@+6@+ km@+2@+)"]
+        if title: frame[0] += f"+t{title}"
+        with pygmt.config(FONT_ANNOT_PRIMARY="12p,Helvetica", FONT_LABEL="14p,Helvetica", MAP_FRAME_PEN="1p,black"):
+            fig = pygmt.Figure();
+            fig.basemap(region=[1,365,y_min,y_max], projection=projection, frame=frame)
+            for x in month_starts[1:-1]:
+                fig.plot(x=[x,x], y=[y_min,y_max], pen="0.35p,gray55")
+            for y in np.arange(5.,y_max+.001,5.):
+                fig.plot(x=[1,365], y=[y,y], pen="0.35p,gray55")
+            for name in series_order:
+                t     = clim[name];
+                st    = style_map.get(name,SIAStyle("1.6p,black","gray80@80"));
+                valid = np.isfinite(t.lower)&np.isfinite(t.upper)
+                x     = t.loc[valid,"doy"].to_numpy();
+                lo    = t.loc[valid,"lower"].to_numpy();
+                hi    = t.loc[valid,"upper"].to_numpy()
+                if len(x):
+                    fig.plot(x = np.r_[x,x[::-1]], y = np.r_[hi,lo[::-1]], close = True, fill = st.fill, pen="0p")
+            for name in series_order:
+                t     = clim[name];
+                st    = style_map.get(name,SIAStyle("1.6p,black","gray80@80"));
+                valid = np.isfinite(t["mean"])
+                fig.plot(x = t.loc[valid,"doy"], y = t.loc[valid,"mean"], pen = st.pen, label = name)
+            fig.text(x = month_mids, y = np.full(12, y_min-.55), text = list("JFMAMJJASOND"), font = "12p,Helvetica", justify = "TC", no_clip = True)
+            fig.legend(position = legend_position, box = "+gwhite+p0.7p,black");
+            fig.savefig(out_file, dpi = 600)
+        if write_csv:
+            rows = []
+            for name in series_order:
+                t = clim[name].copy();
+                t.insert(0,"series",name);
+                rows.append(t)
+            pd.concat(rows, ignore_index = True).to_csv(out_file.with_suffix(".csv"), index = False)
+        return clim
+
     def pygmt_da_prep(self, da: xr.DataArray,
                       lon       : xr.DataArray | None    = None,
                       lat       : xr.DataArray | None    = None, *,

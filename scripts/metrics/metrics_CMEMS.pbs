@@ -1,0 +1,72 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q normalbw
+#PBS -l walltime=08:00:00
+#PBS -l ncpus=24
+#PBS -l mem=190GB
+#PBS -l jobfs=10GB
+#PBS -j oe
+#PBS -l storage=gdata/xp65+gdata/gv90+scratch/gv90
+
+set -euo pipefail
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+RUN_USER="${RUN_USER:-da1339}"
+ROOT="${ROOT:-/g/data/gv90/da1339/SeaIce/CMEMS/0p083/daily}"
+START_DATE="${START_DATE:?START_DATE not set}"
+END_DATE="${END_DATE:?END_DATE not set}"
+HEMISPHERE="${HEMISPHERE:-SH}"
+METHOD="${METHOD:-binary-days}"
+ISPD_THRESH="${ISPD_THRESH:-5e-4}"
+AICE_THRESH="${AICE_THRESH:-0.15}"
+BIN_WINDOW="${BIN_WINDOW:-11}"
+BIN_MIN_DAYS="${BIN_MIN_DAYS:-9}"
+ROLL_WINDOW="${ROLL_WINDOW:-15}"
+METRIC_GROUPS="${METRIC_GROUPS:-cmems_core}"
+METRIC_NAMES="${METRIC_NAMES:-}"
+CHUNKS_TIME="${CHUNKS_TIME:-31}"
+CHUNKS_LATITUDE="${CHUNKS_LATITUDE:-256}"
+CHUNKS_LONGITUDE="${CHUNKS_LONGITUDE:-540}"
+OVERWRITE="${OVERWRITE:-false}"
+UPDATE_MISSING_ONLY="${UPDATE_MISSING_ONLY:-true}"
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
+METRIC_GROUPS="${METRIC_GROUPS//|/,}"
+METRIC_NAMES="${METRIC_NAMES//|/,}"
+
+REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest}"
+PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/shuga/scripts/metrics/metrics_CMEMS.py}"
+export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+
+export DASK_TEMPORARY_DIRECTORY="/scratch/gv90/${RUN_USER}/dask_tmp/${PBS_JOBID}"
+export TMPDIR="/scratch/gv90/${RUN_USER}/tmp/${PBS_JOBID}"
+mkdir -p "$DASK_TEMPORARY_DIRECTORY" "$TMPDIR"
+
+CMD=(
+  python "$PY_SCRIPT"
+  --root "$ROOT"
+  --start-date "$START_DATE"
+  --end-date "$END_DATE"
+  --hemisphere "$HEMISPHERE"
+  --method "$METHOD"
+  --ispd-thresh "$ISPD_THRESH"
+  --aice-thresh "$AICE_THRESH"
+  --bin-window "$BIN_WINDOW"
+  --bin-min-days "$BIN_MIN_DAYS"
+  --roll-window "$ROLL_WINDOW"
+  --metric-groups "$METRIC_GROUPS"
+  --chunks-time "$CHUNKS_TIME"
+  --chunks-latitude "$CHUNKS_LATITUDE"
+  --chunks-longitude "$CHUNKS_LONGITUDE"
+  --log-level "$LOG_LEVEL"
+)
+
+[[ -n "$METRIC_NAMES" ]] && CMD+=(--metric-names "$METRIC_NAMES")
+[[ "$OVERWRITE" == "true" ]] && CMD+=(--overwrite)
+[[ "$UPDATE_MISSING_ONLY" != "true" ]] && CMD+=(--no-update-missing-only)
+
+echo "Running: ${CMD[*]}"
+"${CMD[@]}"
