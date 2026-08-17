@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bin-window", type=int, default=11)
     p.add_argument("--bin-min-days", type=int, default=9)
     p.add_argument("--roll-window", type=int, default=15)
-    p.add_argument("--metric-groups", default="cmems_core")
+    p.add_argument("--metric-groups", default=None)
     p.add_argument("--metric-names", default=None)
     p.add_argument("--chunks-time", type=int, default=31)
     p.add_argument("--chunks-latitude", type=int, default=256)

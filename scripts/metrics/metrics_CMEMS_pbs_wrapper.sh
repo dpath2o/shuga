@@ -24,7 +24,7 @@ START_DATE=""
 END_DATE=""
 HEMISPHERE="SH"
 METHOD="binary-days"
-METRIC_GROUPS="cmems_core"
+METRIC_GROUPS=""
 METRIC_NAMES=""
 ISPD_THRESH="5e-4"
 AICE_THRESH="0.15"
@@ -49,6 +49,10 @@ while getopts ":b:e:H:m:G:M:s:a:r:oh" opt; do
 done
 
 [[ -n "$START_DATE" && -n "$END_DATE" ]] || { usage; exit 2; }
+
+if [[ -z "$METRIC_GROUPS" && -z "$METRIC_NAMES" ]]; then
+    METRIC_GROUPS="cmems_core"
+fi
 
 REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest}"
 PBS_SCRIPT="${REPO_ROOT}/shuga/scripts/metrics/metrics_CMEMS.pbs"

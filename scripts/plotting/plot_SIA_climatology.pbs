@@ -9,23 +9,57 @@
 #PBS -l wd
 #PBS -j oe
 #PBS -N SIA_climatology
+
 set -euo pipefail
+
 module purge
 module use /g/data/xp65/public/modules
 module load conda/analysis3-25.12
+
 ROOT="/g/data/gv90/da1339"
 REPO="${ROOT}/src/mawsons-chest"
-MODEL_ROOT="${ROOT}/afim_output/GRAPHICAL/LD-pub-workspace/timeseries"
 SEAICE_ROOT="${ROOT}/SeaIce"
-NSIDC_STORE="${SEAICE_ROOT}/NSIDC/processed/NSIDC_G02202_V6_SH_SIA_SIE.zarr"
-OSISAF_STORE="${SEAICE_ROOT}/OSI-SAF-450/processed/OSI-SAF-450_SH_SIA.zarr"
-ORAS_STORE="${SEAICE_ROOT}/CMEMS/CMEMS_SIA_SIV_SIT_2000-2005.zarr"
-OUTPUT="${ROOT}/SIA_SH_climatology_2000-2005_with_OSISAF450.png"
+
+# ------------------------------------------------------------------
+# Set these at qsub time for paper1 / paper2 / paper3.
+# ------------------------------------------------------------------
+PAPER_ROOT="${PAPER_ROOT:?PAPER_ROOT not set}"
+START_DATE="${START_DATE:?START_DATE not set}"
+END_DATE="${END_DATE:?END_DATE not set}"
+OUTPUT="${OUTPUT:?OUTPUT not set}"
+
+# Comma-separated SIM=LABEL list.
+EXPERIMENTS="${EXPERIMENTS:-}"
+
+NSIDC_STORE="${NSIDC_STORE:-${SEAICE_ROOT}/NSIDC/processed/NSIDC_G02202_V6_SH_SIA_SIE.zarr}"
+OSISAF_STORE="${OSISAF_STORE:-${SEAICE_ROOT}/OSI-SAF-450/processed/OSI-SAF-450_SH_SIA.zarr}"
+CMEMS_STORE="${CMEMS_STORE:-${SEAICE_ROOT}/CMEMS/0p083/daily/SH/SI/mets.zarr}"
+
+ENVELOPE="${ENVELOPE:-minmax}"
+SMOOTH_DAYS="${SMOOTH_DAYS:-1}"
+Y_MAX="${Y_MAX:-18}"
+
 cd "${REPO}"
+
 export PYTHONNOUSERSITE=1
 export PYTHONPATH="${REPO}"
-python -u shuga/scripts/plotting/plot_SIA_climatology.py \
-  --model-root "${MODEL_ROOT}" --seaice-root "${SEAICE_ROOT}" \
-  --nsidc-store "${NSIDC_STORE}" --osisaf-store "${OSISAF_STORE}" --oras-store "${ORAS_STORE}" \
-  --start-date 1994-01-01 --end-date 1999-12-31 --envelope minmax --smooth-days 1 --y-max 18 \
+
+CMD=(
+  python -u shuga/scripts/plotting/plot_SIA_climatology.py
+  --paper-root "${PAPER_ROOT}"
+  --seaice-root "${SEAICE_ROOT}"
+  --nsidc-store "${NSIDC_STORE}"
+  --osisaf-store "${OSISAF_STORE}"
+  --cmems-store "${CMEMS_STORE}"
+  --start-date "${START_DATE}"
+  --end-date "${END_DATE}"
+  --envelope "${ENVELOPE}"
+  --smooth-days "${SMOOTH_DAYS}"
+  --y-max "${Y_MAX}"
   --output "${OUTPUT}"
+)
+
+[[ -n "${EXPERIMENTS}" ]] && CMD+=(--experiments "${EXPERIMENTS}")
+
+echo "Running: ${CMD[*]}"
+"${CMD[@]}"

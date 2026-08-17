@@ -25,7 +25,7 @@ AICE_THRESH="${AICE_THRESH:-0.15}"
 BIN_WINDOW="${BIN_WINDOW:-11}"
 BIN_MIN_DAYS="${BIN_MIN_DAYS:-9}"
 ROLL_WINDOW="${ROLL_WINDOW:-15}"
-METRIC_GROUPS="${METRIC_GROUPS:-cmems_core}"
+METRIC_GROUPS="${METRIC_GROUPS:-}"
 METRIC_NAMES="${METRIC_NAMES:-}"
 CHUNKS_TIME="${CHUNKS_TIME:-31}"
 CHUNKS_LATITUDE="${CHUNKS_LATITUDE:-256}"
@@ -57,14 +57,14 @@ CMD=(
   --bin-window "$BIN_WINDOW"
   --bin-min-days "$BIN_MIN_DAYS"
   --roll-window "$ROLL_WINDOW"
-  --metric-groups "$METRIC_GROUPS"
   --chunks-time "$CHUNKS_TIME"
   --chunks-latitude "$CHUNKS_LATITUDE"
   --chunks-longitude "$CHUNKS_LONGITUDE"
   --log-level "$LOG_LEVEL"
 )
 
-[[ -n "$METRIC_NAMES" ]] && CMD+=(--metric-names "$METRIC_NAMES")
+[[ -n "$METRIC_GROUPS" ]] && CMD+=(--metric-groups "$METRIC_GROUPS")
+[[ -n "$METRIC_NAMES" ]]  && CMD+=(--metric-names "$METRIC_NAMES")
 [[ "$OVERWRITE" == "true" ]] && CMD+=(--overwrite)
 [[ "$UPDATE_MISSING_ONLY" != "true" ]] && CMD+=(--no-update-missing-only)
 

@@ -607,11 +607,11 @@ class CICEPlotter:
         if title: frame[0] += f"+t{title}"
         with pygmt.config(FONT_ANNOT_PRIMARY="12p,Helvetica", FONT_LABEL="14p,Helvetica", MAP_FRAME_PEN="1p,black"):
             fig = pygmt.Figure();
-            fig.basemap(region=[1,365,y_min,y_max], projection=projection, frame=frame)
+            fig.basemap(region = [1,365,y_min,y_max], projection = projection, frame = frame)
             for x in month_starts[1:-1]:
-                fig.plot(x=[x,x], y=[y_min,y_max], pen="0.35p,gray55")
+                fig.plot(x = [x,x], y = [y_min,y_max], pen = "0.35p,gray55")
             for y in np.arange(5.,y_max+.001,5.):
-                fig.plot(x=[1,365], y=[y,y], pen="0.35p,gray55")
+                fig.plot(x = [1,365], y = [y,y], pen = "0.35p,gray55")
             for name in series_order:
                 t     = clim[name];
                 st    = style_map.get(name,SIAStyle("1.6p,black","gray80@80"));
@@ -620,12 +620,16 @@ class CICEPlotter:
                 lo    = t.loc[valid,"lower"].to_numpy();
                 hi    = t.loc[valid,"upper"].to_numpy()
                 if len(x):
-                    fig.plot(x = np.r_[x,x[::-1]], y = np.r_[hi,lo[::-1]], close = True, fill = st.fill, pen="0p")
+                    fig.plot(x = np.r_[x,x[::-1]], y = np.r_[hi,lo[::-1]], close = True, fill = st.fill, pen = "0p")
             for name in series_order:
-                t     = clim[name];
-                st    = style_map.get(name,SIAStyle("1.6p,black","gray80@80"));
-                valid = np.isfinite(t["mean"])
-                fig.plot(x = t.loc[valid,"doy"], y = t.loc[valid,"mean"], pen = st.pen, label = name)
+                self.logger.info(f"adding {name} to figure")
+                t      = clim[name];
+                st     = style_map.get(name,SIAStyle("1.6p,black","gray80@80"));
+                valid  = np.isfinite(t["mean"])
+                x_mean = np.ascontiguousarray(t.loc[valid, "doy"].to_numpy(dtype = np.float64))
+                y_mean = np.ascontiguousarray(t.loc[valid, "mean"].to_numpy(dtype = np.float64))
+                fig.plot(x = x_mean, y = y_mean, pen = st.pen, label = name)
+                #fig.plot(x = t.loc[valid,"doy"], y = t.loc[valid,"mean"], pen = st.pen, label = name)
             fig.text(x = month_mids, y = np.full(12, y_min-.55), text = list("JFMAMJJASOND"), font = "12p,Helvetica", justify = "TC", no_clip = True)
             fig.legend(position = legend_position, box = "+gwhite+p0.7p,black");
             fig.savefig(out_file, dpi = 600)

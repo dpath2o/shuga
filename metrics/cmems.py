@@ -48,6 +48,8 @@ def expand_cmems_metric_names(
 ) -> list[str]:
     names = _as_list(metric_names)
     groups = _as_list(metric_groups)
+    # Default to the complete CMEMS set only when neither explicit names
+    # nor groups were supplied. Thus metric_names="SIA" remains SIA-only.
     if not names and not groups:
         groups = ["cmems_core"]
 

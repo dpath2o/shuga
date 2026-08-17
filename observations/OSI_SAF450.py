@@ -219,20 +219,20 @@ def compute_sia(ds: xr.Dataset, hemisphere: str = "SH", concentration_threshold:
         ``sia`` in 10^6 km^2 and ``sia_m2`` in m^2 indexed by time.
     """
     conc_name = _find_concentration_name(ds)
-    conc = _normalise_fraction(ds[conc_name])
-    area = _infer_cell_area(ds, conc)
-    mask = xr.ones_like(conc, dtype=bool)
+    conc      = _normalise_fraction(ds[conc_name])
+    area      = _infer_cell_area(ds, conc)
+    mask      = xr.ones_like(conc, dtype=bool)
     hemi_mask = _hemisphere_mask(ds, conc, hemisphere)
     if hemi_mask is not None:
         mask = mask & hemi_mask
-    threshold = float(concentration_threshold) / 100.0
-    ice_area = conc.where(mask & (conc >= threshold), 0.0) * area
+    threshold    = float(concentration_threshold) / 100.0
+    ice_area     = conc.where(mask & (conc >= threshold), 0.0) * area
     spatial_dims = [d for d in ice_area.dims if d != "time"]
-    sia_m2 = ice_area.sum(dim=spatial_dims, skipna=True).rename("sia_m2")
-    sia = (sia_m2 / 1.0e12).rename("sia")
-    sia.attrs.update(units="10^6 km^2", long_name="sea ice area")
-    sia_m2.attrs.update(units="m2", long_name="sea ice area")
-    out = xr.Dataset({"sia": sia, "sia_m2": sia_m2})
+    sia_m2       = ice_area.sum(dim = spatial_dims, skipna = True).rename("SIA_m2")
+    sia          = (sia_m2 / 1.0e12).rename("SIA")
+    sia.attrs.update(units = "10^6 km^2", long_name = "Sea Ice Area")
+    sia_m2.attrs.update(units = "m2", long_name = "Sea Ice Area")
+    out = xr.Dataset({"SIA": sia, "SIA_m2": sia_m2})
     out.attrs.update(source                          = "OSI-SAF/Copernicus Marine SEAICE_GLO_SEAICE_L4_REP_OBSERVATIONS_011_009",
                      concentration_variable          = conc_name,
                      concentration_threshold_percent = float(concentration_threshold),
