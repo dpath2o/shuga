@@ -22,7 +22,6 @@ class SIAStyle:
     """Line and envelope styling for one SIA series."""
     pen: str
     fill: str
-
 DEFAULT_SIA_STYLES: dict[str, SIAStyle] = {"NSIDC"      : SIAStyle("2.4p,black"     , "gray40@82"),
                                            "OSI-SAF-450": SIAStyle("2.4p,gray35,5_2", "gray65@82"),
                                            "ORAS"       : SIAStyle("2.4p,#61D97B"   , "#61D97B@80")}
@@ -32,9 +31,9 @@ class SITStyle:
     """Line and envelope styling for one SIT series."""
     pen: str
     fill: str
-
-DEFAULT_SIT_STYLES: dict[str, SITStyle] = {"ESA-CCI/AWI": SITStyle("2.4p,#AA33CC", "#AA33CC@82"),
-                                           "CMEMS":       SITStyle("2.4p,#61D97B", "#61D97B@82")}
+DEFAULT_SIT_STYLES: dict[str, SITStyle] = {"ESA-CCI": SITStyle("2.6p,black", "gray45@84"),
+                                           "AWI"    : SITStyle("2.6p,gray35,5_2", "gray65@84"),
+                                           "CMEMS"  : SITStyle("2.4p,#61D97B", "#61D97B@82")}
 
 def _any_not_none(*vals) -> bool:
     return any(v is not None for v in vals)
@@ -364,6 +363,33 @@ class CICEPlotter:
             da.attrs["units"] = units_override
         return cls.dataarray_to_series(cls.sia_to_million_km2(da), label)
 
+    @staticmethod
+    def sit_monthly_climatology(series: pd.Series, *, envelope: str = "p10-p90") -> pd.DataFrame:
+        s = series.dropna().sort_index()
+        if s.empty:
+            raise ValueError(f"{series.name}: no finite SIT values")
+        s.index = pd.DatetimeIndex(s.index)
+        monthly = s.resample("MS").mean().dropna()
+        grp     = monthly.groupby(monthly.index.month)
+        mean    = grp.mean().reindex(range(1,13))
+        key     = envelope.lower()
+        if key == "minmax":
+            lower, upper = grp.min().reindex(range(1,13)), grp.max().reindex(range(1,13))
+        elif key == "std":
+            std = grp.std(ddof=1).reindex(range(1,13))
+            lower, upper = mean-std, mean+std
+        elif key in {"p10-p90","p10p90"}:
+            lower = grp.quantile(.10).reindex(range(1,13))
+            upper = grp.quantile(.90).reindex(range(1,13))
+        else:
+            raise ValueError("envelope must be minmax, std, or p10-p90")
+        n = grp.count().reindex(range(1,13)).fillna(0).astype(int)
+        return pd.DataFrame({"month" : range(1,13),
+                             "mean"  : mean.to_numpy(float),
+                             "lower" : lower.to_numpy(float),
+                             "upper" : upper.to_numpy(float),
+                             "n"     : n.to_numpy(int)})
+
     @classmethod
     def load_sit_store(cls, path: str | Path, *,
                        label     : str,
@@ -659,6 +685,67 @@ class CICEPlotter:
             pd.concat(rows, ignore_index = True).to_csv(out_file.with_suffix(".csv"), index = False)
         return clim
 
+    def plot_sit_monthly_climatology_envelope(self, series: Mapping[str,pd.Series], output: str | Path, *,
+                                              envelope: str = "p10-p90",
+                                              order: Sequence[str] | None = None,
+                                              colors: Mapping[str,str] | None = None,
+                                              y_min: float = 0.0,
+                                              y_max: float = 4.0,
+                                              title: str | None = None,
+                                              write_csv: bool = True) -> dict[str,pd.DataFrame]:
+        pygmt      = self._require_pygmt()
+        stats      = {name:self.sit_monthly_climatology(s,envelope=envelope) for name,s in series.items()}
+        plot_order = [n for n in (list(order) if order else list(stats)) if n in stats]
+        style_map  = dict(DEFAULT_SIT_STYLES)
+        for name,color in dict(colors or {}).items():
+            if name not in style_map:
+                style_map[name] = SITStyle(f"2.2p,{color}", f"{color}@82")
+        x_month = np.arange(1,13,dtype=float)
+        frame   = ["WSen","x0","ya0.5f0.25+lSea Ice Thickness (m)"]
+        if title:
+            frame[0] += f"+t{title}"
+        with pygmt.config(FONT_ANNOT_PRIMARY = "12p,Helvetica",
+                          FONT_LABEL         = "14p,Helvetica",
+                          MAP_FRAME_PEN      = "1p,black"):
+            fig = pygmt.Figure()
+            fig.basemap(region=[0.5,12.5,y_min,y_max],
+                        projection="X24c/16c", frame=frame)
+            for x in np.arange(1.5,12.0,1.0):
+                fig.plot(x=[x,x], y=[y_min,y_max], pen="0.35p,gray55")
+            for y in np.arange(0.5,y_max+.001,0.5):
+                fig.plot(x=[0.5,12.5], y=[y,y], pen="0.35p,gray55")
+            for name in plot_order:
+                t     = stats[name]
+                st    = style_map.get(name,SITStyle("1.8p,black","gray80@82"))
+                valid = np.isfinite(t["lower"]) & np.isfinite(t["upper"])
+                x     = x_month[valid]
+                lo    = t.loc[valid,"lower"].to_numpy(float)
+                hi    = t.loc[valid,"upper"].to_numpy(float)
+                if len(x):
+                    fig.plot(x=np.r_[x,x[::-1]], y=np.r_[hi,lo[::-1]],
+                             close=True, fill=st.fill, pen="0p")
+            for name in plot_order:
+                t     = stats[name]
+                st    = style_map.get(name,SITStyle("1.8p,black","gray80@82"))
+                valid = np.isfinite(t["mean"])
+                x     = np.ascontiguousarray(x_month[valid], dtype=np.float64)
+                y     = np.ascontiguousarray(t.loc[valid,"mean"].to_numpy(float), dtype=np.float64)
+                if len(x):
+                    fig.plot(x=x,y=y,pen=st.pen,label=name)
+            fig.text(x = x_month, y = np.full(12,y_min-.12), text = list("JFMAMJJASOND"), font = "12p,Helvetica", justify = "TC", no_clip = True)
+            fig.legend(position = "jTR+jTR+o0.2c", box = "+gwhite+p0.8p")
+            output = Path(output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(output,dpi=600)
+        if write_csv:
+            rows = []
+            for name in plot_order:
+                t = stats[name].copy()
+                t.insert(0,"series",name)
+                rows.append(t)
+            pd.concat(rows,ignore_index=True).to_csv(Path(output).with_suffix(".csv"),index=False)
+        return stats
+
     def plot_sit_daily_climatology_envelope(self, df: pd.DataFrame, output: str | Path, *,
                                             start_date: str,
                                             end_date: str,
@@ -697,19 +784,18 @@ class CICEPlotter:
             t["doy"] = t.index.astype(float)
             stats[name] = t
         fig = pygmt.Figure()
-        fig.basemap(region = [1,365,y_min,y_max], projection = "X24c/16c",
-                    frame=["WSen","xa30g30","ya0.5g0.5","y+lSea Ice Thickness (m)"])
-        colors = dict(colors or {})
+        fig.basemap(region = [1,365,y_min,y_max], projection = "X24c/16c", frame = ["WSen","xa30g30","ya0.5g0.5","y+lSea Ice Thickness (m)"])
+        colors     = dict(colors or {})
         plot_order = list(order) if order else list(stats)
         for name in plot_order:
             if name not in stats:
                 continue
-            t = stats[name]
+            t     = stats[name]
             valid = np.isfinite(t["mean"].values)
-            x = np.ascontiguousarray(t.loc[valid,"doy"].to_numpy(dtype=np.float64))
-            y = np.ascontiguousarray(t.loc[valid,"mean"].to_numpy(dtype=np.float64))
-            lo = np.ascontiguousarray(t.loc[valid,"lower"].to_numpy(dtype=np.float64))
-            hi = np.ascontiguousarray(t.loc[valid,"upper"].to_numpy(dtype=np.float64))
+            x     = np.ascontiguousarray(t.loc[valid,"doy"].to_numpy(dtype=np.float64))
+            y     = np.ascontiguousarray(t.loc[valid,"mean"].to_numpy(dtype=np.float64))
+            lo    = np.ascontiguousarray(t.loc[valid,"lower"].to_numpy(dtype=np.float64))
+            hi    = np.ascontiguousarray(t.loc[valid,"upper"].to_numpy(dtype=np.float64))
             if len(x) == 0:
                 continue
             if name in DEFAULT_SIT_STYLES:
@@ -720,10 +806,10 @@ class CICEPlotter:
             fig.plot(x = np.ascontiguousarray(np.concatenate([x, x[::-1]])),
                      y = np.ascontiguousarray(np.concatenate([lo, hi[::-1]])),
                      close=True, fill=st.fill, pen="0.2p,gray60")
-            fig.plot(x=x, y=y, pen=st.pen, label=name)
-        fig.legend(position="jTR+jTR+o0.2c", box="+gwhite+p0.8p")
+            fig.plot(x = x, y = y, pen = st.pen, label = name)
+        fig.legend(position = "jTR+jTR+o0.2c", box = "+gwhite+p0.8p")
         output = Path(output)
-        output.parent.mkdir(parents=True, exist_ok=True)
+        output.parent.mkdir(parents = True, exist_ok = True)
         fig.savefig(output)
         if write_csv:
             rows = []

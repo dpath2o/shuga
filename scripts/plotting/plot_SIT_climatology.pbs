@@ -9,7 +9,6 @@
 #PBS -l wd
 #PBS -j oe
 #PBS -N SIT_climatology
-
 set -euo pipefail
 module purge
 module use /g/data/xp65/public/modules
@@ -17,16 +16,16 @@ module load conda/analysis3-26.02
 
 ROOT="/g/data/gv90/da1339"
 REPO="${ROOT}/src/mawsons-chest"
-
-DATA_ROOT="${DATA_ROOT:?DATA_ROOT not set}"
-START_DATE="${START_DATE:?START_DATE not set}"
-END_DATE="${END_DATE:?END_DATE not set}"
-OUTPUT="${OUTPUT:?OUTPUT not set}"
+DATA_ROOT="${DATA_ROOT:-${ROOT}/afim_output}"
+MODEL_START_DATE="${MODEL_START_DATE:-2000-01-01}"
+MODEL_END_DATE="${MODEL_END_DATE:-2005-12-31}"
 HEMISPHERE="${HEMISPHERE:-SH}"
-EXPERIMENTS="${EXPERIMENTS:-}"
+EXPERIMENTS="${EXPERIMENTS:-no-slip-LFI=LFI rheology without lateral drag,Cs-high=static high Cs,Cq-high=quadratic high Cq}"
 
-OBS_STORE="${OBS_STORE:-${ROOT}/SeaIce/SIT/processed/${HEMISPHERE}/continuous/SIT_timeseries.zarr}"
+ESA_STORE="${ESA_STORE:-${ROOT}/SeaIce/SIT/processed/${HEMISPHERE}/ESA/SIT_timeseries.zarr}"
+AWI_STORE="${AWI_STORE:-${ROOT}/SeaIce/SIT/processed/${HEMISPHERE}/AWI/SIT_timeseries.zarr}"
 CMEMS_STORE="${CMEMS_STORE:-${ROOT}/SeaIce/CMEMS/0p083/daily/${HEMISPHERE}/SI/mets.zarr}"
+OUTPUT="${OUTPUT:-${ROOT}/GRAPHICAL/LD-pub-workspace/timeseries/SIT_${HEMISPHERE}_climatology_2000-2005.png}"
 
 cd "$REPO"
 export PYTHONPATH="$REPO"
@@ -34,16 +33,15 @@ export PYTHONNOUSERSITE=1
 
 CMD=(python -u shuga/scripts/plotting/plot_SIT_climatology.py
      --data-root "$DATA_ROOT"
-     --start-date "$START_DATE"
-     --end-date "$END_DATE"
+     --model-start-date "$MODEL_START_DATE"
+     --model-end-date "$MODEL_END_DATE"
      --hemisphere "$HEMISPHERE"
-     --obs-store "$OBS_STORE"
+     --experiments "$EXPERIMENTS"
+     --esa-store "$ESA_STORE"
+     --awi-store "$AWI_STORE"
      --cmems-store "$CMEMS_STORE"
      --output "$OUTPUT"
-     --envelope "${ENVELOPE:-minmax}"
-     --smooth-days "${SMOOTH_DAYS:-7}"
+     --envelope "${ENVELOPE:-p10-p90}"
      --y-max "${Y_MAX:-4}")
-
-[[ -n "$EXPERIMENTS" ]] && CMD+=(--experiments "$EXPERIMENTS")
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"

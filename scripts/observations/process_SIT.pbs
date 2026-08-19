@@ -8,19 +8,17 @@
 #PBS -l storage=gdata/gv90+gdata/xp65
 #PBS -j oe
 #PBS -N process_SIT
-
 set -euo pipefail
 module purge
 module use /g/data/xp65/public/modules
 module load conda/analysis3-26.02
-
 REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
 cd "$REPO"
 export PYTHONPATH="$REPO"
-
+export PYTHONNOUSERSITE=1
 CMD=(python -u shuga/scripts/observations/process_SIT.py
      --hemisphere "${HEMISPHERE:-SH}"
-     --prefer "${PREFER:-AWI}")
-
+     --sources "${SOURCES:-ESA,AWI}")
 [[ "${OVERWRITE:-false}" == "true" ]] && CMD+=(--overwrite)
+echo "Running: ${CMD[*]}"
 "${CMD[@]}"
