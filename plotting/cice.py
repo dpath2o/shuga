@@ -27,6 +27,15 @@ DEFAULT_SIA_STYLES: dict[str, SIAStyle] = {"NSIDC"      : SIAStyle("2.4p,black" 
                                            "OSI-SAF-450": SIAStyle("2.4p,gray35,5_2", "gray65@82"),
                                            "ORAS"       : SIAStyle("2.4p,#61D97B"   , "#61D97B@80")}
 
+@dataclass(frozen=True)
+class SITStyle:
+    """Line and envelope styling for one SIT series."""
+    pen: str
+    fill: str
+
+DEFAULT_SIT_STYLES: dict[str, SITStyle] = {"ESA-CCI/AWI": SITStyle("2.4p,#AA33CC", "#AA33CC@82"),
+                                           "CMEMS":       SITStyle("2.4p,#61D97B", "#61D97B@82")}
+
 def _any_not_none(*vals) -> bool:
     return any(v is not None for v in vals)
 
@@ -296,12 +305,12 @@ class CICEPlotter:
         return xr.open_dataset(path, chunks=chunks)
 
     @classmethod
-    def load_sia_store(cls, path : str | Path, *,
-                       label      : str,
-                       start_date : str | None = None,
-                       end_date   : str | None = None,
-                       variable   : str | None = None,
-                       candidates : Sequence[str] = ("SIA", "sia", "sea_ice_area"),
+    def load_sia_store(cls, path: str | Path, *,
+                       label         : str,
+                       start_date    : str | None = None,
+                       end_date      : str | None = None,
+                       variable      : str | None = None,
+                       candidates    : Sequence[str] = ("SIA", "sia", "sea_ice_area"),
                        units_override: str | None = None) -> pd.Series:
         """
         Load a one-dimensional SIA time series from NetCDF or Zarr.
@@ -343,34 +352,42 @@ class CICEPlotter:
             var = next( (name for name in candidates if name in ds), None)
             if var is None:
                 raise KeyError(f"{label}: could not identify an SIA variable in {path}. Available variables: {list(ds.data_vars)}")
-
         da = ds[var]
-
         if "time" not in da.dims:
-            raise ValueError(
-                f"{label}: expected {var!r} to contain a time dimension; "
-                f"got {da.dims}"
-            )
-
+            raise ValueError(f"{label}: expected {var!r} to contain a time dimension; got {da.dims}")
         if start_date is not None or end_date is not None:
-            da = da.sel(
-                time=slice(start_date, end_date)
-            )
-
+            da = da.sel(time = slice(start_date, end_date))
         if da.sizes.get("time", 0) == 0:
-            raise ValueError(
-                f"{label}: no SIA data between "
-                f"{start_date or 'start'} and {end_date or 'end'}"
-            )
-
+            raise ValueError(f"{label}: no SIA data between {start_date or 'start'} and {end_date or 'end'}")
         if units_override is not None:
             da = da.copy()
             da.attrs["units"] = units_override
+        return cls.dataarray_to_series(cls.sia_to_million_km2(da), label)
 
-        return cls.dataarray_to_series(
-            cls.sia_to_million_km2(da),
-            label,
-        )
+    @classmethod
+    def load_sit_store(cls, path: str | Path, *,
+                       label     : str,
+                       start_date: str | None = None,
+                       end_date  : str | None = None,
+                       variable  : str | None = None,
+                       candidates: Sequence[str] = ("SIT", "sit", "sea_ice_thickness", "sithick")) -> pd.Series:
+        path = Path(path).expanduser()
+        if path.is_dir() or path.suffix == ".zarr":
+            try:
+                ds = xr.open_zarr(path, consolidated=True)
+            except Exception:
+                ds = xr.open_zarr(path, consolidated=False)
+        else:
+            ds = xr.open_dataset(path)
+        var = variable or next((n for n in candidates if n in ds), None)
+        if var is None or var not in ds:
+            raise KeyError(f"{label}: SIT variable not found in {path}; available={list(ds.data_vars)}")
+        da = ds[var]
+        if "time" not in da.dims or [d for d in da.dims if d != "time"]:
+            raise ValueError(f"{label}: expected 1-D SIT time series; got {da.dims}")
+        if start_date is not None or end_date is not None:
+            da = da.sel(time=slice(start_date, end_date))
+        return cls.dataarray_to_series(da, label)
 
     @staticmethod
     def _noleap_doy(index: pd.DatetimeIndex) -> np.ndarray:
@@ -641,6 +658,81 @@ class CICEPlotter:
                 rows.append(t)
             pd.concat(rows, ignore_index = True).to_csv(out_file.with_suffix(".csv"), index = False)
         return clim
+
+    def plot_sit_daily_climatology_envelope(self, df: pd.DataFrame, output: str | Path, *,
+                                            start_date: str,
+                                            end_date: str,
+                                            envelope: str = "minmax",
+                                            smooth_days: int = 7,
+                                            order: Sequence[str] | None = None,
+                                            colors: Mapping[str, str] | None = None,
+                                            y_min: float = 0.0,
+                                            y_max: float = 4.0,
+                                            title: str | None = None,
+                                            write_csv: bool = True) -> Path:
+        pygmt = self._require_pygmt()
+        frame = df.loc[pd.Timestamp(start_date):pd.Timestamp(end_date)].copy()
+        if frame.empty:
+            raise ValueError("No SIT data in requested period.")
+        stats = {}
+        for name in frame.columns:
+            s = frame[name].dropna()
+            if s.empty:
+                continue
+            tmp = pd.DataFrame({"value": s})
+            tmp = tmp.loc[~((tmp.index.month == 2) & (tmp.index.day == 29))]
+            tmp["doy"] = tmp.index.dayofyear
+            grp = tmp.groupby("doy")["value"]
+            mean = grp.mean()
+            if envelope == "minmax":
+                lower, upper = grp.min(), grp.max()
+            elif envelope == "std":
+                std = grp.std()
+                lower, upper = mean - std, mean + std
+            else:
+                lower, upper = grp.quantile(0.10), grp.quantile(0.90)
+            t = pd.DataFrame({"mean":mean, "lower":lower, "upper":upper})
+            if smooth_days > 1:
+                t = t.rolling(smooth_days, center=True, min_periods=1).mean()
+            t["doy"] = t.index.astype(float)
+            stats[name] = t
+        fig = pygmt.Figure()
+        fig.basemap(region = [1,365,y_min,y_max], projection = "X24c/16c",
+                    frame=["WSen","xa30g30","ya0.5g0.5","y+lSea Ice Thickness (m)"])
+        colors = dict(colors or {})
+        plot_order = list(order) if order else list(stats)
+        for name in plot_order:
+            if name not in stats:
+                continue
+            t = stats[name]
+            valid = np.isfinite(t["mean"].values)
+            x = np.ascontiguousarray(t.loc[valid,"doy"].to_numpy(dtype=np.float64))
+            y = np.ascontiguousarray(t.loc[valid,"mean"].to_numpy(dtype=np.float64))
+            lo = np.ascontiguousarray(t.loc[valid,"lower"].to_numpy(dtype=np.float64))
+            hi = np.ascontiguousarray(t.loc[valid,"upper"].to_numpy(dtype=np.float64))
+            if len(x) == 0:
+                continue
+            if name in DEFAULT_SIT_STYLES:
+                st = DEFAULT_SIT_STYLES[name]
+            else:
+                colour = colors.get(name, "black")
+                st = SITStyle(f"2.2p,{colour}", f"{colour}@82")
+            fig.plot(x = np.ascontiguousarray(np.concatenate([x, x[::-1]])),
+                     y = np.ascontiguousarray(np.concatenate([lo, hi[::-1]])),
+                     close=True, fill=st.fill, pen="0.2p,gray60")
+            fig.plot(x=x, y=y, pen=st.pen, label=name)
+        fig.legend(position="jTR+jTR+o0.2c", box="+gwhite+p0.8p")
+        output = Path(output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output)
+        if write_csv:
+            rows = []
+            for name, t in stats.items():
+                tt = t.copy()
+                tt.insert(0, "series", name)
+                rows.append(tt.reset_index(drop=True))
+            pd.concat(rows, ignore_index=True).to_csv(output.with_suffix(".csv"), index=False)
+        return output
 
     def pygmt_da_prep(self, da: xr.DataArray,
                       lon       : xr.DataArray | None    = None,

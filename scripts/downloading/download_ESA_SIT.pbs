@@ -1,0 +1,40 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q copyq
+#PBS -l walltime=10:00:00
+#PBS -l ncpus=1
+#PBS -l mem=4GB
+#PBS -l jobfs=1GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -j oe
+#PBS -N download_ESA_SIT
+
+set -euo pipefail
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+DEST="${DEST:-/g/data/gv90/da1339/SeaIce/ESA/CCI}"
+
+cd "$REPO"
+export PYTHONPATH="$REPO"
+export PYTHONNOUSERSITE=1
+
+CMD=(
+  python -u shuga/scripts/downloading/download_ESA_SIT.py
+  --dest "$DEST"
+  --sensors "${SENSORS:-envisat,cryosat2,sentinel3a,sentinel3b}"
+  --hemispheres "${HEMISPHERES:-nh,sh}"
+  --retries "${RETRIES:-4}"
+  --log-level "${LOG_LEVEL:-INFO}"
+)
+
+[[ -n "${YEAR_MIN:-}" ]] && CMD+=(--year-min "$YEAR_MIN")
+[[ -n "${YEAR_MAX:-}" ]] && CMD+=(--year-max "$YEAR_MAX")
+[[ "${ALL_VERSIONS:-false}" == "true" ]] && CMD+=(--all-versions)
+[[ "${DRY_RUN:-false}" == "true" ]] && CMD+=(--dry-run)
+
+echo "Running: ${CMD[*]}"
+"${CMD[@]}"

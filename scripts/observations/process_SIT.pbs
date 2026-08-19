@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q normalbw
+#PBS -l walltime=06:00:00
+#PBS -l ncpus=8
+#PBS -l mem=64GB
+#PBS -l jobfs=10GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -j oe
+#PBS -N process_SIT
+
+set -euo pipefail
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+cd "$REPO"
+export PYTHONPATH="$REPO"
+
+CMD=(python -u shuga/scripts/observations/process_SIT.py
+     --hemisphere "${HEMISPHERE:-SH}"
+     --prefer "${PREFER:-AWI}")
+
+[[ "${OVERWRITE:-false}" == "true" ]] && CMD+=(--overwrite)
+"${CMD[@]}"

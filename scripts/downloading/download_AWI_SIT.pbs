@@ -1,0 +1,27 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q copyq
+#PBS -l walltime=10:00:00
+#PBS -l ncpus=1
+#PBS -l mem=4GB
+#PBS -l jobfs=1GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -j oe
+#PBS -N download_AWI_SIT
+
+set -euo pipefail
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+cd "$REPO"
+export PYTHONPATH="$REPO"
+
+python -u shuga/scripts/downloading/download_AWI_SIT.py \
+  --dest "${DEST:-/g/data/gv90/da1339/SeaIce/AWI}" \
+  --hemispheres "${HEMISPHERES:-nh,sh}" \
+  --levels "${LEVELS:-l2p_release,l3cp_release}" \
+  --sensors "${SENSORS:-envisat,cryosat2,sentinel3a,sentinel3b}" \
+  ${YEAR_MIN:+--year-min "$YEAR_MIN"} \
+  ${YEAR_MAX:+--year-max "$YEAR_MAX"}

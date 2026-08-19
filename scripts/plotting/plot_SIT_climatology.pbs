@@ -1,0 +1,49 @@
+#!/bin/bash
+#PBS -P jk72
+#PBS -q normalbw
+#PBS -l walltime=01:00:00
+#PBS -l ncpus=2
+#PBS -l mem=16GB
+#PBS -l jobfs=5GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -l wd
+#PBS -j oe
+#PBS -N SIT_climatology
+
+set -euo pipefail
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+ROOT="/g/data/gv90/da1339"
+REPO="${ROOT}/src/mawsons-chest"
+
+DATA_ROOT="${DATA_ROOT:?DATA_ROOT not set}"
+START_DATE="${START_DATE:?START_DATE not set}"
+END_DATE="${END_DATE:?END_DATE not set}"
+OUTPUT="${OUTPUT:?OUTPUT not set}"
+HEMISPHERE="${HEMISPHERE:-SH}"
+EXPERIMENTS="${EXPERIMENTS:-}"
+
+OBS_STORE="${OBS_STORE:-${ROOT}/SeaIce/SIT/processed/${HEMISPHERE}/continuous/SIT_timeseries.zarr}"
+CMEMS_STORE="${CMEMS_STORE:-${ROOT}/SeaIce/CMEMS/0p083/daily/${HEMISPHERE}/SI/mets.zarr}"
+
+cd "$REPO"
+export PYTHONPATH="$REPO"
+export PYTHONNOUSERSITE=1
+
+CMD=(python -u shuga/scripts/plotting/plot_SIT_climatology.py
+     --data-root "$DATA_ROOT"
+     --start-date "$START_DATE"
+     --end-date "$END_DATE"
+     --hemisphere "$HEMISPHERE"
+     --obs-store "$OBS_STORE"
+     --cmems-store "$CMEMS_STORE"
+     --output "$OUTPUT"
+     --envelope "${ENVELOPE:-minmax}"
+     --smooth-days "${SMOOTH_DAYS:-7}"
+     --y-max "${Y_MAX:-4}")
+
+[[ -n "$EXPERIMENTS" ]] && CMD+=(--experiments "$EXPERIMENTS")
+echo "Running: ${CMD[*]}"
+"${CMD[@]}"

@@ -1,0 +1,47 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q copyq
+#PBS -l walltime=10:00:00
+#PBS -l ncpus=1
+#PBS -l mem=4GB
+#PBS -l jobfs=1GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -j oe
+#PBS -N download_ESA_CCI
+
+set -euo pipefail
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+DEST="${DEST:-/g/data/gv90/da1339/SeaIce/ESA/CCI}"
+
+PRODUCTS="${PRODUCTS:-thickness,concentration,thickness_drift_aware}"
+HEMISPHERES="${HEMISPHERES:-NH,SH}"
+SENSORS="${SENSORS:-}"
+LEVELS="${LEVELS:-}"
+RETRIES="${RETRIES:-5}"
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
+cd "$REPO"
+
+export PYTHONPATH="$REPO"
+export PYTHONNOUSERSITE=1
+
+CMD=(
+  python -u shuga/scripts/downloading/download_ESA_CCI.py
+  --dest "$DEST"
+  --products "$PRODUCTS"
+  --hemispheres "$HEMISPHERES"
+  --retries "$RETRIES"
+  --log-level "$LOG_LEVEL"
+)
+
+[[ -n "$SENSORS" ]] && CMD+=(--sensors "$SENSORS")
+[[ -n "$LEVELS" ]] && CMD+=(--levels "$LEVELS")
+[[ "${DRY_RUN:-false}" == "true" ]] && CMD+=(--dry-run)
+
+echo "Running: ${CMD[*]}"
+"${CMD[@]}"
