@@ -21,7 +21,6 @@ MODEL_START_DATE="${MODEL_START_DATE:-2000-01-01}"
 MODEL_END_DATE="${MODEL_END_DATE:-2005-12-31}"
 HEMISPHERE="${HEMISPHERE:-SH}"
 EXPERIMENTS="${EXPERIMENTS:-no-slip-LFI=LFI rheology without lateral drag,Cs-high=static high Cs,Cq-high=quadratic high Cq}"
-
 ESA_STORE="${ESA_STORE:-${ROOT}/SeaIce/SIT/processed/${HEMISPHERE}/ESA/SIT_timeseries.zarr}"
 AWI_STORE="${AWI_STORE:-${ROOT}/SeaIce/SIT/processed/${HEMISPHERE}/AWI/SIT_timeseries.zarr}"
 CMEMS_STORE="${CMEMS_STORE:-${ROOT}/SeaIce/CMEMS/0p083/daily/${HEMISPHERE}/SI/mets.zarr}"
@@ -42,6 +41,6 @@ CMD=(python -u shuga/scripts/plotting/plot_SIT_climatology.py
      --cmems-store "$CMEMS_STORE"
      --output "$OUTPUT"
      --envelope "${ENVELOPE:-p10-p90}"
-     --y-max "${Y_MAX:-4}")
+     --y-max "${Y_MAX:-3}")
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"

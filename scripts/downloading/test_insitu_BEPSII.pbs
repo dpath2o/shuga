@@ -1,0 +1,30 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q copyq
+#PBS -l walltime=00:30:00
+#PBS -l ncpus=1
+#PBS -l mem=2GB
+#PBS -l jobfs=1GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -j oe
+#PBS -N test_BEPSII
+
+set -euo pipefail
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+ROOT="${ROOT:-/g/data/gv90/da1339/SeaIce/InSitu/raw}"
+
+cd "$REPO"
+
+export PYTHONPATH="$REPO"
+export PYTHONNOUSERSITE=1
+
+python -u shuga/scripts/downloading/download_insitu_thickness.py \
+    --root "$ROOT" \
+    --sources "bepsii" \
+    --dry-run \
+    --log-level INFO

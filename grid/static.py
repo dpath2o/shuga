@@ -1,12 +1,10 @@
 from __future__ import annotations
-import logging
-import re
-import shutil
+import logging, re, shutil
 from pathlib import Path
 import numpy as np
 import xarray as xr
-from shuga.core.paths import ShugaPaths
-from shuga.grid.cice import CICEGridwork
+from shuga.core.paths    import ShugaPaths
+from shuga.grid.cice     import CICEGridwork
 from shuga.grid.geometry import (angle_to_radians,
                                  area_to_m2,
                                  coerce_2d_dims_to_nj_ni,

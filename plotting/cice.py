@@ -31,9 +31,9 @@ class SITStyle:
     """Line and envelope styling for one SIT series."""
     pen: str
     fill: str
-DEFAULT_SIT_STYLES: dict[str, SITStyle] = {"ESA-CCI": SITStyle("2.6p,black", "gray45@84"),
+DEFAULT_SIT_STYLES: dict[str, SITStyle] = {"ESA-CCI": SITStyle("2.6p,black"     , "gray45@84"),
                                            "AWI"    : SITStyle("2.6p,gray35,5_2", "gray65@84"),
-                                           "CMEMS"  : SITStyle("2.4p,#61D97B", "#61D97B@82")}
+                                           "ORAS"   : SITStyle("2.4p,#61D97B"   , "#61D97B@82")}
 
 def _any_not_none(*vals) -> bool:
     return any(v is not None for v in vals)
@@ -694,7 +694,7 @@ class CICEPlotter:
                                               title: str | None = None,
                                               write_csv: bool = True) -> dict[str,pd.DataFrame]:
         pygmt      = self._require_pygmt()
-        stats      = {name:self.sit_monthly_climatology(s,envelope=envelope) for name,s in series.items()}
+        stats      = {name: self.sit_monthly_climatology(s, envelope = envelope) for name,s in series.items()}
         plot_order = [n for n in (list(order) if order else list(stats)) if n in stats]
         style_map  = dict(DEFAULT_SIT_STYLES)
         for name,color in dict(colors or {}).items():

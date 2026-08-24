@@ -7,11 +7,9 @@ from shuga.core.paths import ShugaPaths
 from shuga.core.types import ClassificationSpec, ObservationSpec, RunSpec
 from shuga.plotting.cice import CICEPlotter
 
-DEFAULT_EXPERIMENTS = {
-    "no-slip-LFI":"LFI rheology without lateral drag",
-    "Cs-high":"static high Cs",
-    "Cq-high":"quadratic high Cq",
-}
+DEFAULT_EXPERIMENTS = {"no-slip-LFI" : "LFI rheology without lateral drag",
+                       "Cs-high"     : "static high Cs",
+                       "Cq-high"     : "quadratic high Cq"}
 MODEL_PALETTE = ["#0072B2","#E69F00","#CC79A7","#009E73","#D55E00","#56B4E9","#F0E442"]
 
 def parse_experiments(value):
@@ -37,7 +35,6 @@ def main():
     ap.add_argument("--envelope", choices=("minmax","std","p10-p90"), default="p10-p90")
     ap.add_argument("--y-max", type=float, default=4.0)
     args = ap.parse_args()
-
     exps = parse_experiments(args.experiments)
     run_cfg = RunSpec(sim_name="SIT-comparison", start_date=args.model_start_date,
                       end_date=args.model_end_date, hemisphere=args.hemisphere)

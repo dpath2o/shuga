@@ -1,0 +1,45 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q normalbw
+#PBS -l walltime=01:00:00
+#PBS -l ncpus=2
+#PBS -l mem=8GB
+#PBS -l jobfs=2GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -j oe
+#PBS -N process_BEPSII
+
+set -euo pipefail
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+
+INPUT="${INPUT:-/g/data/gv90/da1339/SeaIce/InSitu/raw/Zenodo/BEPSII_TS/DATA/BEPSII_TS_v1.0.nc}"
+
+OUTPUT_ROOT="${OUTPUT_ROOT:-/g/data/gv90/da1339/SeaIce/InSitu/processed/BEPSII_TS}"
+
+HEMISPHERE="${HEMISPHERE:-SH}"
+
+cd "$REPO"
+
+export PYTHONPATH="$REPO"
+export PYTHONNOUSERSITE=1
+
+CMD=(
+    python -u shuga/scripts/observations/insitu_thickness.py
+    --input "$INPUT"
+    --output-root "$OUTPUT_ROOT"
+    --hemisphere "$HEMISPHERE"
+    --log-level "${LOG_LEVEL:-INFO}"
+)
+
+[[ "${DRY_RUN:-false}" == "true" ]] && CMD+=(--dry-run)
+[[ "${OVERWRITE:-false}" == "true" ]] && CMD+=(--overwrite)
+[[ "${KEEP_MISSING_THICKNESS:-false}" == "true" ]] && CMD+=(--keep-missing-thickness)
+[[ "${NO_DEDUPLICATE:-false}" == "true" ]] && CMD+=(--no-deduplicate)
+
+echo "Running: ${CMD[*]}"
+"${CMD[@]}"

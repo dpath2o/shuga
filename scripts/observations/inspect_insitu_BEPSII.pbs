@@ -1,0 +1,140 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q normalbw
+#PBS -l walltime=00:20:00
+#PBS -l ncpus=1
+#PBS -l mem=4GB
+#PBS -l jobfs=1GB
+#PBS -l storage=gdata/gv90+gdata/xp65
+#PBS -j oe
+#PBS -N inspect_BEPSII_v2
+
+set -euo pipefail
+
+module purge
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.02
+
+python - <<'PY'
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+root = "/g/data/gv90/da1339/SeaIce/InSitu/processed/BEPSII_TS/SH"
+
+stores = {
+    "all": f"{root}/all/BEPSII_TS_points.zarr",
+    "fast": f"{root}/fast/BEPSII_TS_fast_points.zarr",
+    "pack": f"{root}/pack/BEPSII_TS_pack_points.zarr",
+}
+
+for name, path in stores.items():
+    ds = xr.open_zarr(
+        path,
+        consolidated=True,
+    )
+
+    print("\n" + "=" * 80)
+    print(name.upper())
+    print("=" * 80)
+    print(ds)
+
+    hi = ds["ice_thickness"]
+
+    print("\nn =", ds.sizes["obs"])
+    print("min hi  =", float(hi.min(skipna=True)))
+    print("mean hi =", float(hi.mean(skipna=True)))
+    print("max hi  =", float(hi.max(skipna=True)))
+
+    print(">3 m =", int(ds["thickness_gt_3m"].sum()))
+    print(">5 m =", int(ds["thickness_gt_5m"].sum()))
+    print(
+        "partial core <80% =",
+        int(ds["partial_core_lt80pct"].sum()),
+    )
+
+    t = pd.to_datetime(ds.time.values)
+    print("time =", t.min(), "->", t.max())
+
+print("\nFAST CRUISES")
+fast = xr.open_zarr(
+    stores["fast"],
+    consolidated=True,
+)
+
+names, counts = np.unique(
+    fast.cruise.values.astype(str),
+    return_counts=True,
+)
+
+for cruise, n in zip(names, counts):
+    print(f"{cruise:40s} {n:5d}")
+
+print("\nDOCUMENTED FAST-CAMPAIGN QA")
+all_ds = xr.open_zarr(
+    stores["all"],
+    consolidated=True,
+)
+
+print("\nDOCUMENTED FAST-CAMPAIGN QA")
+
+all_ds = xr.open_zarr(
+    stores["all"],
+    consolidated=True,
+)
+
+# Boolean selection with drop=True requires an in-memory indexer.
+doc_mask = (
+    all_ds["is_documented_fast_campaign"] == 1
+).compute()
+
+doc = all_ds.where(
+    doc_mask,
+    drop=True,
+)
+
+print(
+    "documented campaign records =",
+    doc.sizes["obs"],
+)
+print(
+    "i_type fast among them =",
+    int(doc["is_fast_ice"].sum().compute()),
+)
+print(
+    "i_type pack among them =",
+    int(doc["is_pack_ice"].sum().compute()),
+)
+print(
+    "inconsistent records =",
+    int(
+        (
+            doc["type_campaign_consistent"] == 0
+        ).sum().compute()
+    ),
+)
+
+print("\ni_type COUNTS IN DOCUMENTED FAST CAMPAIGNS")
+
+values, counts = np.unique(
+    doc["bepsii_type_index"]
+    .values
+    .astype(float),
+    return_counts=True,
+)
+
+for value, count in zip(values, counts):
+    print(
+        f"i_type={value:g}: {count}"
+    )
+
+print("documented campaign records =", doc.sizes["obs"])
+print(
+    "i_type fast among them =",
+    int(doc.is_fast_ice.sum()),
+)
+print(
+    "inconsistent records =",
+    int((doc.type_campaign_consistent == 0).sum()),
+)
+PY
