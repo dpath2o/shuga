@@ -48,12 +48,12 @@ END_YEAR="2005"
 if [[ $# -gt 0 && "$1" =~ ^[0-9]{4}$ ]]; then
     START_YEAR="$1"
     shift
-fi
-if [[ $# -gt 0 && "$1" =~ ^[0-9]{4}$ ]]; then
-    END_YEAR="$1"
-    shift
-else
-    END_YEAR="${START_YEAR}"
+    if [[ $# -gt 0 && "$1" =~ ^[0-9]{4}$ ]]; then
+        END_YEAR="$1"
+        shift
+    else
+        END_YEAR="${START_YEAR}"
+    fi
 fi
 
 PROJECT="gv90"
