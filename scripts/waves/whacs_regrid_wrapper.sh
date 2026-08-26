@@ -21,7 +21,7 @@ Options:
   --project NAME            default: gv90
   --user NAME               default: da1339
   --sim-name NAME           default: LD-waves-exp01
-  --target-lat-max FLOAT    default: -45.0
+  --target-lat-max FLOAT    default: -35.0
   --sic-threshold FLOAT     default: 0.15
   --k-nearest N             default: 8
   --idw-power FLOAT         default: 2.5
@@ -60,7 +60,7 @@ PROJECT="gv90"
 RUN_USER="da1339"
 SIM_NAME="LD-waves-exp01"
 MAX_CONCURRENT="2"
-TARGET_LAT_MAX="-45.0"
+TARGET_LAT_MAX="-35.0"
 SIC_THRESHOLD="0.15"
 K_NEAREST="8"
 IDW_POWER="2.5"
