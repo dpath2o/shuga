@@ -1,0 +1,98 @@
+#!/bin/bash
+#PBS -P gv90
+#PBS -q normalbw
+#PBS -l ncpus=8
+#PBS -l mem=64GB
+#PBS -l walltime=24:00:00
+#PBS -l storage=gdata/gv90+gdata/ia39+gdata/xp65
+#PBS -l wd
+#PBS -j oe
+#PBS -r y
+#PBS -N shuga_whacs_regrid
+
+set -euo pipefail
+
+START_YEAR="${START_YEAR:-1995}"
+END_YEAR="${END_YEAR:-2005}"
+ARRAY_INDEX="${PBS_ARRAY_INDEX:-0}"
+
+TOTAL_MONTHS=$(( (END_YEAR - START_YEAR + 1) * 12 ))
+if (( ARRAY_INDEX < 0 || ARRAY_INDEX >= TOTAL_MONTHS )); then
+    echo "PBS_ARRAY_INDEX=${ARRAY_INDEX} outside 0..$((TOTAL_MONTHS - 1))" >&2
+    exit 2
+fi
+
+YEAR=$(( START_YEAR + ARRAY_INDEX / 12 ))
+MONTH_NUM=$(( ARRAY_INDEX % 12 + 1 ))
+MONTH="$(printf '%02d' "${MONTH_NUM}")"
+
+PROJECT="${PROJECT:-gv90}"
+RUN_USER="${RUN_USER:-da1339}"
+SIM_NAME="${SIM_NAME:-LD-waves-exp01}"
+HEMISPHERE="${HEMISPHERE:-SH}"
+
+WHACS_ROOT="${WHACS_ROOT:-/g/data/ia39/WP3/release/ACS_hindcast/spec/release/WP3/WHACS/BoM-CSIRO/hindcast/ERA5/ERA5/WHACS/WWIII-v6.07/spectra/1hr/efth}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/g/data/${PROJECT}/${RUN_USER}/afim_input/CAWCR}"
+WEIGHTS_ROOT="${WEIGHTS_ROOT:-/g/data/${PROJECT}/${RUN_USER}/grids/weights}"
+
+SIC_THRESHOLD="${SIC_THRESHOLD:-0.15}"
+TARGET_LAT_MAX="${TARGET_LAT_MAX:--45.0}"
+K_NEAREST="${K_NEAREST:-8}"
+IDW_POWER="${IDW_POWER:-2.5}"
+RADIUS_KM="${RADIUS_KM:-1000.0}"
+TIME_CHUNK="${TIME_CHUNK:-1}"
+COMPRESSION_LEVEL="${COMPRESSION_LEVEL:-3}"
+
+OW_NC="${OW_NC:-false}"
+OW_WGT="${OW_WGT:-false}"
+OW_SIC_WGT="${OW_SIC_WGT:-false}"
+
+SCRIPT_ROOT="${SCRIPT_ROOT:-/home/581/da1339/AFIM/src/mawsons-chest}"
+PY_SCRIPT="${PY_SCRIPT:-${SCRIPT_ROOT}/shuga/scripts/waves/whacs_regrid.py}"
+
+mkdir -p "${OUTPUT_ROOT}" "${WEIGHTS_ROOT}"
+
+echo "============================================================"
+echo "SHUGA WHACS -> CICE25 forcing"
+echo "PBS_JOBID=${PBS_JOBID:-unknown} ARRAY_INDEX=${ARRAY_INDEX}"
+echo "YEAR=${YEAR} MONTH=${MONTH}"
+echo "WHACS_ROOT=${WHACS_ROOT}"
+echo "OUTPUT_ROOT=${OUTPUT_ROOT}"
+echo "WEIGHTS_ROOT=${WEIGHTS_ROOT}"
+echo "TARGET_LAT_MAX=${TARGET_LAT_MAX}"
+echo "K_NEAREST=${K_NEAREST} IDW_POWER=${IDW_POWER} RADIUS_KM=${RADIUS_KM}"
+echo "TIME_CHUNK=${TIME_CHUNK} COMPRESSION_LEVEL=${COMPRESSION_LEVEL}"
+echo "HOST=$(hostname) START=$(date)"
+echo "============================================================"
+
+module use /g/data/xp65/public/modules
+module load conda/analysis3-26.01
+
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="${SCRIPT_ROOT}:${PYTHONPATH:-}"
+
+PY_ARGS=(
+    "${YEAR}" "${MONTH}"
+    --project "${PROJECT}"
+    --user "${RUN_USER}"
+    --sim-name "${SIM_NAME}"
+    --hemisphere "${HEMISPHERE}"
+    --source-root "${WHACS_ROOT}"
+    --output-root "${OUTPUT_ROOT}"
+    --weights-root "${WEIGHTS_ROOT}"
+    --sic-threshold "${SIC_THRESHOLD}"
+    --target-lat-max "${TARGET_LAT_MAX}"
+    --k-nearest "${K_NEAREST}"
+    --idw-power "${IDW_POWER}"
+    --radius-km "${RADIUS_KM}"
+    --time-chunk "${TIME_CHUNK}"
+    --compression-level "${COMPRESSION_LEVEL}"
+)
+
+[[ "${OW_NC}" == "true" ]] && PY_ARGS+=(--overwrite-nc)
+[[ "${OW_WGT}" == "true" ]] && PY_ARGS+=(--overwrite-weights)
+[[ "${OW_SIC_WGT}" == "true" ]] && PY_ARGS+=(--overwrite-sic-weights)
+
+python "${PY_SCRIPT}" "${PY_ARGS[@]}"
+
+echo "END=$(date)"
