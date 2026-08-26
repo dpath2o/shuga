@@ -26,7 +26,7 @@ Options:
   --k-nearest N             default: 8
   --idw-power FLOAT         default: 2.5
   --radius-km FLOAT         default: 1000.0
-  --time-chunk N            default: 1
+  --time-chunk N            default: 4
   --compression-level N     default: 3
   --ow_nc                   rebuild completed output files too
   --ow_wgt                  rebuild station weights (not recommended for a multi-month array)
@@ -65,7 +65,7 @@ SIC_THRESHOLD="0.15"
 K_NEAREST="8"
 IDW_POWER="2.5"
 RADIUS_KM="1000.0"
-TIME_CHUNK="1"
+TIME_CHUNK="4"
 COMPRESSION_LEVEL="3"
 OW_NC="false"
 OW_WGT="false"
