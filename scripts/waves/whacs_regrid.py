@@ -31,8 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--weights-root", type=Path, default=None)
 
     p.add_argument("--sic-threshold", type=float, default=0.15)
-    p.add_argument("--target-lat-max", type=float, default=-45.0,
-                   help="Southernmost forcing-domain northern limit; cells north of this are zero. Default: -45")
+    p.add_argument("--target-lat-max", type=float, default=-35.0,
+                   help="Southern Hemisphere forcing-domain northern limit; cells north of this are zero. Default: -35")
     p.add_argument("--k-nearest", type=int, default=8)
     p.add_argument("--idw-power", type=float, default=2.5)
     p.add_argument("--radius-km", type=float, default=1000.0)
