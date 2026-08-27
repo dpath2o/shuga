@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -P gv90
+#PBS -P au88
 #PBS -q normalbw
 #PBS -l ncpus=8
 #PBS -l mem=64GB
@@ -14,6 +14,8 @@ set -euo pipefail
 
 START_YEAR="${START_YEAR:-1995}"
 END_YEAR="${END_YEAR:-2005}"
+# For an array job PBS_ARRAY_INDEX is supplied by PBS. For a one-month pilot
+# submitted without -J, default to index 0 (January of START_YEAR).
 ARRAY_INDEX="${PBS_ARRAY_INDEX:-0}"
 
 TOTAL_MONTHS=$(( (END_YEAR - START_YEAR + 1) * 12 ))
@@ -26,14 +28,17 @@ YEAR=$(( START_YEAR + ARRAY_INDEX / 12 ))
 MONTH_NUM=$(( ARRAY_INDEX % 12 + 1 ))
 MONTH="$(printf '%02d' "${MONTH_NUM}")"
 
-PROJECT="${PROJECT:-gv90}"
+# ACCOUNT_PROJECT is PBS accounting only. DATA_PROJECT controls the existing
+# shuga /g/data tree and deliberately remains gv90.
+ACCOUNT_PROJECT="${ACCOUNT_PROJECT:-au88}"
+DATA_PROJECT="${DATA_PROJECT:-gv90}"
 RUN_USER="${RUN_USER:-da1339}"
 SIM_NAME="${SIM_NAME:-LD-waves-exp01}"
 HEMISPHERE="${HEMISPHERE:-SH}"
 
 WHACS_ROOT="${WHACS_ROOT:-/g/data/ia39/WP3/release/ACS_hindcast/spec/release/WP3/WHACS/BoM-CSIRO/hindcast/ERA5/ERA5/WHACS/WWIII-v6.07/spectra/1hr/efth}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/g/data/${PROJECT}/${RUN_USER}/afim_input/CAWCR}"
-WEIGHTS_ROOT="${WEIGHTS_ROOT:-/g/data/${PROJECT}/${RUN_USER}/grids/weights}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/g/data/${DATA_PROJECT}/${RUN_USER}/afim_input/CAWCR}"
+WEIGHTS_ROOT="${WEIGHTS_ROOT:-/g/data/${DATA_PROJECT}/${RUN_USER}/grids/weights}"
 
 SIC_THRESHOLD="${SIC_THRESHOLD:-0.15}"
 TARGET_LAT_MAX="${TARGET_LAT_MAX:--35.0}"
@@ -55,6 +60,7 @@ mkdir -p "${OUTPUT_ROOT}" "${WEIGHTS_ROOT}"
 echo "============================================================"
 echo "SHUGA WHACS -> CICE25 forcing"
 echo "PBS_JOBID=${PBS_JOBID:-unknown} ARRAY_INDEX=${ARRAY_INDEX}"
+echo "ACCOUNT_PROJECT=${ACCOUNT_PROJECT} DATA_PROJECT=${DATA_PROJECT}"
 echo "YEAR=${YEAR} MONTH=${MONTH}"
 echo "WHACS_ROOT=${WHACS_ROOT}"
 echo "OUTPUT_ROOT=${OUTPUT_ROOT}"
@@ -73,7 +79,7 @@ export PYTHONPATH="${SCRIPT_ROOT}:${PYTHONPATH:-}"
 
 PY_ARGS=(
     "${YEAR}" "${MONTH}"
-    --project "${PROJECT}"
+    --project "${DATA_PROJECT}"
     --user "${RUN_USER}"
     --sim-name "${SIM_NAME}"
     --hemisphere "${HEMISPHERE}"
