@@ -4,7 +4,6 @@ import calendar
 import fcntl
 import os
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -12,8 +11,6 @@ import xarray as xr
 from netCDF4 import Dataset as NCFile
 
 from shuga.core.paths import ShugaPaths
-from shuga.core.types import ObservationSpec
-from shuga.observations import SeaIceObservations
 from shuga.waves.cawcr import CAWCRRegridConfig, CAWCRRegridder, _time_to_netcdf_numeric
 
 
@@ -69,8 +66,9 @@ class WHACSRegridder(CAWCRRegridder):
        bins onto the 25-bin frequency grid expected by Noah Day's Icepack code.
     3. Regrid station spectra to the native CICE T grid using static sparse
        inverse-distance weights.
-    4. Zero incident wave energy where daily NSIDC SIC >= ``sic_threshold``;
-       Noah's CICE wave propagation then carries incident wave energy into ice.
+    4. Write the complete regridded WHACS spectrum without any observational
+       sea-ice mask. CICE/Icepack is responsible for wave propagation and
+       attenuation in the model ice state.
     5. Write a lean hourly monthly NetCDF containing the CICE forcing field
        ``efreq(time,nfreq,nj,ni)`` plus frequency and grid coordinates.
 
@@ -247,7 +245,7 @@ class WHACSRegridder(CAWCRRegridder):
             )
 
     # ------------------------------------------------------------------
-    # shared static weight files with inter-process locking
+    # shared static station-weight file with inter-process locking
     # ------------------------------------------------------------------
     @staticmethod
     def _weight_lock_path(path: Path) -> Path:
@@ -278,32 +276,6 @@ class WHACSRegridder(CAWCRRegridder):
                 self._station_diag = None
             return super().build_or_load_station_weights(
                 station_lon, station_lat, paths=paths, overwrite=overwrite
-            )
-
-    def build_or_load_sic_weights(
-        self,
-        src_lon: np.ndarray,
-        src_lat: np.ndarray,
-        *,
-        paths: ShugaPaths,
-        overwrite: bool = False,
-    ):
-        if self._sic_weights is not None and not overwrite:
-            return self._sic_weights
-        path = self.config.sic_weights_path
-        if path is None:
-            return super().build_or_load_sic_weights(
-                src_lon, src_lat, paths=paths, overwrite=overwrite
-            )
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = self._weight_lock_path(path)
-        with lock_path.open("a+") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            if path.exists() and not overwrite:
-                self._sic_weights = None
-            return super().build_or_load_sic_weights(
-                src_lon, src_lat, paths=paths, overwrite=overwrite
             )
 
     @staticmethod
@@ -397,7 +369,7 @@ class WHACSRegridder(CAWCRRegridder):
                 chunksizes=(1, nf, min(128, nj), min(128, ni)),
             )
 
-            nc.title = "Hourly WHACS incident-wave spectra regridded for standalone CICE6"
+            nc.title = "Hourly WHACS wave spectra regridded for standalone CICE6"
             nc.source_product = "WHACS BoM-CSIRO hindcast, WWIII-v6.07, ERA5 forced"
             nc.source_file = str(self._current_whacs_path)
             nc.output_field = "efreq(time,nfreq,nj,ni)"
@@ -405,7 +377,7 @@ class WHACSRegridder(CAWCRRegridder):
             nc.cice_nfreq = 25
             nc.frequency_grid = "Noah Day CICE/Icepack nfreq=25 geometric WaveWatch grid"
             nc.spectral_remap = "direction integration then conservative frequency-bin overlap"
-            nc.sic_mask = f"NSIDC daily SIC < {self.config.sic_threshold:.3f} supplies incident waves; otherwise efreq=0"
+            nc.ice_mask = "none; WHACS forcing is not masked by observed or model sea-ice concentration"
             nc.station_regrid = (
                 f"IDW k={self.config.k_nearest}, power={self.config.idw_power}, "
                 f"radius_km={self.config.radius_km}"
@@ -419,14 +391,14 @@ class WHACSRegridder(CAWCRRegridder):
         out: Path,
         i0: int,
         i1: int,
-        efreq_masked_chunk: xr.DataArray,
+        efreq_chunk: xr.DataArray,
     ) -> None:
         arr = (
-            efreq_masked_chunk
+            efreq_chunk
             .transpose("time", "frequency", "nj", "ni")
             .values.astype(np.float32, copy=False)
         )
-        # Incident wave forcing must be finite and non-negative for CICE.
+        # Wave forcing must be finite and non-negative for CICE.
         arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
         np.maximum(arr, 0.0, out=arr)
         with NCFile(out, mode="a") as nc:
@@ -442,9 +414,7 @@ class WHACSRegridder(CAWCRRegridder):
         month: int,
         *,
         paths: ShugaPaths,
-        obs_class: Optional[SeaIceObservations] = None,
         overwrite_weights: bool = False,
-        overwrite_sic_weights: bool = False,
         overwrite_output: bool = False,
         time_chunk: int = 1,
         complevel: int = 3,
@@ -466,8 +436,6 @@ class WHACSRegridder(CAWCRRegridder):
                 paths.wave_weights_root_path
                 / f"map_WHACSstations_to_ACCESS-OM3-025_idw_k{self.config.k_nearest}.npz"
             )
-        if self.config.sic_weights_path is None:
-            self.config.sic_weights_path = paths.nsidc2cice_weight_file
 
         out = Path(self.config.output_path)
         expected_nt = 24 * calendar.monthrange(year, month)[1]
@@ -484,6 +452,7 @@ class WHACSRegridder(CAWCRRegridder):
         self._log(f"WHACS source: {source}")
         self._log(f"CICE output : {out}")
         self._log(f"Weights     : {self.config.weights_path}")
+        self._log("Ice mask    : none (WHACS spectrum retained independently of sea-ice concentration)")
 
         ds_raw = self.open_whacs_month(source, time_chunk=time_chunk)
         ds_raw = self._subset_time_window(ds_raw, dt0, dtN)
@@ -494,31 +463,6 @@ class WHACSRegridder(CAWCRRegridder):
         self._log("Conservatively remapping WHACS frequency bins -> CICE25")
         efreq_station = self.remap_to_cice25(native, ds_raw)
         self._log_spectral_qc(native, efreq_station, ds_raw)
-
-        obs_cfg = paths.obs_cfg or ObservationSpec()
-        if obs_class is None:
-            run_cfg = paths.run_cfg
-            if run_cfg is None:
-                raise ValueError("WHACS prepare_month requires ShugaPaths(run_cfg=RunSpec(...)).")
-            obs_class = SeaIceObservations(
-                run_cfg=run_cfg,
-                obs_cfg=obs_cfg,
-                pth_cfg=paths,
-                logger=self.logger,
-            )
-
-        self._log("Loading daily NSIDC SIC and regridding it to the CICE T grid")
-        sic_daily = obs_class.load_nsidc_daily(
-            start_date=dt0.strftime("%Y-%m-%d"),
-            end_date=dtN.strftime("%Y-%m-%d"),
-            hemisphere=self.config.hemisphere,
-        )
-        sic_daily_cice = self._regrid_daily_sic_to_cice_all(
-            sic_daily,
-            paths=paths,
-            sic_var=obs_cfg.nsidc_sic_var,
-            overwrite_weights=overwrite_sic_weights,
-        )
 
         ds_grid = self.get_target_grid(paths)
 
@@ -544,23 +488,18 @@ class WHACSRegridder(CAWCRRegridder):
             i1 = min(i0 + max(1, int(time_chunk)), nt)
             self._log(f"Processing hourly chunk {i0}:{i1} / {nt}")
             station_chunk = efreq_station.isel(time=slice(i0, i1))
-            efreq_unmasked, _ = self._regrid_station_spectra_chunk_to_cice(
+            efreq_cice, _ = self._regrid_station_spectra_chunk_to_cice(
                 station_chunk,
                 paths=paths,
                 overwrite_weights=False,
             )
-            sic_hourly = self.expand_daily_sic_to_hourly(
-                sic_daily_cice,
-                efreq_unmasked["time"],
-            )
-            efreq_masked, _ = self.apply_ice_edge_mask(efreq_unmasked, sic_hourly)
             self._append_forcing_chunk(
                 out=work_out,
                 i0=i0,
                 i1=i1,
-                efreq_masked_chunk=efreq_masked,
+                efreq_chunk=efreq_cice,
             )
-            del station_chunk, efreq_unmasked, sic_hourly, efreq_masked
+            del station_chunk, efreq_cice
 
         with NCFile(work_out, mode="a") as nc:
             nc.completed = "true"
