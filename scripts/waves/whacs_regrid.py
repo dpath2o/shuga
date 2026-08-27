@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
             "Regrid one monthly WHACS directional-spectrum file to hourly CICE25 "
-            "incident-wave forcing on the native CICE T grid."
+            "wave forcing on the native CICE T grid. No NSIDC/model-ice mask is applied."
         )
     )
     p.add_argument("year", type=int)
@@ -30,19 +30,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-root", type=Path, default=None)
     p.add_argument("--weights-root", type=Path, default=None)
 
-    p.add_argument("--sic-threshold", type=float, default=0.15)
     p.add_argument("--target-lat-max", type=float, default=-35.0,
                    help="Southern Hemisphere forcing-domain northern limit; cells north of this are zero. Default: -35")
     p.add_argument("--k-nearest", type=int, default=8)
     p.add_argument("--idw-power", type=float, default=2.5)
     p.add_argument("--radius-km", type=float, default=1000.0)
-    p.add_argument("--time-chunk", type=int, default=1)
+    p.add_argument("--time-chunk", type=int, default=4)
     p.add_argument("--compression-level", type=int, default=3)
 
     p.add_argument("--overwrite-nc", action="store_true",
                    help="Rebuild even if a completed output exists. Legacy/incomplete files are replaced automatically.")
     p.add_argument("--overwrite-weights", action="store_true")
-    p.add_argument("--overwrite-sic-weights", action="store_true")
     p.add_argument("--log-file", type=Path, default=None)
     return p
 
@@ -83,7 +81,6 @@ def main() -> None:
 
     output_path = output_root / f"CAWCR_efreq_for_CICE6_{year:04d}{month:02d}.nc"
     station_weights = weights_root / f"map_WHACSstations_to_ACCESS-OM3-025_idw_k{args.k_nearest}.npz"
-    sic_weights = weights_root / "nsidc2cice_nearest.npz"
 
     log_file = args.log_file or (
         paths.logs_root_path / "waves" / f"whacs_regrid_{year:04d}{month:02d}.log"
@@ -105,12 +102,10 @@ def main() -> None:
         k_nearest=args.k_nearest,
         idw_power=args.idw_power,
         radius_km=args.radius_km,
-        sic_threshold=args.sic_threshold,
         hemisphere=args.hemisphere,
         target_lat_max=args.target_lat_max,
         fill_value=0.0,
         weights_path=station_weights,
-        sic_weights_path=sic_weights,
     )
 
     worker = WHACSRegridder(cfg, source_root=args.source_root, logger=logger)
@@ -119,7 +114,6 @@ def main() -> None:
         month,
         paths=paths,
         overwrite_weights=args.overwrite_weights,
-        overwrite_sic_weights=args.overwrite_sic_weights,
         overwrite_output=args.overwrite_nc,
         time_chunk=args.time_chunk,
         complevel=args.compression_level,
