@@ -14,8 +14,6 @@ set -euo pipefail
 
 START_YEAR="${START_YEAR:-1995}"
 END_YEAR="${END_YEAR:-2005}"
-# For an array job PBS_ARRAY_INDEX is supplied by PBS. For a one-month pilot
-# submitted without -J, default to index 0 (January of START_YEAR).
 ARRAY_INDEX="${PBS_ARRAY_INDEX:-0}"
 
 TOTAL_MONTHS=$(( (END_YEAR - START_YEAR + 1) * 12 ))
@@ -28,8 +26,6 @@ YEAR=$(( START_YEAR + ARRAY_INDEX / 12 ))
 MONTH_NUM=$(( ARRAY_INDEX % 12 + 1 ))
 MONTH="$(printf '%02d' "${MONTH_NUM}")"
 
-# ACCOUNT_PROJECT is PBS accounting only. DATA_PROJECT controls the existing
-# shuga /g/data tree and deliberately remains gv90.
 ACCOUNT_PROJECT="${ACCOUNT_PROJECT:-au88}"
 DATA_PROJECT="${DATA_PROJECT:-gv90}"
 RUN_USER="${RUN_USER:-da1339}"
@@ -40,7 +36,6 @@ WHACS_ROOT="${WHACS_ROOT:-/g/data/ia39/WP3/release/ACS_hindcast/spec/release/WP3
 OUTPUT_ROOT="${OUTPUT_ROOT:-/g/data/${DATA_PROJECT}/${RUN_USER}/afim_input/CAWCR}"
 WEIGHTS_ROOT="${WEIGHTS_ROOT:-/g/data/${DATA_PROJECT}/${RUN_USER}/grids/weights}"
 
-SIC_THRESHOLD="${SIC_THRESHOLD:-0.15}"
 TARGET_LAT_MAX="${TARGET_LAT_MAX:--35.0}"
 K_NEAREST="${K_NEAREST:-8}"
 IDW_POWER="${IDW_POWER:-2.5}"
@@ -50,7 +45,6 @@ COMPRESSION_LEVEL="${COMPRESSION_LEVEL:-3}"
 
 OW_NC="${OW_NC:-false}"
 OW_WGT="${OW_WGT:-false}"
-OW_SIC_WGT="${OW_SIC_WGT:-false}"
 
 SCRIPT_ROOT="${SCRIPT_ROOT:-/home/581/da1339/AFIM/src/mawsons-chest}"
 PY_SCRIPT="${PY_SCRIPT:-${SCRIPT_ROOT}/shuga/scripts/waves/whacs_regrid.py}"
@@ -65,6 +59,7 @@ echo "YEAR=${YEAR} MONTH=${MONTH}"
 echo "WHACS_ROOT=${WHACS_ROOT}"
 echo "OUTPUT_ROOT=${OUTPUT_ROOT}"
 echo "WEIGHTS_ROOT=${WEIGHTS_ROOT}"
+echo "ICE_MASK=none"
 echo "TARGET_LAT_MAX=${TARGET_LAT_MAX}"
 echo "K_NEAREST=${K_NEAREST} IDW_POWER=${IDW_POWER} RADIUS_KM=${RADIUS_KM}"
 echo "TIME_CHUNK=${TIME_CHUNK} COMPRESSION_LEVEL=${COMPRESSION_LEVEL}"
@@ -86,7 +81,6 @@ PY_ARGS=(
     --source-root "${WHACS_ROOT}"
     --output-root "${OUTPUT_ROOT}"
     --weights-root "${WEIGHTS_ROOT}"
-    --sic-threshold "${SIC_THRESHOLD}"
     --target-lat-max "${TARGET_LAT_MAX}"
     --k-nearest "${K_NEAREST}"
     --idw-power "${IDW_POWER}"
@@ -97,7 +91,6 @@ PY_ARGS=(
 
 [[ "${OW_NC}" == "true" ]] && PY_ARGS+=(--overwrite-nc)
 [[ "${OW_WGT}" == "true" ]] && PY_ARGS+=(--overwrite-weights)
-[[ "${OW_SIC_WGT}" == "true" ]] && PY_ARGS+=(--overwrite-sic-weights)
 
 python "${PY_SCRIPT}" "${PY_ARGS[@]}"
 
