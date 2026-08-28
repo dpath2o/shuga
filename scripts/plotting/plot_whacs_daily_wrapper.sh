@@ -1,7 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-PBS_SCRIPT="${PBS_SCRIPT:-/home/581/da1339/shuga/scripts/plotting/plot_whacs_daily.pbs}"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
+SCRIPT_ROOT="${SCRIPT_ROOT:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
+PBS_SCRIPT="${PBS_SCRIPT:-${SCRIPT_DIR}/plot_whacs_daily.pbs}"
 
 usage() {
     cat <<EOF
@@ -12,8 +15,11 @@ Defaults:
   START_YEAR=1995
   END_YEAR=2005
 
-For a single year argument, submits January of that year as a normal non-array
-pilot job. For a year range, submits one PBS array element per month.
+Submission behaviour:
+  * A single year argument (e.g. 1995) submits January of that year only.
+  * A year range (e.g. 1995 2005) checks each month and submits one ordinary
+    PBS job for every regridded WHACS file that already exists.
+  * No PBS arrays are used.
 
 Options:
   --account-project NAME    PBS accounting project, default: au88
@@ -26,14 +32,17 @@ Options:
   --tp-max FLOAT            optional fixed Tp colour maximum (s)
   --dpi N                   output PNG dpi, default: 300
   --overwrite               recreate existing daily figures
-  --dry-run                 print qsub command only
+  --dry-run                 print qsub command(s) only
   -h, --help                show this help
 
 Examples:
   # January 1995 pilot:
-  $0 1995
+  $0 1995 --north -50
 
-  # Full 1995--2005 monthly plotting array:
+  # Submit plotting for every available regridded month in 1995:
+  $0 1995 1995 --north -50
+
+  # Submit plotting for every available regridded month from 1995--2005:
   $0 1995 2005
 EOF
 }
@@ -88,30 +97,50 @@ if (( END_YEAR < START_YEAR )); then
     exit 2
 fi
 
-VARS="START_YEAR=${START_YEAR},END_YEAR=${END_YEAR},DATA_PROJECT=${DATA_PROJECT},RUN_USER=${RUN_USER},SIM_NAME=${SIM_NAME},NORTH=${NORTH},GRID_STRIDE=${GRID_STRIDE},HS_MAX=${HS_MAX},TP_MAX=${TP_MAX},DPI=${DPI},OVERWRITE=${OVERWRITE}"
+REGRID_ROOT="/g/data/${DATA_PROJECT}/${RUN_USER}/afim_input/CAWCR"
 
-if [[ "${PILOT_SINGLE_YEAR}" == "true" ]]; then
-    CMD=(qsub -P "${ACCOUNT_PROJECT}" -v "${VARS}" "${PBS_SCRIPT}")
-    DESC="January ${START_YEAR} non-array pilot"
-else
-    TOTAL_MONTHS=$(( (END_YEAR - START_YEAR + 1) * 12 ))
-    LAST_INDEX=$(( TOTAL_MONTHS - 1 ))
-    CMD=(qsub -P "${ACCOUNT_PROJECT}" -J "0-${LAST_INDEX}" -v "${VARS}" "${PBS_SCRIPT}")
-    DESC="${START_YEAR}--${END_YEAR}, array 0-${LAST_INDEX}"
-fi
+submit_month() {
+    local year="$1"
+    local month_num="$2"
+    local month
+    month="$(printf '%02d' "${month_num}")"
+    local reg_file="${REGRID_ROOT}/CAWCR_efreq_for_CICE6_${year}${month}.nc"
 
-echo "Submitting WHACS daily plotting: ${DESC}"
+    if [[ ! -s "${reg_file}" ]]; then
+        echo "skipping ${year}-${month}: no regridded file: ${reg_file}"
+        return 0
+    fi
+
+    local vars
+    vars="YEAR=${year},MONTH_NUM=${month_num},DATA_PROJECT=${DATA_PROJECT},RUN_USER=${RUN_USER},SIM_NAME=${SIM_NAME},NORTH=${NORTH},GRID_STRIDE=${GRID_STRIDE},HS_MAX=${HS_MAX},TP_MAX=${TP_MAX},DPI=${DPI},OVERWRITE=${OVERWRITE},SCRIPT_ROOT=${SCRIPT_ROOT},REGRID_ROOT=${REGRID_ROOT}"
+    local cmd=(qsub -P "${ACCOUNT_PROJECT}" -v "${vars}" "${PBS_SCRIPT}")
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf 'DRY RUN %s-%s: ' "${year}" "${month}"
+        printf '%q ' "${cmd[@]}"
+        printf '\n'
+    else
+        printf 'submitting %s-%s: ' "${year}" "${month}"
+        "${cmd[@]}"
+    fi
+}
+
+echo "WHACS daily plotting submission"
 echo "  accounting project = ${ACCOUNT_PROJECT}"
 echo "  data project       = ${DATA_PROJECT}"
+echo "  regridded root     = ${REGRID_ROOT}"
 echo "  north limit        = ${NORTH}"
 echo "  grid stride        = ${GRID_STRIDE}"
 echo "  Hs max             = ${HS_MAX:-auto}"
 echo "  Tp max             = ${TP_MAX:-auto}"
+echo "  PBS arrays         = disabled"
 
-if [[ "${DRY_RUN}" == "true" ]]; then
-    printf 'DRY RUN: '
-    printf '%q ' "${CMD[@]}"
-    printf '\n'
+if [[ "${PILOT_SINGLE_YEAR}" == "true" ]]; then
+    submit_month "${START_YEAR}" 1
 else
-    "${CMD[@]}"
+    for (( year=START_YEAR; year<=END_YEAR; year++ )); do
+        for month_num in {1..12}; do
+            submit_month "${year}" "${month_num}"
+        done
+    done
 fi
