@@ -6,6 +6,7 @@ import numpy as np
 import xarray as xr
 from netCDF4 import Dataset as NCFile
 
+from shuga.grid.cice import CICEGridwork
 from shuga.waves.whacs import WHACSRegridder
 
 
@@ -113,8 +114,6 @@ class WHACSMultiSourceRegridder(WHACSRegridder):
                 for axis in ("time", "frequency", "direction", "frequency_lo", "frequency_hi"):
                     self._assert_same_axis(reference, ds, axis, source_set)
 
-            # Keep only variables needed downstream. Avoid carrying wind/depth
-            # and station-name fields from the five archives through concat.
             keep_vars = ["efth"]
             for name in ("frequency_lo", "frequency_hi"):
                 if name in ds:
@@ -169,6 +168,42 @@ class WHACSMultiSourceRegridder(WHACSRegridder):
             + f"; total={before}, unique={after}, duplicates_removed={before-after}"
         )
         return combined
+
+    def get_target_grid(self, paths) -> xr.Dataset:
+        """Load target grid using the current CICEGridwork ``pth_cfg`` API."""
+        if self._target_grid is not None:
+            return self._target_grid
+        gridwork = CICEGridwork(pth_cfg=paths, logger=self.logger)
+        bundle = gridwork.load_cice_grid(build_faces=False)
+        lon = bundle.tgrid["TLON"]
+        lat = bundle.tgrid["TLAT"]
+        if self.config.target_lon_type:
+            lon = xr.DataArray(
+                gridwork.normalise_longitudes(lon.values, to=self.config.target_lon_type),
+                dims=lon.dims,
+                coords=lon.coords,
+                attrs=lon.attrs,
+            )
+        if bundle.mask is not None:
+            ocean_mask = bundle.mask.astype(np.int8)
+        else:
+            ocean_mask = xr.where(np.isfinite(lon) & np.isfinite(lat), 1, 0).astype(np.int8)
+        hemisphere_mask = self._build_hemisphere_mask(lat)
+        active_mask = (
+            ocean_mask.astype(bool)
+            & hemisphere_mask
+            & np.isfinite(lon)
+            & np.isfinite(lat)
+        ).astype(np.int8)
+        self._target_grid = xr.Dataset(
+            data_vars={
+                "TLON": lon.astype(np.float32),
+                "TLAT": lat.astype(np.float32),
+                "ocean_mask": ocean_mask.astype(np.int8),
+                "target_active_mask": active_mask.astype(np.int8),
+            }
+        )
+        return self._target_grid
 
     def _is_complete_forcing_file(self, path: Path, expected_nt: int | None = None) -> bool:
         """Require a completed forcing file built from the current five-source geometry."""
