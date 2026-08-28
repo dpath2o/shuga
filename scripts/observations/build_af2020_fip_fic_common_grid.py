@@ -80,7 +80,7 @@ def main() -> None:
     args = parse_args()
 
     paths = ShugaPaths()
-    gridwork = CICEGridwork(paths=paths)
+    gridwork = CICEGridwork(pth_cfg=paths)
 
     af20_cfg = AF2020Spec(
         variable=args.af2020_variable,

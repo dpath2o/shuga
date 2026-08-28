@@ -124,7 +124,7 @@ def _resolve_plot_grid(ds_wave: xr.Dataset,
     else:
         if paths is None:
             raise ValueError("Could not find TLON/TLAT in ds_wave and no ShugaPaths was provided.")
-        gridwork = CICEGridwork(paths=paths)
+        gridwork = CICEGridwork(pth_cfg=paths)
         bundle = gridwork.load_cice_grid(build_faces=False)
         lon = bundle.tgrid["TLON"].values.astype(np.float64)
         lat = bundle.tgrid["TLAT"].values.astype(np.float64)
@@ -133,7 +133,7 @@ def _resolve_plot_grid(ds_wave: xr.Dataset,
     elif "ocean_mask" in ds_wave:
         mask = ds_wave["ocean_mask"].values.astype(bool)
     elif paths is not None:
-        gridwork = CICEGridwork(paths=paths)
+        gridwork = CICEGridwork(pth_cfg=paths)
         bundle = gridwork.load_cice_grid(build_faces=False)
         if bundle.mask is not None:
             mask = bundle.mask.values.astype(bool)

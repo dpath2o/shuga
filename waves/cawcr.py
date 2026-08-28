@@ -227,7 +227,7 @@ class CAWCRRegridder:
     def get_target_grid(self, paths: ShugaPaths) -> xr.Dataset:
         if self._target_grid is not None:
             return self._target_grid
-        gridwork = CICEGridwork(paths=paths, logger=self.logger)
+        gridwork = CICEGridwork(pth_cfg=paths, logger=self.logger)
         bundle   = gridwork.load_cice_grid(build_faces=False)
         lon      = bundle.tgrid["TLON"]
         lat      = bundle.tgrid["TLAT"]
