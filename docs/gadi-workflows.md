@@ -18,6 +18,8 @@ export TMPDIR="/scratch/${PROJECT}/${RUN_USER}/tmp/${PBS_JOBID}"
 mkdir -p "$DASK_TEMPORARY_DIRECTORY" "$TMPDIR"
 ```
 
+Individual production scripts may pin a newer `analysis3` module where required; check the PBS header before submission.
+
 ## Common roots
 
 ```text
@@ -156,13 +158,100 @@ Guiding rules:
 
 ## Forcing
 
-Forcing scripts live in:
+Atmospheric forcing scripts live primarily in:
 
 ```text
 shuga/scripts/forcing/
 ```
 
-They currently support ERA5 CICE-ready monthly products and quicklook plotting. Workflow details live here; package capability is described in `forcing.md`.
+Wave-forcing production scripts live in:
+
+```text
+shuga/scripts/waves/
+```
+
+Package capability is described in [`forcing.md`](forcing.md). The WHACS-specific scientific and technical workflow is documented in [`WHACS_wave_forcing.md`](WHACS_wave_forcing.md).
+
+### WHACS → CICE25
+
+The production WHACS workflow combines the five hourly full-spectrum archives:
+
+```text
+GRID,GLOB,BUOYS,NIWA,SCHISM
+```
+
+and writes monthly CICE forcing under:
+
+```text
+/g/data/gv90/da1339/afim_input/CAWCR/CAWCR_efreq_for_CICE6_YYYYMM.nc
+```
+
+A January-1995 pilot is submitted as a normal job:
+
+```bash
+qsub \
+  -P au88 \
+  -v START_YEAR=1995,END_YEAR=1995 \
+  shuga/scripts/waves/whacs_regrid.pbs
+```
+
+The PBS worker defaults to index 0 when `PBS_ARRAY_INDEX` is absent, so this processes January of `START_YEAR`.
+
+A multi-year run uses the wrapper:
+
+```bash
+./shuga/scripts/waves/whacs_regrid_wrapper.sh 1995 2005
+```
+
+Operational defaults:
+
+```text
+PBS accounting project = au88
+data/output project     = gv90
+WHACS source project    = ia39
+queue                   = normalbw
+ncpus                   = 8
+memory                  = 64 GB
+walltime                = 24 h
+target latitude         = <= 35°S
+IDW                     = k=8, p=2.5, radius=1000 km
+time chunk              = 4 hours
+ice mask                = none
+```
+
+The shared five-source station-weight file is:
+
+```text
+/g/data/gv90/da1339/grids/weights/
+map_WHACS_grid-glob-buoys-niwa-schism_to_ACCESS-OM3-025_idw_k8.npz
+```
+
+Before a long production submission, inspect the monthly log and verify:
+
+```text
+WHACS spectral source sets: GRID,GLOB,BUOYS,NIWA,SCHISM
+Combined WHACS source stations: ...
+Spectral QC retained m0 ...
+Ice mask    : none ...
+Processing hourly chunk ...
+```
+
+and verify the resulting NetCDF contains:
+
+```text
+source_sets = GRID,GLOB,BUOYS,NIWA,SCHISM
+completed   = true
+```
+
+Daily PyGMT regridding QC scripts live in:
+
+```text
+shuga/scripts/plotting/plot_whacs_daily.py
+shuga/scripts/plotting/plot_whacs_daily.pbs
+shuga/scripts/plotting/plot_whacs_daily_wrapper.sh
+```
+
+See [`WHACS_wave_forcing.md`](WHACS_wave_forcing.md) before interpreting native-versus-regridded plots: once production uses all five source sets, a `GRID`-only native panel is not a complete before/after comparison.
 
 ## Job checks
 
@@ -179,7 +268,7 @@ from shuga.core.paths import ShugaPaths
 from shuga.grid.cice import CICEGridwork
 paths = ShugaPaths()
 print(paths.resolve_static_store())
-print(CICEGridwork(paths=paths).load_cice_static(variables=["TLON", "TLAT", "tarea"]))
+print(CICEGridwork(pth_cfg=paths).load_cice_static(variables=["TLON", "TLAT", "tarea"]))
 PY
 ```
 
