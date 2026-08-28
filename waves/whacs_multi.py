@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+from netCDF4 import Dataset as NCFile
 
 from shuga.waves.whacs import WHACSRegridder
 
@@ -15,15 +16,15 @@ class WHACSMultiSourceRegridder(WHACSRegridder):
     """Regrid the union of all five WHACS full-spectral point archives.
 
     WHACS stores hourly directional spectra in five parallel monthly files:
-    ``GRID``, ``GLOB``, ``BUOYS``, ``NIWA`` and ``SCHISM``.  The base
+    ``GRID``, ``GLOB``, ``BUOYS``, ``NIWA`` and ``SCHISM``. The base
     :class:`WHACSRegridder` was originally written around the ``GRID`` file
-    alone.  This subclass preserves the tested direction integration,
+    alone. This subclass preserves the tested direction integration,
     conservative 28->25 frequency remap, station-to-CICE IDW interpolation and
     NetCDF writer, but replaces the monthly source loader with the union of all
     five point sets.
 
     Fixed station coordinates duplicated between source sets are removed before
-    interpolation.  Source-set priority is the order in ``WHACS_SPECTRAL_SETS``;
+    interpolation. Source-set priority is the order in ``WHACS_SPECTRAL_SETS``;
     thus a GRID spectrum is retained when an identical location occurs in a
     later source set.
     """
@@ -112,8 +113,8 @@ class WHACSMultiSourceRegridder(WHACSRegridder):
                 for axis in ("time", "frequency", "direction", "frequency_lo", "frequency_hi"):
                     self._assert_same_axis(reference, ds, axis, source_set)
 
-            # Keep only what the downstream spectral workflow needs.  Avoid
-            # concatenating winds/depth/name fields from the five archives.
+            # Keep only variables needed downstream. Avoid carrying wind/depth
+            # and station-name fields from the five archives through concat.
             keep_vars = ["efth"]
             for name in ("frequency_lo", "frequency_hi"):
                 if name in ds:
@@ -152,7 +153,7 @@ class WHACSMultiSourceRegridder(WHACSRegridder):
         )
         after = int(combined.sizes["station"])
 
-        self._current_whacs_path = ";".join(str(p) for p in source_paths)  # metadata string
+        self._current_whacs_path = ";".join(str(p) for p in source_paths)
         combined.attrs.update(
             whacs_source_sets=",".join(self.spectral_sets),
             whacs_source_station_counts=",".join(
@@ -169,11 +170,21 @@ class WHACSMultiSourceRegridder(WHACSRegridder):
         )
         return combined
 
+    def _is_complete_forcing_file(self, path: Path, expected_nt: int | None = None) -> bool:
+        """Require a completed forcing file built from the current five-source geometry."""
+        if not super()._is_complete_forcing_file(path, expected_nt=expected_nt):
+            return False
+        try:
+            with NCFile(path, mode="r") as nc:
+                actual = str(getattr(nc, "source_sets", ""))
+                expected = ",".join(self.spectral_sets)
+                return actual == expected
+        except Exception:
+            return False
+
     def _initialise_forcing_file(self, **kwargs) -> None:
         super()._initialise_forcing_file(**kwargs)
         out = Path(kwargs["out"])
-        from netCDF4 import Dataset as NCFile
-
         with NCFile(out, mode="a") as nc:
             nc.source_sets = ",".join(self.spectral_sets)
             nc.source_geometry = "union of fixed WHACS GRID,GLOB,BUOYS,NIWA,SCHISM spectral points"
