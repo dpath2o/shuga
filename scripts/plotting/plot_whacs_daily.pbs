@@ -12,19 +12,14 @@
 
 set -euo pipefail
 
-START_YEAR="${START_YEAR:-1995}"
-END_YEAR="${END_YEAR:-2005}"
-ARRAY_INDEX="${PBS_ARRAY_INDEX:-0}"
+YEAR="${YEAR:-1995}"
+MONTH_NUM="${MONTH_NUM:-1}"
+MONTH="$(printf '%02d' "${MONTH_NUM}")"
 
-TOTAL_MONTHS=$(( (END_YEAR - START_YEAR + 1) * 12 ))
-if (( ARRAY_INDEX < 0 || ARRAY_INDEX >= TOTAL_MONTHS )); then
-    echo "PBS_ARRAY_INDEX=${ARRAY_INDEX} outside 0..$((TOTAL_MONTHS - 1))" >&2
+if (( MONTH_NUM < 1 || MONTH_NUM > 12 )); then
+    echo "MONTH_NUM=${MONTH_NUM} outside 1..12" >&2
     exit 2
 fi
-
-YEAR=$(( START_YEAR + ARRAY_INDEX / 12 ))
-MONTH_NUM=$(( ARRAY_INDEX % 12 + 1 ))
-MONTH="$(printf '%02d' "${MONTH_NUM}")"
 
 DATA_PROJECT="${DATA_PROJECT:-gv90}"
 RUN_USER="${RUN_USER:-da1339}"
@@ -39,7 +34,7 @@ TP_MAX="${TP_MAX:-}"
 DPI="${DPI:-300}"
 OVERWRITE="${OVERWRITE:-false}"
 
-SCRIPT_ROOT="${SCRIPT_ROOT:-/home/581/da1339/AFIM/src/mawsons-chest}"
+SCRIPT_ROOT="${SCRIPT_ROOT:-/home/581/da1339/src/mawsons-chest}"
 PY_SCRIPT="${PY_SCRIPT:-${SCRIPT_ROOT}/shuga/scripts/plotting/plot_whacs_daily.py}"
 
 module use /g/data/xp65/public/modules
