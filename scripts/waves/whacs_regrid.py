@@ -8,14 +8,16 @@ from shuga.core.logging import build_file_logger
 from shuga.core.paths import ShugaPaths
 from shuga.core.types import CICEGridSpec, ObservationSpec, RunSpec, WaveForcingSpec
 from shuga.waves.cawcr import CAWCRRegridConfig
-from shuga.waves.whacs import WHACSRegridder, WHACS_SOURCE_ROOT
+from shuga.waves.whacs import WHACS_SOURCE_ROOT
+from shuga.waves.whacs_multi import WHACSMultiSourceRegridder, WHACS_SPECTRAL_SETS
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
-            "Regrid one monthly WHACS directional-spectrum file to hourly CICE25 "
-            "wave forcing on the native CICE T grid. No NSIDC/model-ice mask is applied."
+            "Regrid the five monthly WHACS directional-spectrum point archives "
+            "(GRID,GLOB,BUOYS,NIWA,SCHISM) to hourly CICE25 wave forcing on "
+            "the native CICE T grid. No NSIDC/model-ice mask is applied."
         )
     )
     p.add_argument("year", type=int)
@@ -80,7 +82,11 @@ def main() -> None:
     )
 
     output_path = output_root / f"CAWCR_efreq_for_CICE6_{year:04d}{month:02d}.nc"
-    station_weights = weights_root / f"map_WHACSstations_to_ACCESS-OM3-025_idw_k{args.k_nearest}.npz"
+    set_tag = "-".join(name.lower() for name in WHACS_SPECTRAL_SETS)
+    station_weights = (
+        weights_root
+        / f"map_WHACS_{set_tag}_to_ACCESS-OM3-025_idw_k{args.k_nearest}.npz"
+    )
 
     log_file = args.log_file or (
         paths.logs_root_path / "waves" / f"whacs_regrid_{year:04d}{month:02d}.log"
@@ -108,7 +114,8 @@ def main() -> None:
         weights_path=station_weights,
     )
 
-    worker = WHACSRegridder(cfg, source_root=args.source_root, logger=logger)
+    logger.info("WHACS spectral source sets: %s", ",".join(WHACS_SPECTRAL_SETS))
+    worker = WHACSMultiSourceRegridder(cfg, source_root=args.source_root, logger=logger)
     out = worker.prepare_month(
         year,
         month,
