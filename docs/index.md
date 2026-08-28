@@ -1,6 +1,6 @@
 # shuga documentation
 
-`shuga` is the post-processing package used in the Mawson's Chest workflow for CICE sea-ice output, with a particular focus on Antarctic fast-ice classification, metrics, plotting, and experiment comparison.
+`shuga` is the post-processing package used in the Mawson's Chest workflow for CICE sea-ice output, with a particular focus on Antarctic fast-ice classification, metrics, plotting, experiment comparison, and preparation of selected forcing products.
 
 The package is organised around a small number of public workflow objects:
 
@@ -10,6 +10,7 @@ The package is organised around a small number of public workflow objects:
 - `CICEClassifier` builds fast-ice masks.
 - `CICEMetrics` computes metric products from CICE history and classified masks.
 - `CICEGridwork` and `CICEStaticBuilder` handle CICE grid assets and `iceh_static.zarr`.
+- `WHACSRegridder` / `WHACSMultiSourceRegridder` prepare hourly WHACS wave spectra for the standalone CICE/Icepack wave-forcing pathway.
 
 Most day-to-day usage should go through the public workflow classes or the loader functions. Lower-level modules exist so calculations can be tested and reused, but they are not normally required in notebooks or PBS scripts.
 
@@ -24,6 +25,8 @@ Most day-to-day usage should go through the public workflow classes or the loade
 | `classification.md` | Fast-ice mask methods and classification outputs. |
 | `metrics.md` | Metric groups, metric dispatch, secondary metrics, and outputs. |
 | `plotting-observations.md` | Plotting and observation loader conventions. |
+| [`WHACS_wave_forcing.md`](WHACS_wave_forcing.md) | Five-source WHACS directional spectra → CICE25 hourly forcing, spectral QC, spatial regridding, and output contract. |
+| `forcing.md` | General forcing capability and design intent. |
 | `gadi-workflows.md` | PBS wrapper use, Gadi paths, and common operational checks. |
 | `developer-guide.md` | Maintenance rules, testing checks, and repo hygiene. |
 
@@ -46,7 +49,8 @@ not older draft names such as `shugga` or `ShuggaPaths`.
 3. Run classification for one or more methods.
 4. Run metrics for the same methods.
 5. Load metric stores into notebooks for figures and analysis.
-6. Use scripts/PBS wrappers for repeatable production runs.
+6. Prepare external forcing products where required by an experiment, including WHACS wave spectra.
+7. Use scripts/PBS wrappers for repeatable production runs.
 
 ## Public API reminder
 
