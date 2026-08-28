@@ -11,14 +11,18 @@ import xarray as xr
 from shuga.core.paths import ShugaPaths
 from shuga.core.types import CICEGridSpec, ObservationSpec, RunSpec, WaveForcingSpec
 from shuga.plotting.cawcr import plot_whacs_daily_comparison
+from shuga.waves.cawcr import CAWCRRegridConfig
 from shuga.waves.whacs import WHACS_SOURCE_ROOT
+from shuga.waves.whacs_multi import WHACSMultiSourceRegridder, WHACS_SPECTRAL_SETS
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
-            "Create daily 2x2 PyGMT WHACS regridding QC figures: native station Hs/Tp "
-            "on the upper row and regridded CICE-grid Hs/Tp on the lower row."
+            "Create daily 2x2 PyGMT WHACS regridding QC figures. The upper row "
+            "uses the combined GRID+GLOB+BUOYS+NIWA+SCHISM native WHACS spectral "
+            "points and the lower row uses the corresponding regridded CICE-grid "
+            "Hs/Tp fields."
         )
     )
     p.add_argument("year", type=int)
@@ -38,14 +42,6 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def whacs_file(source_root: Path, year: int, month: int) -> Path:
-    last_day = calendar.monthrange(year, month)[1]
-    return source_root / (
-        f"efth_WHACS_hindcast_spec_GRID_1hr_"
-        f"{year:04d}{month:02d}010000-{year:04d}{month:02d}{last_day:02d}2300.nc"
-    )
-
-
 def main() -> None:
     args = build_parser().parse_args()
     if not (1 <= args.month <= 12):
@@ -56,13 +52,13 @@ def main() -> None:
     year = int(args.year)
     month = int(args.month)
 
-    regridded_root = args.regridded_root or Path(f"/g/data/{args.project}/{args.user}/afim_input/CAWCR")
-    output_root = args.output_root or Path(f"/g/data/{args.project}/{args.user}/GRAPHICAL/forcing/WHACS/daily")
-
-    src_file = whacs_file(args.source_root, year, month)
+    regridded_root = args.regridded_root or Path(
+        f"/g/data/{args.project}/{args.user}/afim_input/CAWCR"
+    )
+    output_root = args.output_root or Path(
+        f"/g/data/{args.project}/{args.user}/GRAPHICAL/forcing/WHACS/daily"
+    )
     reg_file = regridded_root / f"CAWCR_efreq_for_CICE6_{year:04d}{month:02d}.nc"
-    if not src_file.exists():
-        raise FileNotFoundError(src_file)
     if not reg_file.exists():
         raise FileNotFoundError(reg_file)
 
@@ -82,20 +78,61 @@ def main() -> None:
         graphics_root=output_root,
     )
 
-    print(f"native WHACS : {src_file}")
-    print(f"regridded    : {reg_file}")
-    print(f"figures      : {output_root}")
-
-    ds_raw = xr.open_dataset(
-        src_file,
-        chunks={"time": 24, "station": 512, "frequency": -1, "direction": -1},
+    # Reuse the production five-source WHACS loader so the native upper-row
+    # diagnostics use exactly the same source geometry, axis validation and
+    # duplicate-location policy as the regridding workflow.
+    source_cfg = CAWCRRegridConfig(
+        source_var="efth",
+        station_lon_name="longitude",
+        station_lat_name="latitude",
+        time_dim="time",
+        station_dim="station",
+        frequency_dim="frequency",
+        direction_dim="direction",
+        frequency_lo_name="frequency1",
+        frequency_hi_name="frequency2",
     )
+    source_loader = WHACSMultiSourceRegridder(
+        source_cfg,
+        source_root=args.source_root,
+    )
+    grid_anchor = source_loader.whacs_file(year, month)
+
+    print(f"native WHACS source sets : {','.join(WHACS_SPECTRAL_SETS)}")
+    print(f"native WHACS GRID anchor : {grid_anchor}")
+    print(f"regridded               : {reg_file}")
+    print(f"figures                 : {output_root}")
+
+    ds_raw = source_loader.open_whacs_month(grid_anchor, time_chunk=24)
     ds_wave = xr.open_dataset(reg_file, chunks={"time": 24})
+
+    expected_sets = ",".join(WHACS_SPECTRAL_SETS)
+    actual_sets = str(ds_wave.attrs.get("source_sets", ""))
+    if actual_sets and actual_sets != expected_sets:
+        raise ValueError(
+            "Native/regridded WHACS source-set mismatch: "
+            f"native={expected_sets!r}, regridded={actual_sets!r}"
+        )
+    if not actual_sets:
+        print(
+            "WARNING: regridded file has no source_sets attribute; "
+            "upper row uses all five WHACS sets but lower-row provenance cannot be verified."
+        )
+
+    print(
+        "native WHACS composite     : "
+        f"{ds_raw.sizes.get('station', 0)} unique stations after duplicate removal"
+    )
 
     month_start = pd.Timestamp(year=year, month=month, day=1)
     month_stop = month_start + pd.offsets.MonthBegin(1)
     for day in pd.date_range(month_start, month_stop, freq="1D", inclusive="left"):
-        out = output_root / f"{year:04d}" / f"{month:02d}" / f"WHACS_Hs_Tp_regrid_QC_{day:%Y%m%d}.png"
+        out = (
+            output_root
+            / f"{year:04d}"
+            / f"{month:02d}"
+            / f"WHACS_Hs_Tp_regrid_QC_{day:%Y%m%d}.png"
+        )
         if out.exists() and not args.overwrite:
             print(f"exists, skipping: {out}")
             continue
