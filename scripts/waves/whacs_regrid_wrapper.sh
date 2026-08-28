@@ -12,11 +12,12 @@ Defaults:
   START_YEAR=1995
   END_YEAR=2005
 
-The PBS job is charged to au88 by default, while shuga input/output paths
+The PBS jobs are charged to au88 by default, while shuga input/output paths
 remain under /g/data/gv90 unless --data-project is changed.
 
 The WHACS spectrum is regridded without any NSIDC/model sea-ice mask.
-For a multi-year run this submits one PBS array element per calendar month.
+For multi-month production this wrapper submits one ordinary PBS job per month
+rather than a PBS array, avoiding Gadi queue/server array-size limits.
 
 Options:
   --account-project NAME    PBS accounting project, default: au88
@@ -29,24 +30,23 @@ Options:
   --radius-km FLOAT         default: 1000.0
   --time-chunk N            default: 4
   --compression-level N     default: 3
-  --array-step N            optional Gadi -J stride, default: 1
   --ow_nc                   rebuild completed output files too
   --ow_wgt                  rebuild station weights
-  --dry-run                 print qsub command only
+  --dry-run                 print qsub commands only
   -h, --help                show this help
 
 Examples:
-  # Pilot January 1995 (normal non-array job):
-  qsub -P au88 -v START_YEAR=1995,END_YEAR=1995 \
-      ${PBS_SCRIPT}
+  # January 1995 only:
+  $0 1995
 
-  # Full 1995--2005 monthly array:
+  # Full 1995--2005 production submission:
   $0 1995 2005
 EOF
 }
 
 START_YEAR="1995"
 END_YEAR="2005"
+SINGLE_MONTH="false"
 if [[ $# -gt 0 && "$1" =~ ^[0-9]{4}$ ]]; then
     START_YEAR="$1"
     shift
@@ -55,6 +55,7 @@ if [[ $# -gt 0 && "$1" =~ ^[0-9]{4}$ ]]; then
         shift
     else
         END_YEAR="${START_YEAR}"
+        SINGLE_MONTH="true"
     fi
 fi
 
@@ -68,7 +69,6 @@ IDW_POWER="2.5"
 RADIUS_KM="1000.0"
 TIME_CHUNK="4"
 COMPRESSION_LEVEL="3"
-ARRAY_STEP="1"
 OW_NC="false"
 OW_WGT="false"
 DRY_RUN="false"
@@ -85,7 +85,6 @@ while [[ $# -gt 0 ]]; do
         --radius-km) RADIUS_KM="$2"; shift 2 ;;
         --time-chunk) TIME_CHUNK="$2"; shift 2 ;;
         --compression-level) COMPRESSION_LEVEL="$2"; shift 2 ;;
-        --array-step) ARRAY_STEP="$2"; shift 2 ;;
         --ow_nc) OW_NC="true"; shift ;;
         --ow_wgt) OW_WGT="true"; shift ;;
         --dry-run) DRY_RUN="true"; shift ;;
@@ -98,42 +97,56 @@ if (( END_YEAR < START_YEAR )); then
     echo "END_YEAR must be >= START_YEAR" >&2
     exit 2
 fi
-if (( ARRAY_STEP < 1 )); then
-    echo "--array-step must be >= 1" >&2
-    exit 2
-fi
 
+OUTPUT_ROOT="/g/data/${DATA_PROJECT}/${RUN_USER}/afim_input/CAWCR"
 TOTAL_MONTHS=$(( (END_YEAR - START_YEAR + 1) * 12 ))
-LAST_INDEX=$(( TOTAL_MONTHS - 1 ))
-
-VARS="START_YEAR=${START_YEAR},END_YEAR=${END_YEAR},ACCOUNT_PROJECT=${ACCOUNT_PROJECT},DATA_PROJECT=${DATA_PROJECT},RUN_USER=${RUN_USER},SIM_NAME=${SIM_NAME},TARGET_LAT_MAX=${TARGET_LAT_MAX},K_NEAREST=${K_NEAREST},IDW_POWER=${IDW_POWER},RADIUS_KM=${RADIUS_KM},TIME_CHUNK=${TIME_CHUNK},COMPRESSION_LEVEL=${COMPRESSION_LEVEL},OW_NC=${OW_NC},OW_WGT=${OW_WGT}"
-
-if (( TOTAL_MONTHS == 1 )); then
-    CMD=(qsub -P "${ACCOUNT_PROJECT}" -v "${VARS}" "${PBS_SCRIPT}")
-    ARRAY_DESC="non-array single month"
-else
-    ARRAY_SPEC="0-${LAST_INDEX}"
-    if (( ARRAY_STEP > 1 )); then
-        ARRAY_SPEC="${ARRAY_SPEC}:${ARRAY_STEP}"
-    fi
-    CMD=(qsub -P "${ACCOUNT_PROJECT}" -J "${ARRAY_SPEC}" -v "${VARS}" "${PBS_SCRIPT}")
-    ARRAY_DESC="${ARRAY_SPEC}"
+if [[ "${SINGLE_MONTH}" == "true" ]]; then
+    TOTAL_MONTHS=1
 fi
 
 echo "Submitting WHACS monthly regridding: ${START_YEAR}--${END_YEAR}"
 echo "  accounting project = ${ACCOUNT_PROJECT}"
 echo "  data project       = ${DATA_PROJECT}"
-echo "  months             = ${TOTAL_MONTHS}"
-echo "  array              = ${ARRAY_DESC}"
+echo "  jobs               = ${TOTAL_MONTHS} ordinary monthly PBS job(s)"
 echo "  ice mask           = none"
 echo "  target latitude    = <= ${TARGET_LAT_MAX} deg"
 echo "  station weights    = IDW k=${K_NEAREST}, p=${IDW_POWER}, radius=${RADIUS_KM} km"
 echo "  PBS script         = ${PBS_SCRIPT}"
 
-if [[ "${DRY_RUN}" == "true" ]]; then
-    printf 'DRY RUN: '
-    printf '%q ' "${CMD[@]}"
-    printf '\n'
-else
-    "${CMD[@]}"
-fi
+submitted=0
+skipped=0
+
+for (( year=START_YEAR; year<=END_YEAR; year++ )); do
+    month_start=1
+    month_end=12
+    if [[ "${SINGLE_MONTH}" == "true" ]]; then
+        month_end=1
+    fi
+
+    for (( month=month_start; month<=month_end; month++ )); do
+        mm="$(printf '%02d' "${month}")"
+        out="${OUTPUT_ROOT}/CAWCR_efreq_for_CICE6_${year}${mm}.nc"
+
+        # Avoid knowingly queuing an already-produced month. The Python worker
+        # still performs the authoritative provenance/completion check.
+        if [[ -f "${out}" && "${OW_NC}" != "true" ]]; then
+            echo "  existing ${year}-${mm}: submitting anyway only if worker finds it stale"
+        fi
+
+        VARS="YEAR=${year},MONTH_NUM=${month},START_YEAR=${year},END_YEAR=${year},ACCOUNT_PROJECT=${ACCOUNT_PROJECT},DATA_PROJECT=${DATA_PROJECT},RUN_USER=${RUN_USER},SIM_NAME=${SIM_NAME},TARGET_LAT_MAX=${TARGET_LAT_MAX},K_NEAREST=${K_NEAREST},IDW_POWER=${IDW_POWER},RADIUS_KM=${RADIUS_KM},TIME_CHUNK=${TIME_CHUNK},COMPRESSION_LEVEL=${COMPRESSION_LEVEL},OW_NC=${OW_NC},OW_WGT=${OW_WGT}"
+        CMD=(qsub -P "${ACCOUNT_PROJECT}" -v "${VARS}" "${PBS_SCRIPT}")
+
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            printf 'DRY RUN %04d-%02d: ' "${year}" "${month}"
+            printf '%q ' "${CMD[@]}"
+            printf '\n'
+        else
+            printf '  submitting %04d-%02d: ' "${year}" "${month}"
+            "${CMD[@]}"
+        fi
+        submitted=$((submitted + 1))
+    done
+
+done
+
+echo "Submission complete: submitted=${submitted}, skipped=${skipped}"
