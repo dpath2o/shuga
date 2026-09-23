@@ -49,7 +49,7 @@ Examples:
   $(basename "$0") -r Aus -f 8 LD-static-Cs1e-3 LD-static-Cs5e-4
 
 Environment customisation:
-  BASE_DIR          Default: ~/graphical/LD-pub-workspace
+  BASE_DIR          Default: /g/data/gv90/da1339/GRAPHICAL/lateral-drag
   FIELD             Default: FIHI_TS
   METHOD_TAG        Default: binary-days
   FPS               Default: 6

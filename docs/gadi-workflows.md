@@ -24,10 +24,10 @@ Individual production scripts may pin a newer `analysis3` module where required;
 
 ```text
 ~/AFIM_archive -> /g/data/gv90/da1339/afim_output
-~/AFIM_archive/<SIM_NAME>/zarr/iceh_daily.zarr
-~/AFIM_archive/<SIM_NAME>/zarr/iceh_hourly.zarr
+~/AFIM_archive/<PUBLICATION>/<SIM_NAME>/zarr/iceh_daily.zarr
+~/AFIM_archive/<PUBLICATION>/<SIM_NAME>/zarr/iceh_hourly.zarr
 ~/AFIM_archive/CICE_0p25_Cgrid_coords.zarr
-/g/data/gv90/da1339/GRAPHICAL/
+/g/data/gv90/da1339/GRAPHICAL/<PUBLICATION>/<SIM_NAME>/
 ```
 
 ## Classification

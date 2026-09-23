@@ -142,7 +142,7 @@ shuga/
 
 | Object | Purpose |
 |---|---|
-| `RunSpec` | Simulation name, analysis dates, hemisphere, project/user, history frequency. |
+| `RunSpec` | Simulation name, publication group, analysis dates, hemisphere, project/user, history frequency. |
 | `ClassificationSpec` | Ice domain, speed/concentration thresholds, classification method/window, and CICE grid reconstruction where relevant. |
 | `MetricsSpec` | Metric selection, groups, scales, diagnostics, and optional observational skill settings. |
 | `ObservationSpec` | Observation roots and product-specific settings. |
@@ -161,8 +161,16 @@ For **SI**, grid type is not part of the physical classification. FI/PI remain g
 A typical standalone experiment lives under:
 
 ```text
-/g/data/gv90/da1339/afim_output/<SIM_NAME>/zarr/
+/g/data/<PROJECT>/<USER>/afim_output/<PUBLICATION>/<SIM_NAME>/zarr/
 ```
+
+Examples of publication groups are `LFI-sensitivity`, `lateral-drag`, and `LFI-waves-dyntens`.
+The shared `CICE_0p25_Cgrid_coords.zarr` stays directly under `afim_output`.
+Existing simulations are discovered in a unique group. Supply `RunSpec(publication="lateral-drag")`
+or `--publication lateral-drag` for a new simulation or when a name occurs in two groups.
+Graphics for a run go to `GRAPHICAL/<PUBLICATION>/<SIM_NAME>/`.
+The `--afim-output-root` override accepts either the shared `afim_output` directory
+or a specific publication directory.
 
 For FI/PI:
 
@@ -576,10 +584,10 @@ standalone CICE6 experiments
 ## Paper1
 
 ```bash
-export PAPER_ROOT=/g/data/gv90/da1339/afim_output/paper1
+export PAPER_ROOT=/g/data/gv90/da1339/afim_output/LFI-sensitivity
 export START_DATE=1994-01-01
 export END_DATE=1999-12-31
-export OUTPUT=/g/data/gv90/da1339/GRAPHICAL/paper1/SIA_SH_climatology_1994-1999.png
+export OUTPUT=/g/data/gv90/da1339/GRAPHICAL/LFI-sensitivity/SIA_SH_climatology_1994-1999.png
 export EXPERIMENTS="AOM2-ERA5=ACCESS-OM2-ERA5,notensnogi=notens-nogi,ry93=ry93,elps-min=elps-min"
 
 qsub -V shuga/scripts/plotting/plot_SIA_climatology.pbs
@@ -591,7 +599,7 @@ qsub -V shuga/scripts/plotting/plot_SIA_climatology.pbs
 export PAPER_ROOT=/g/data/gv90/da1339/afim_output
 export START_DATE=2000-01-01
 export END_DATE=2005-12-31
-export OUTPUT=/g/data/gv90/da1339/GRAPHICAL/paper2/SIA_SH_climatology_2000-2005.png
+export OUTPUT=/g/data/gv90/da1339/GRAPHICAL/lateral-drag/SIA_SH_climatology_2000-2005.png
 export EXPERIMENTS="no-slip-LFI=LFI rheology without lateral drag,Cs-high=static high Cs,Cq-high=quadratic high Cq"
 
 qsub -V shuga/scripts/plotting/plot_SIA_climatology.pbs
@@ -600,10 +608,10 @@ qsub -V shuga/scripts/plotting/plot_SIA_climatology.pbs
 ## Paper3
 
 ```bash
-export PAPER_ROOT=/g/data/gv90/da1339/afim_output/paper3
+export PAPER_ROOT=/g/data/gv90/da1339/afim_output/LFI-waves-dyntens
 export START_DATE=2000-01-01
 export END_DATE=2005-12-31
-export OUTPUT=/g/data/gv90/da1339/GRAPHICAL/paper3/SIA_SH_climatology_2000-2005.png
+export OUTPUT=/g/data/gv90/da1339/GRAPHICAL/LFI-waves-dyntens/SIA_SH_climatology_2000-2005.png
 export EXPERIMENTS="LD-tides=LD tides"
 
 qsub -V shuga/scripts/plotting/plot_SIA_climatology.pbs

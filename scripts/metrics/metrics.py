@@ -27,6 +27,7 @@ def _comma_split(value: str | None) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Compute or update shuga metrics from classification outputs and/or CICE history.")
     p.add_argument("--sim-name", required=True)
+    p.add_argument("--publication", default=None, help="Publication group below afim_output.")
     p.add_argument("--start-date", required=True)
     p.add_argument("--end-date", required=True)
     p.add_argument("--hemisphere", default="SH")
@@ -90,6 +91,7 @@ def main() -> None:
                             hemisphere     = args.hemisphere,
                             project        = args.project,
                             user           = args.user,
+                            publication    = args.publication,
                             iceh_frequency = args.iceh_frequency)
     cls_cfg       = ClassificationSpec(ice_type     = args.ice_type,
                                        grid_type    = args.grid_type,

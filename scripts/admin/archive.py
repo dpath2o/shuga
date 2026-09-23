@@ -138,8 +138,12 @@ def list_archive_experiments(archive_root):
         sys.exit(1)
     experiments = []
     for path in archive_root.iterdir():
-        if is_experiment_archive_dir(path):
-            experiments.append(path)
+        if not is_experiment_archive_dir(path):
+            continue
+        if (path / "history").is_dir() or (path / "zarr").is_dir():
+            experiments.append(path)  # existing flat layout
+        else:
+            experiments.extend(child for child in path.iterdir() if is_experiment_archive_dir(child))
     return sorted(experiments, key=lambda p: natural_key(p.name))
 
 def validate_mapped_cases(run_dirs, archive_names):
@@ -741,7 +745,7 @@ def main():
     dry_run = not args.send_to_archive
 
     archive_dirs = list_archive_experiments(archive_root)
-    archive_names = {path.name for path in archive_dirs}
+    archive_names = {path.name for path in archive_dirs} | {str(path.relative_to(archive_root)) for path in archive_dirs}
 
     run_dirs = list_run_dirs(runs_root)
 
@@ -787,7 +791,11 @@ def main():
             continue
 
         exp_name = MAPPED_CASES[run_case]
-        exp_dir = archive_root / exp_name
+        candidates = [path for path in archive_dirs if path.name == exp_name or str(path.relative_to(archive_root)) == exp_name]
+        if len(candidates) != 1:
+            print(f"ERROR: mapped experiment {exp_name!r} has {len(candidates)} matches; use publication/experiment in MAPPED_CASES.", file=sys.stderr)
+            continue
+        exp_dir = candidates[0]
 
         if not exp_dir.is_dir():
             print(
@@ -803,7 +811,7 @@ def main():
         row = process_run_dir(
             run_dir,
             exp_name,
-            archive_root,
+            exp_dir.parent,
             dry_run=dry_run,
             overwrite=args.overwrite,
             move_history_files=args.move_history_files,

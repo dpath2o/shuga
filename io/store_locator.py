@@ -67,6 +67,7 @@ class CICEStoreLocator:
         base_run   = base_paths.run_cfg if base_paths is not None else self.run_cfg
         run_other  = replace(base_run,
                              sim_name = sim_name,
+                             publication = base_run.publication if sim_name == base_run.sim_name else None,
                              project  = project or base_run.project,
                              user     = user or base_run.user)
         if base_paths is None:

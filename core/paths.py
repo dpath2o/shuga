@@ -118,12 +118,48 @@ class ShugaPaths:
 
     @property
     def output_root(self) -> Path:
-        base = Path(self.afim_output_root).expanduser() if self.afim_output_root is not None else Path(f"/g/data/{self._project}/{self._user}/afim_output")
+        base = Path(self.afim_output_root).expanduser()
         if self.run_cfg is None:
             return base
         if base.name == self.run_cfg.sim_name:
             return base
-        return base / self.run_cfg.sim_name
+        return self.publication_output_root / self.run_cfg.sim_name
+
+    @property
+    def publication_name(self) -> str | None:
+        """Explicit publication, or the unique group containing this simulation."""
+        if self.run_cfg is None:
+            return None
+        base = Path(self.afim_output_root).expanduser()
+        sim = self.run_cfg.sim_name
+        if base.name == sim:
+            return base.parent.name if base.parent.name != "afim_output" else None
+        if base.parent.name == "afim_output" and base.name != "afim_output":
+            if self.run_cfg.publication and self.run_cfg.publication != base.name:
+                raise ValueError(f"publication={self.run_cfg.publication!r} conflicts with output root {base}")
+            return base.name
+        if self.run_cfg.publication:
+            return self.run_cfg.publication
+        matches = sorted(p.name for p in base.iterdir() if p.is_dir() and (p / sim).is_dir()) if base.is_dir() else []
+        if len(matches) > 1:
+            raise ValueError(f"Simulation {sim!r} occurs in multiple publications: {matches}. Set publication explicitly.")
+        return matches[0] if matches else None
+
+    @property
+    def publication_output_root(self) -> Path:
+        base = Path(self.afim_output_root).expanduser()
+        if self.run_cfg is not None and base.name == self.run_cfg.sim_name:
+            return base.parent
+        if base.parent.name == "afim_output" and base.name != "afim_output":
+            return base
+        publication = self.publication_name
+        if publication:
+            return base / publication
+        if self.run_cfg is not None and (base / self.run_cfg.sim_name).is_dir():
+            return base  # Existing flat-layout simulation only.
+        if self.run_cfg is not None:
+            raise ValueError(f"Cannot locate {self.run_cfg.sim_name!r} below {base}; set RunSpec(publication='...') for a new simulation")
+        return base
 
     @property
     def zarr_root(self) -> Path:
@@ -174,6 +210,12 @@ class ShugaPaths:
         if self.graphics_root is not None:
             return Path(self.graphics_root).expanduser()
         return Path(f"/g/data/{self._project}/{self._user}/GRAPHICAL")
+
+    @property
+    def publication_graphics_root(self) -> Path:
+        base = self.graphics_root_path
+        publication = self.publication_name
+        return base if not publication or base.name == publication else base / publication
 
     @property
     def logs_root_path(self) -> Path:
@@ -232,7 +274,7 @@ class ShugaPaths:
 
     @property
     def ld_pub_tables_root_path(self) -> Path:
-        return Path(f"/g/data/{self._project}/{self._user}/GRAPHICAL/LD-pub-workspace/tables")
+        return self.publication_graphics_root / "tables"
 
     @property
     def nsidc_root_path(self) -> Path:
@@ -543,7 +585,7 @@ class ShugaPaths:
             candidates.append(Path(self.static_store).expanduser())
         candidates.extend([self.default_cice_static_store_path,
                            Path.home() / "AFIM_archive" / "CICE_0p25_Cgrid_coords.zarr",
-                           self.afim_output_root / "CICE_0p25_Cgrid_coords.zarr",
+                           (self.afim_output_root.parent if self.afim_output_root.parent.name == "afim_output" else self.afim_output_root) / "CICE_0p25_Cgrid_coords.zarr",
                            self.zarr_root / "iceh_static.zarr",
                            self.zarr_root / "static" / "iceh_static.zarr",
                            self.archive_zarr_root_path / "iceh_static.zarr",
@@ -590,7 +632,12 @@ class ShugaPaths:
 
     def figure_root(self, region: str | None = None, *, sim_name: str | None = None) -> Path:
         sim   = sim_name or self._require_run("figure_root").sim_name
-        parts = [self.graphics_root_path, sim]
+        if sim_name is not None and self.run_cfg is not None and sim_name != self.run_cfg.sim_name:
+            other = replace(self.run_cfg, sim_name=sim_name, publication=None)
+            root = replace(self, run_cfg=other).publication_graphics_root
+        else:
+            root = self.publication_graphics_root
+        parts = [root, sim]
         if region is not None:
             parts.append(str(region))
         path = parts[0]
@@ -624,7 +671,7 @@ class ShugaPaths:
         sim    = sim_name or (self._require_run("fip_plot_path").sim_name if run_cfg is None else run_cfg.sim_name)
         dt0    = start_date or (self._require_run("fip_plot_path").start_date if run_cfg is None else run_cfg.start_date)
         dtN    = end_date or (self._require_run("fip_plot_path").end_date if run_cfg is None else run_cfg.end_date)
-        return (self.graphics_root_path / sim / region / "FIP" / f"{dt0}_{dtN}_{sim}_FIP_{norm.replace('-', '_')}.png")
+        return (self.figure_root(sim_name=sim) / region / "FIP" / f"{dt0}_{dtN}_{sim}_FIP_{norm.replace('-', '_')}.png")
 
     def timeseries_plot_path(self, variable: str, method: str, region: str = "total") -> Path:
         run_cfg     = self._require_run("timeseries_plot_path")
@@ -659,7 +706,7 @@ class ShugaPaths:
             sim_tokens.append(filename_token(sim_name))
         sim_part = "_".join(sim_tokens)
         name     = f"{var}_{sim_part}_{dt0}_{dtN}_{norm}_{region_key}.png"
-        return self.graphics_root_path / "timeseries" / name
+        return self.publication_graphics_root / "timeseries" / name
 
     def split_hemisphere_plot_path(self, variable: str, date_str: str) -> Path:
         return self.figure_root() / variable / f"{date_str}.png"
@@ -822,4 +869,3 @@ class ShugaPaths:
                 if value is not None:
                     resolved[key] = Path(value).expanduser()
         return resolved
-

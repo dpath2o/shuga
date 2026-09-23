@@ -26,7 +26,7 @@ GRD_STY      = "c0.15c"
 pth_cfg      = configs.ShugaPaths(LD_cfg = configs.LateralDragSpec())
 P_CPT_FIP    = pth_cfg.fip_cmap
 P_F2         = pth_cfg.combined_form_factors_path
-D_pub        = pth_cfg.graphics_root_path / "LD-pub-workspace"
+D_pub        = pth_cfg.graphics_root_path / "lateral-drag"
 EXPS_STATIC  = ["Cs-high", "Cs-high-ktens-mid", "Cs-high-ktens-high", "Cs-high-eDef", "Cs-mid", "Cs-low"]
 EXPS_QUAD    = ["Cq-high", "Cq-mid", "Cq-low"]
 EXPS_LINEAR  = ["Cl-mid", "Cl-low"]

@@ -86,6 +86,7 @@ fi
 [[ -n "${STATIC_STORE:-}" ]]           && CMD+=(--static-store "$STATIC_STORE")
 [[ -n "${CLASSIFICATION_ROOT:-}" ]]    && CMD+=(--classification-root "$CLASSIFICATION_ROOT")
 [[ -n "${AFIM_OUTPUT_ROOT:-}" ]]       && CMD+=(--afim-output-root "$AFIM_OUTPUT_ROOT")
+[[ -n "${PUBLICATION:-}" ]]            && CMD+=(--publication "$PUBLICATION")
 [[ -n "${GRAPHICS_ROOT:-}" ]]          && CMD+=(--graphics-root "$GRAPHICS_ROOT")
 [[ -n "${LOGS_ROOT:-}" ]]              && CMD+=(--logs-root "$LOGS_ROOT")
 [[ -n "${OBS_METRICS_STORE:-}" ]]      && CMD+=(--obs-metrics-store "$OBS_METRICS_STORE")

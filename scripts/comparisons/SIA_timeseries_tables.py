@@ -107,13 +107,18 @@ def load_sia_series_from_store(
 
 
 def default_cice_metric_path(base_dir: Path, sim_name: str, hemisphere: str, ice_type: str, grid_type: str, method: str, ispd_thresh: str, bin_window: int, bin_min_days: int, roll_window: int) -> Path:
+    from shuga.core.paths import ShugaPaths
+    from shuga.core.types import RunSpec
     if method == "binary-days":
         method_dir = f"bin-win-{bin_window:02d}_bin-min-{bin_min_days:02d}"
     elif method == "rolling-mean":
         method_dir = f"roll-days-{roll_window}"
     else:
         method_dir = method
-    return base_dir / sim_name / "zarr" / hemisphere / f"ispd_thresh_{ispd_thresh}" / ice_type / grid_type / method_dir / "mets.zarr"
+    root = ShugaPaths(run_cfg=RunSpec(sim_name, "1900-01-01", "2100-12-31"), afim_output_root=base_dir).zarr_root
+    if ice_type.upper() == "SI":
+        return root / hemisphere / "SI" / "mets.zarr"
+    return root / hemisphere / f"ispd_thresh_{ispd_thresh}" / ice_type / grid_type / method_dir / "mets.zarr"
 
 
 def load_all_series(args: argparse.Namespace) -> pd.DataFrame:

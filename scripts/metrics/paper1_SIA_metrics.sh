@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AFIM_ROOT="/g/data/gv90/da1339/afim_output/paper1"
+AFIM_ROOT="/g/data/gv90/da1339/afim_output/LFI-sensitivity"
 STATIC_STORE="/g/data/gv90/da1339/afim_output/CICE_0p25_Cgrid_coords.zarr"
 
 SIMULATIONS=(

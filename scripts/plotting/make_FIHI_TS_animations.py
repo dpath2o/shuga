@@ -16,7 +16,7 @@ Directory assumptions
 ---------------------
 Input PNG directories are assumed to be:
 
-    ~/graphical/LD-pub-workspace/[sim_name]/FIHI_TS/[REGION]
+    ~/graphical/lateral-drag/[sim_name]/FIHI_TS/[REGION]
 
 with filenames like:
 
@@ -25,10 +25,10 @@ with filenames like:
 Outputs
 -------
 Frames:
-    ~/graphical/LD-pub-workspace/frames/<RUN_TAG>/
+    ~/graphical/lateral-drag/frames/<RUN_TAG>/
 
 Animation:
-    ~/graphical/LD-pub-workspace/animations/<RUN_TAG>.mp4
+    ~/graphical/lateral-drag/animations/<RUN_TAG>.mp4
 
 Examples
 --------
@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Iterable, List, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
+from shuga.core.paths import ShugaPaths
 
 
 VALID_REGIONS = {"DML", "WIO", "EIO", "Aus", "VOL", "AS", "BS", "WS", "total"}
@@ -80,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--base-dir",
-        default=str(Path.home() / "graphical" / "LD-pub-workspace"),
+        default=str(ShugaPaths().graphics_root_path / "lateral-drag"),
         help="Base working directory containing simulation subdirectories.",
     )
     parser.add_argument(

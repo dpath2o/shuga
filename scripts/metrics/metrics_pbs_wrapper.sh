@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SIM_NAME=""
+PUBLICATION=""
 START_DATE="1993-01-01"
 END_DATE="1999-12-31"
 HEMISPHERE="SH"
@@ -51,6 +52,7 @@ Usage: $0 -s SIM_NAME [options]
 
 Core options:
   -s, --sim-name NAME             Simulation name (required)
+      --publication NAME          Publication group below afim_output
   -b, --start-date DATE           Start date (default: 1993-01-01)
   -e, --end-date DATE             End date (default: 1999-12-31)
   -H, --hemisphere SH|NH          Hemisphere (default: SH)
@@ -110,6 +112,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -s|--sim-name)
             require_value "$1" "${2:-}"; SIM_NAME="$2"; shift 2 ;;
+        --publication)
+            require_value "$1" "${2:-}"; PUBLICATION="$2"; shift 2 ;;
         -b|--start-date)
             require_value "$1" "${2:-}"; START_DATE="$2"; shift 2 ;;
         -e|--end-date)
@@ -230,7 +234,29 @@ if [[ -z "$AFIM_OUTPUT_ROOT" ]]; then
 fi
 
 if [[ -z "$CICE_STORE" ]]; then
-    CICE_STORE="${AFIM_OUTPUT_ROOT}/${SIM_NAME}/zarr/${CICE_STORE_NAME}"
+    if [[ -n "$PUBLICATION" ]]; then
+        if [[ "${AFIM_OUTPUT_ROOT##*/}" == "$PUBLICATION" ]]; then
+            SIM_ROOT="${AFIM_OUTPUT_ROOT}/${SIM_NAME}"
+        else
+            SIM_ROOT="${AFIM_OUTPUT_ROOT}/${PUBLICATION}/${SIM_NAME}"
+        fi
+    else
+        matches=()
+        for candidate in "${AFIM_OUTPUT_ROOT}"/*/"${SIM_NAME}"; do
+            [[ -d "$candidate" ]] && matches+=("$candidate")
+        done
+        if (( ${#matches[@]} > 1 )); then
+            echo "Multiple publication groups contain ${SIM_NAME}; pass --publication." >&2
+            exit 1
+        elif (( ${#matches[@]} == 1 )); then
+            SIM_ROOT="${matches[0]}"
+            PUBLICATION="${SIM_ROOT%/${SIM_NAME}}"
+            PUBLICATION="${PUBLICATION##*/}"
+        else
+            SIM_ROOT="${AFIM_OUTPUT_ROOT}/${SIM_NAME}"
+        fi
+    fi
+    CICE_STORE="${SIM_ROOT}/zarr/${CICE_STORE_NAME}"
 fi
 
 if [[ -z "$STATIC_STORE" ]]; then
@@ -287,6 +313,7 @@ QSUB_VARS="SIM_NAME=${SIM_NAME},START_DATE=${START_DATE},END_DATE=${END_DATE},HE
 [[ -n "$METRIC_NAMES"  ]]       && QSUB_VARS+=",METRIC_NAMES=${METRIC_NAMES_SAFE}"
 [[ -n "$CLASSIFICATION_ROOT" ]] && QSUB_VARS+=",CLASSIFICATION_ROOT=${CLASSIFICATION_ROOT}"
 [[ -n "$GRAPHICS_ROOT" ]]       && QSUB_VARS+=",GRAPHICS_ROOT=${GRAPHICS_ROOT}"
+[[ -n "$PUBLICATION" ]]         && QSUB_VARS+=",PUBLICATION=${PUBLICATION}"
 [[ -n "$LOGS_ROOT" ]]           && QSUB_VARS+=",LOGS_ROOT=${LOGS_ROOT}"
 [[ -n "$OBS_METRICS_STORE" ]]   && QSUB_VARS+=",OBS_METRICS_STORE=${OBS_METRICS_STORE}"
 [[ -n "$COAST_DISTANCE_VAR" ]]  && QSUB_VARS+=",COAST_DISTANCE_VAR=${COAST_DISTANCE_VAR}"

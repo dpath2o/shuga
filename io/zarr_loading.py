@@ -131,7 +131,8 @@ def _resolve_run_context(run_cfg: RunSpec | None = None, *,
                       hemisphere     = hemisphere_eff or _default_value(RunSpec, "hemisphere"),
                       project        = project_eff,
                       user           = user_eff,
-                      iceh_frequency = iceh_frequency_eff)
+                      iceh_frequency = iceh_frequency_eff,
+                      publication    = (run_cfg.publication if run_cfg is not None and sim_name_eff == run_cfg.sim_name else None))
     return run_eff, dt0_eff, dtN_eff, hemisphere_eff
 
 def _resolve_classify_context(cls_cfg: ClassificationSpec | None = None, *,

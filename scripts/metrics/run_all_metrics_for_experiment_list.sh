@@ -23,6 +23,7 @@ METHODS="binary-days,rolling-mean"
 GRID="Tc"
 PROJECT="${PROJECT:-jk72}"
 RUN_USER="${RUN_USER:-da1339}"
+PUBLICATION="${PUBLICATION:-lateral-drag}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PBS_SCRIPT="${SCRIPT_DIR}/metrics.pbs"
 
@@ -40,6 +41,7 @@ submit_metric_job () {
     job_name="${job_name//,/}"
     local qsub_vars
     qsub_vars="SIM_NAME=${sim_name}"
+    qsub_vars+=",PUBLICATION=${PUBLICATION}"
     qsub_vars+=",START_DATE=${START}"
     qsub_vars+=",END_DATE=${END}"
     qsub_vars+=",HEMISPHERE=SH"

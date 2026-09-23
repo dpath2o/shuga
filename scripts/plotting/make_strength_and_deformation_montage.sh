@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="${HOME}/graphical/LD-pub-workspace"
+BASE="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/lateral-drag"
 SRC_REL="FIST-FIP_and_strain-invariant/Aus/2000-01-01_2005-12-31.png"
-OUT_DIR="${HOME}/graphical/LD-pub-workspace/FIST-FIP_and_strain-invariant"
+OUT_DIR="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/lateral-drag/FIST-FIP_and_strain-invariant"
 mkdir -p "${OUT_DIR}"
 
 TMP="$(mktemp -d)"

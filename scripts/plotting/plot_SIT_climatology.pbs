@@ -24,7 +24,7 @@ EXPERIMENTS="${EXPERIMENTS:-no-slip-LFI=LFI rheology without lateral drag,Cs-hig
 ESA_STORE="${ESA_STORE:-${ROOT}/SeaIce/SIT/processed/${HEMISPHERE}/ESA/SIT_timeseries.zarr}"
 AWI_STORE="${AWI_STORE:-${ROOT}/SeaIce/SIT/processed/${HEMISPHERE}/AWI/SIT_timeseries.zarr}"
 CMEMS_STORE="${CMEMS_STORE:-${ROOT}/SeaIce/CMEMS/0p083/daily/${HEMISPHERE}/SI/mets.zarr}"
-OUTPUT="${OUTPUT:-${ROOT}/GRAPHICAL/LD-pub-workspace/timeseries/SIT_${HEMISPHERE}_climatology_2000-2005.png}"
+OUTPUT="${OUTPUT:-${ROOT}/GRAPHICAL/lateral-drag/timeseries/SIT_${HEMISPHERE}_climatology_2000-2005.png}"
 
 cd "$REPO"
 export PYTHONPATH="$REPO"

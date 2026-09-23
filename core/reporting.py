@@ -178,12 +178,14 @@ def report_sim_status(sim_name        : str | None = None, *,
                               project    = project or run_cfg.project,
                               user       = user or run_cfg.user)
         elif hemisphere is not None or project is not None or user is not None:
+            publication = run_cfg.publication
             run_cfg = RunSpec(sim_name   = run_cfg.sim_name,
                               start_date = run_cfg.start_date,
                               end_date   = run_cfg.end_date,
                               hemisphere = hemisphere or run_cfg.hemisphere,
                               project    = project or run_cfg.project,
-                              user       = user or run_cfg.user)
+                              user       = user or run_cfg.user,
+                              publication = publication)
     classify_eff = cls_cfg or ClassificationSpec()
     pth_cfg        = ShugaPaths(run_cfg = run_cfg, cls_cfg = classify_eff, afim_output_root = afim_output_root)
     try:

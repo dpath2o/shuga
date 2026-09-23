@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SIM_NAME=""
+PUBLICATION=""
 START_DATE="1993-01-01"
 END_DATE="1999-12-31"
 HEMISPHERE="SH"
@@ -50,6 +51,7 @@ Usage: ./classify_pbs_wrapper.sh -s SIM_NAME [-b START_DATE] [-e END_DATE] [-H H
           [--overwrite-history] [--overwrite-static] [--delete-original]
           [--netcdf-engine ENGINE]
           [--afim-output-root DIR] [--cice-store DIR] [--static-store DIR]
+          [--publication NAME]
           [--classification-root DIR] [--archive-root DIR] [--logs-root DIR]
 
 Short flags:
@@ -81,6 +83,7 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -s) SIM_NAME="$2"; shift 2 ;;
+        --publication) PUBLICATION="$2"; shift 2 ;;
         -b) START_DATE="$2"; shift 2 ;;
         -e) END_DATE="$2"; shift 2 ;;
         -H) HEMISPHERE="$2"; shift 2 ;;
@@ -159,6 +162,7 @@ QSUB_VARS="SIM_NAME=${SIM_NAME},START_DATE=${START_DATE},END_DATE=${END_DATE},HE
 [[ -n "$DAILY_ROOT" ]] && QSUB_VARS+=",DAILY_ROOT=${DAILY_ROOT}"
 [[ -n "$HOURLY_ROOT" ]] && QSUB_VARS+=",HOURLY_ROOT=${HOURLY_ROOT}"
 [[ -n "$AFIM_OUTPUT_ROOT" ]] && QSUB_VARS+=",AFIM_OUTPUT_ROOT=${AFIM_OUTPUT_ROOT}"
+[[ -n "$PUBLICATION" ]] && QSUB_VARS+=",PUBLICATION=${PUBLICATION}"
 [[ -n "$CICE_STORE" ]] && QSUB_VARS+=",CICE_STORE=${CICE_STORE}"
 [[ -n "$STATIC_STORE" ]] && QSUB_VARS+=",STATIC_STORE=${STATIC_STORE}"
 [[ -n "$CLASSIFICATION_ROOT" ]] && QSUB_VARS+=",CLASSIFICATION_ROOT=${CLASSIFICATION_ROOT}"

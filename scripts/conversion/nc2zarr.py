@@ -17,6 +17,7 @@ from shuga.core.logging import build_file_logger
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Convert daily CICE iceh NetCDF history files to grouped monthly Zarr.")
     p.add_argument("--sim-name", required=True)
+    p.add_argument("--publication", default=None)
     p.add_argument("--start-date", default=None)
     p.add_argument("--end-date", default=None)
     p.add_argument("--hemisphere", default="SH")
@@ -69,6 +70,7 @@ def main() -> None:
         hemisphere=args.hemisphere,
         project=args.project,
         user=args.user,
+        publication=args.publication,
         iceh_frequency=args.iceh_frequency,
     )
     classify = ClassificationSpec(
@@ -80,8 +82,8 @@ def main() -> None:
         roll_window=args.roll_window,
     )
     paths = ShugaPaths(
-        run=run,
-        classify=classify,
+        run_cfg=run,
+        cls_cfg=classify,
         afim_output_root=args.afim_output_root,
         logs_root=args.logs_root,
         archive_root=args.archive_root,

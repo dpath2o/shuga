@@ -51,6 +51,7 @@ DRY_RUN="false"
 
 # Optional roots. Leave empty to let classify_pbs_wrapper.sh / classify.pbs defaults apply.
 AFIM_OUTPUT_ROOT=""
+PUBLICATION="${PUBLICATION:-lateral-drag}"
 CICE_STORE=""
 STATIC_STORE=""
 CLASSIFICATION_ROOT=""
@@ -112,6 +113,7 @@ submit_classification_job () {
     fi
 
     [[ -n "${AFIM_OUTPUT_ROOT}"    ]] && cmd+=( --afim-output-root "${AFIM_OUTPUT_ROOT}" )
+    [[ -n "${PUBLICATION}"         ]] && cmd+=( --publication "${PUBLICATION}" )
     [[ -n "${CICE_STORE}"          ]] && cmd+=( --cice-store "${CICE_STORE}" )
     [[ -n "${STATIC_STORE}"        ]] && cmd+=( --static-store "${STATIC_STORE}" )
     [[ -n "${CLASSIFICATION_ROOT}" ]] && cmd+=( --classification-root "${CLASSIFICATION_ROOT}" )

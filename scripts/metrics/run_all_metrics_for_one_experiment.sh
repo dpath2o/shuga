@@ -9,6 +9,7 @@ GRID="Tc"
 
 PROJECT="${PROJECT:-jk72}"
 RUN_USER="${RUN_USER:-da1339}"
+PUBLICATION="${PUBLICATION:-lateral-drag}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PBS_SCRIPT="${SCRIPT_DIR}/metrics.pbs"
@@ -24,6 +25,7 @@ submit_metric_job () {
 
     local qsub_vars
     qsub_vars="SIM_NAME=${SIM}"
+    qsub_vars+=",PUBLICATION=${PUBLICATION}"
     qsub_vars+=",START_DATE=${START}"
     qsub_vars+=",END_DATE=${END}"
     qsub_vars+=",HEMISPHERE=SH"

@@ -27,6 +27,7 @@ AF2020_MAX = pd.Timestamp("2018-02-15")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute and plot continuous/categorical FIP differences: simulation - AF2020.")
     p.add_argument("-s", "--sim-name", required=True)
+    p.add_argument("--publication", default=None)
     p.add_argument("-b", "--start-date", required=True, help="Simulation run/context start date.")
     p.add_argument("-e", "--end-date", required=True, help="Simulation run/context end date.")
     p.add_argument("--fip-start", default=None, help="FIP comparison start. Defaults to max(start-date, AF2020_MIN).")
@@ -130,7 +131,8 @@ def main() -> None:
                                  end_date   = args.end_date,
                                  hemisphere = args.hemisphere,
                                  project    = args.project,
-                                 user       = args.user)
+                                 user       = args.user,
+                                 publication = args.publication)
     cls_cfg            = ClassificationSpec(ice_type     = args.ice_type,
                                             grid_type    = args.grid_type,
                                             ispd_thresh  = args.ispd_thresh,
@@ -175,7 +177,7 @@ def main() -> None:
     if args.out_store is not None:
         out_store = Path(args.out_store).expanduser()
     else:
-        out_root = Path(args.out_root).expanduser() if args.out_root else Path.home() / "AFIM_archive" / args.sim_name / "zarr" / "comparisons"
+        out_root = Path(args.out_root).expanduser() if args.out_root else pth_cfg.zarr_root / "comparisons"
         out_store = out_root / f"FIPdiff_{args.sim_name}_minus_AF2020_{args.classification}_{args.grid_type}_{fip_start}_{fip_end}.zarr"
     if out_store.exists() and args.overwrite:
         shutil.rmtree(out_store)
@@ -198,7 +200,7 @@ def main() -> None:
         if args.plot_root:
             plot_base = Path(args.plot_root).expanduser()
         else:
-            plot_base = (Path("/g/data/gv90/da1339/GRAPHICAL/LD-pub-workspace") / args.sim_name / "FIP_diff")
+            plot_base = pth_cfg.figure_root() / "FIP_diff"
         field = "diff_cat" if args.plot_categorical else "diff"
         for reg_name, reg_def in ANTARCTIC_8_REGIONS.items():
             plt_reg = reg_def["plot_region"]

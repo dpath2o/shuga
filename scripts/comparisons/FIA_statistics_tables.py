@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--project", default="gv90")
     p.add_argument("--user", default="da1339")
     p.add_argument("--af2020-fia-store", default="/g/data/gv90/da1339/SeaIce/FI_obs/AF-FI-2020db_FIA_from_original_dataset.zarr")
-    p.add_argument("--table-root", default="/g/data/gv90/da1339/GRAPHICAL/LD-pub-workspace/tables")
+    p.add_argument("--table-root", default="/g/data/gv90/da1339/GRAPHICAL/lateral-drag/tables")
     p.add_argument("--tag", default=None)
     p.add_argument("--min-edge-trim-days", type=int, default=None,
                    help="Days trimmed from both ends before computing minimum FIA. Default: bin_window//2 for binary-days, else 0.")

@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     p.add_argument("-s", "--sim-name", required=True)
+    p.add_argument("--publication", default=None)
     p.add_argument("-b", "--start-date", default="2000-03-01")
     p.add_argument("-e", "--end-date", default="2031-12-31")
     p.add_argument("--classification", default="binary-days")
@@ -60,6 +61,7 @@ def main() -> None:
         hemisphere=args.hemisphere,
         project=args.project,
         user=args.user,
+        publication=args.publication,
     )
     classify = ClassificationSpec(
         ice_type=args.ice_type,
@@ -73,7 +75,7 @@ def main() -> None:
     metrics = MetricsSpec(methods=(args.classification,))
     plotting = PlottingSpec()
     observations = ObservationSpec()
-    paths = ShugaPaths(run=run, classify=classify, metrics=metrics, plotting=plotting, observations=observations)
+    paths = ShugaPaths(run_cfg=run, cls_cfg=classify, met_cfg=metrics, plt_cfg=plotting, obs_cfg=observations)
     plotter = CICEPlotter(run=run, classify=classify, metrics=metrics, plotting=plotting, observations=observations, paths=paths)
 
     af = xr.open_zarr(Path(args.af2020_store).expanduser(), consolidated=False, chunks={"time": args.chunks_time})
