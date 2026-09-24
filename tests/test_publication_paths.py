@@ -5,6 +5,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +45,11 @@ class PublicationPathsTest(unittest.TestCase):
         self.assertEqual(paths.zarr_root, paths.output_root / "zarr")
         shared = self.out / "CICE_0p25_Cgrid_coords.zarr"
         shared.mkdir()
-        self.assertEqual(paths.resolve_static_store(), shared)
+        archive_static = self.root / "home" / "AFIM_archive" / shared.name
+        archive_static.mkdir(parents=True)
+        with patch.object(Path, "home", return_value=self.root / "home"):
+            self.assertEqual(paths.resolve_static_store(), shared)
+            self.assertEqual(self.paths("Cs-high", base=self.out / "lateral-drag").resolve_static_store(), shared)
 
     def test_explicit_publication_for_new_run_and_group_root(self):
         paths = self.paths("new-run", publication="LFI-waves-dyntens")

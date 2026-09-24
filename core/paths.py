@@ -576,16 +576,17 @@ class ShugaPaths:
 
         Search order:
           1. explicit/default self.static_store,
-          2. shared archive static store,
-          3. legacy /g/data afim_output shared store,
+          2. shared store at the configured afim_output root,
+          3. shared archive static store,
           4. simulation-local iceh_static.zarr fallbacks.
         """
         candidates: list[Path] = []
         if self.static_store is not None:
             candidates.append(Path(self.static_store).expanduser())
-        candidates.extend([self.default_cice_static_store_path,
+        shared_root = (self.afim_output_root.parent if self.afim_output_root.parent.name == "afim_output" else self.afim_output_root)
+        candidates.extend([shared_root / "CICE_0p25_Cgrid_coords.zarr",
+                           self.default_cice_static_store_path,
                            Path.home() / "AFIM_archive" / "CICE_0p25_Cgrid_coords.zarr",
-                           (self.afim_output_root.parent if self.afim_output_root.parent.name == "afim_output" else self.afim_output_root) / "CICE_0p25_Cgrid_coords.zarr",
                            self.zarr_root / "iceh_static.zarr",
                            self.zarr_root / "static" / "iceh_static.zarr",
                            self.archive_zarr_root_path / "iceh_static.zarr",
