@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shuga"
+version = "0.2.0"
+description = "Antarctic fast-ice classification, metrics, plotting, and observations workflows for CICE Zarr output"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pandas",
+  "xarray",
+  "zarr",
+  "dask",
+  "matplotlib",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shuga*"]
+
+[tool.setuptools.package-data]
+shuga = ["cpt/*.cpt"]
