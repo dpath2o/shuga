@@ -87,8 +87,9 @@ DEFAULT_ARCHIVE_ROOT = "/g/data/gv90/da1339/afim_output"
 #
 # This dictionary is authoritative. Any run directory not listed here is skipped.
 #
-MAPPED_CASES = {"free-slip"   : "Cs-high-hmix20",
-                "frcg-exp02"  : "Cs-high-snow-half"}
+MAPPED_CASES = {"free-slip"   : "free-slip-no-drag",
+                "free-slip01" : "Cs-high-ktens-zero",
+                "free-slip02" : "no-slip-LFI-match"}
 
 D_AVOIDS     = {"CICE_0p25_Cgrid_coords.zarr", "future_work", "paper1", "paper3"}
 DATE_RE      = re.compile(r"(?P<year>[12][0-9]{3})[-_](?P<month>[01][0-9])[-_](?P<day>[0-3][0-9])")
