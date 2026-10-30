@@ -23,7 +23,7 @@ METHODS="binary-days,rolling-mean"
 GRID="Tc"
 PROJECT="${PROJECT:-jk72}"
 RUN_USER="${RUN_USER:-da1339}"
-PUBLICATION="${PUBLICATION:-lateral-drag}"
+PUBLICATION="${EXPERIMENT_GROUP:-${PUBLICATION:-lateral-drag}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PBS_SCRIPT="${SCRIPT_DIR}/metrics.pbs"
 

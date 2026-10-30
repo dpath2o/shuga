@@ -106,7 +106,7 @@ def load_sia_series_from_store(
     return _to_dataframe(sia, name)
 
 
-def default_cice_metric_path(base_dir: Path, sim_name: str, hemisphere: str, ice_type: str, grid_type: str, method: str, ispd_thresh: str, bin_window: int, bin_min_days: int, roll_window: int) -> Path:
+def default_cice_metric_path(base_dir: Path, sim_name: str, hemisphere: str, ice_type: str, grid_type: str, method: str, ispd_thresh: str, bin_window: int, bin_min_days: int, roll_window: int, experiment_group: str = "lateral-drag") -> Path:
     from shuga.core.paths import ShugaPaths
     from shuga.core.types import RunSpec
     if method == "binary-days":
@@ -115,7 +115,7 @@ def default_cice_metric_path(base_dir: Path, sim_name: str, hemisphere: str, ice
         method_dir = f"roll-days-{roll_window}"
     else:
         method_dir = method
-    root = ShugaPaths(run_cfg=RunSpec(sim_name, "1900-01-01", "2100-12-31"), afim_output_root=base_dir).zarr_root
+    root = ShugaPaths(run_cfg=RunSpec(sim_name, "1900-01-01", "2100-12-31", experiment_group=experiment_group), afim_output_root=base_dir).zarr_root
     if ice_type.upper() == "SI":
         return root / hemisphere / "SI" / "mets.zarr"
     return root / hemisphere / f"ispd_thresh_{ispd_thresh}" / ice_type / grid_type / method_dir / "mets.zarr"
@@ -127,7 +127,7 @@ def load_all_series(args: argparse.Namespace) -> pd.DataFrame:
     for sim in args.sim_names:
         path = Path(args.cice_store_template.format(sim_name=sim)) if args.cice_store_template else default_cice_metric_path(
             base, sim, args.hemisphere, args.ice_type, args.grid_type, args.method,
-            args.ispd_thresh, args.bin_window, args.bin_min_days, args.roll_window,
+            args.ispd_thresh, args.bin_window, args.bin_min_days, args.roll_window, args.experiment_group,
         )
         LOGGER.info("Loading CICE %s from %s", sim, path)
         frames.append(load_sia_series_from_store(path, sim, args.start_date, args.end_date, var_name=args.cice_sia_var))
@@ -206,11 +206,12 @@ def write_tables(df: pd.DataFrame, out_dir: Path) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Compare CICE, NSIDC, and OSI-SAF-450 SIA time series.")
+    p.add_argument("--experiment-group", "--publication", dest="experiment_group", default="lateral-drag")
     p.add_argument("--sim-names", nargs="+", required=True)
     p.add_argument("--start-date", required=True)
     p.add_argument("--end-date", required=True)
     p.add_argument("--afim-base-dir", default="/g/data/gv90/da1339/afim_output")
-    p.add_argument("--out-dir", default="/g/data/gv90/da1339/GRAPHICAL/AFIM/SIA_comparisons")
+    p.add_argument("--out-dir", default=None)
     p.add_argument("--hemisphere", default="SH")
     p.add_argument("--ice-type", default="SI")
     p.add_argument("--grid-type", default="Tc")
@@ -233,7 +234,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=getattr(logging, args.log_level.upper()), format="%(levelname)s:%(name)s:%(message)s")
-    out_dir = Path(args.out_dir)
+    from shuga.core.paths import ShugaPaths
+    from shuga.core.types import RunSpec
+    paths = ShugaPaths(run_cfg=RunSpec("SIA-comparison", args.start_date, args.end_date, experiment_group=args.experiment_group), afim_output_root=args.afim_base_dir)
+    out_dir = Path(args.out_dir) if args.out_dir else paths.experiment_group_graphics_root / "SIA_comparisons"
     df = load_all_series(args)
     write_tables(df, out_dir)
     years = f"{pd.to_datetime(args.start_date).year}-{pd.to_datetime(args.end_date).year}"

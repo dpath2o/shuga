@@ -2,9 +2,9 @@
 set -euo pipefail
 
 REGION="DML"
-BASE="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/lateral-drag"
+BASE="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/${EXPERIMENT_GROUP:-lateral-drag}"
 D_SRC="FIP_diff/${REGION}/"
-D_OUT="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/lateral-drag/FIP_diff"
+D_OUT="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/${EXPERIMENT_GROUP:-lateral-drag}/FIP_diff"
 mkdir -p "${D_OUT}"
 
 TMP="$(mktemp -d)"

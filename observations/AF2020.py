@@ -54,7 +54,7 @@ class AF2020Observations:
         self.af20_cfg = af20_cfg or AF2020Spec()
         self.run_cfg  = run_cfg or RunSpec(sim_name = "AF2020", start_date = "2000-01-01", end_date = "2018-12-31")
         self.obs_cfg  = obs_cfg or ObservationSpec()
-        self.pth_cfg  = pth_cfg or ShugaPaths(run_cfg = self.run_cfg, classify = None, obs_cfg = self.obs_cfg)  # type: ignore[arg-type]
+        self.pth_cfg  = pth_cfg or ShugaPaths(run_cfg = self.run_cfg, cls_cfg = None, obs_cfg = self.obs_cfg)  # type: ignore[arg-type]
         org_root      = D_org_nc if D_org_nc is not None else self.af20_cfg.D_org_nc
         reg_root      = D_reG    if D_reG    is not None else self.af20_cfg.D_reG
         if org_root is None:

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/lateral-drag"
+BASE="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/${EXPERIMENT_GROUP:-lateral-drag}"
 SRC_REL="FIP-weighted-FI-thickness_and_LD-tau/Aus/2000-01-01_2005-12-31.png"
-OUT_DIR="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/lateral-drag/FIP-weighted-FI-thickness_and_LD-tau"
+OUT_DIR="/g/data/${PROJECT:-gv90}/${RUN_USER:-da1339}/GRAPHICAL/${EXPERIMENT_GROUP:-lateral-drag}/FIP-weighted-FI-thickness_and_LD-tau"
 mkdir -p "${OUT_DIR}"
 
 TMP="$(mktemp -d)"

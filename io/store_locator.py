@@ -64,10 +64,13 @@ class CICEStoreLocator:
 
     def _paths_for_sim(self, sim_name: str, project: str | None = None, user: str | None = None) -> ShugaPaths:
         base_paths = self.pth_cfg
+        if base_paths is not None:
+            base_paths = base_paths.for_sim(sim_name)
         base_run   = base_paths.run_cfg if base_paths is not None else self.run_cfg
         run_other  = replace(base_run,
                              sim_name = sim_name,
-                             publication = base_run.publication if sim_name == base_run.sim_name else None,
+                             publication = None,
+                             experiment_group = (base_paths.experiment_group_name if base_paths is not None else base_run.experiment_group),
                              project  = project or base_run.project,
                              user     = user or base_run.user)
         if base_paths is None:

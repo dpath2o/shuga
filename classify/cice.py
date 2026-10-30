@@ -124,7 +124,7 @@ class CICEClassifier:
         """
         self.run_cfg   = run_cfg
         self.cls_cfg   = cls_cfg
-        self.pth_cfg   = pth_cfg or ShugaPaths(run_cfg = run_cfg, classify = cls_cfg)
+        self.pth_cfg   = pth_cfg or ShugaPaths(run_cfg = run_cfg, cls_cfg = cls_cfg)
         self.chunks    = chunks or {"time": 31}
         self.regridder = regridder
         self.logger    = logger or build_file_logger("shuga.cls_cfg", self.pth_cfg.classification_log_path())

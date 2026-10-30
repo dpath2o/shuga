@@ -3,7 +3,7 @@ import json, re
 import pandas               as pd
 import xarray               as xr
 from calendar               import monthrange
-from dataclasses            import asdict, dataclass, field
+from dataclasses            import asdict, dataclass, field, replace
 from pathlib                import Path
 from typing                 import Any
 from .naming                import normalize_method
@@ -149,6 +149,7 @@ def report_sim_status(sim_name        : str | None = None, *,
                       project         : str | None = None,
                       user            : str | None = None,
                       afim_output_root: str | Path | None = None,
+                      experiment_group: str | None = None,
                       echo            : bool = True,
                       logger                 = None) -> SimulationStatusReport:
     """
@@ -170,22 +171,11 @@ def report_sim_status(sim_name        : str | None = None, *,
                           project    = project or RunSpec.__dataclass_fields__["project"].default,
                           user       = user or RunSpec.__dataclass_fields__["user"].default)
     else:
-        if sim_name is not None and sim_name != run_cfg.sim_name:
-            run_cfg = RunSpec(sim_name   = sim_name,
-                              start_date = run_cfg.start_date,
-                              end_date   = run_cfg.end_date,
-                              hemisphere = hemisphere or run_cfg.hemisphere,
-                              project    = project or run_cfg.project,
-                              user       = user or run_cfg.user)
-        elif hemisphere is not None or project is not None or user is not None:
-            publication = run_cfg.publication
-            run_cfg = RunSpec(sim_name   = run_cfg.sim_name,
-                              start_date = run_cfg.start_date,
-                              end_date   = run_cfg.end_date,
-                              hemisphere = hemisphere or run_cfg.hemisphere,
-                              project    = project or run_cfg.project,
-                              user       = user or run_cfg.user,
-                              publication = publication)
+        run_cfg = replace(run_cfg, sim_name=sim_name or run_cfg.sim_name,
+                          hemisphere=hemisphere or run_cfg.hemisphere,
+                          project=project or run_cfg.project, user=user or run_cfg.user)
+    if experiment_group is not None:
+        run_cfg = replace(run_cfg, experiment_group=experiment_group, publication=None)
     classify_eff = cls_cfg or ClassificationSpec()
     pth_cfg        = ShugaPaths(run_cfg = run_cfg, cls_cfg = classify_eff, afim_output_root = afim_output_root)
     try:

@@ -50,6 +50,7 @@ def _parse_experiments(value: str | None) -> dict[str, str]:
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description = ("Plot SIA climatology for standalone CICE experiments against "
                                                "NSIDC, OSI-SAF-450 and CMEMS."))
+    p.add_argument("--experiment-group", "--publication", dest="experiment_group", default="lateral-drag")
     p.add_argument("--start-date", required = True)
     p.add_argument("--end-date", required = True)
     p.add_argument("--paper-root", type = Path, required = True, help = ("Root containing experiment directories, e.g. "
@@ -69,7 +70,7 @@ def parser() -> argparse.ArgumentParser:
 def main() -> None:
     args         = parser().parse_args()
     experiments  = _parse_experiments(args.experiments)
-    run_cfg      = RunSpec(sim_name = "SIA-comparison", start_date = args.start_date, end_date = args.end_date, hemisphere = "SH")
+    run_cfg      = RunSpec(experiment_group=args.experiment_group, sim_name = "SIA-comparison", start_date = args.start_date, end_date = args.end_date, hemisphere = "SH")
     cls_cfg      = ClassificationSpec(ice_type = "SI", methods = ("raw",))
     obs_cfg      = ObservationSpec(seaice_root = args.seaice_root, nsidc_version = "G02202_V6")
     pth_cfg      = ShugaPaths(run_cfg = run_cfg, cls_cfg = cls_cfg, obs_cfg = obs_cfg, afim_output_root = args.paper_root, graphics_root = args.output.parent)
@@ -94,7 +95,7 @@ def main() -> None:
                                              end_date   = args.end_date,
                                              variable   = "SIA")
     for sim_name, label in experiments.items():
-        sim_run       = RunSpec(sim_name = sim_name, start_date = args.start_date, end_date = args.end_date, hemisphere = "SH")
+        sim_run       = RunSpec(experiment_group=args.experiment_group, sim_name = sim_name, start_date = args.start_date, end_date = args.end_date, hemisphere = "SH")
         sim_cls       = ClassificationSpec(ice_type = "SI", methods = ("raw",))
         sim_paths     = ShugaPaths(run_cfg = sim_run, cls_cfg = sim_cls, afim_output_root = args.paper_root)
         store         = sim_paths.output_root / "zarr" / "SH" / "SI" / "mets.zarr"

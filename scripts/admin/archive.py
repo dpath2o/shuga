@@ -23,16 +23,16 @@ Primary tasks
 2. Use MAPPED_CASES to determine the corresponding archive experiment.
 
 3. Compare archive zarr monthly groups:
-       <archive-root>/<EXPERIMENT_NAME>/zarr/iceh_daily.zarr/YYYY_MM
+       <archive-root>/<EXPERIMENT_GROUP>/<EXPERIMENT_NAME>/zarr/iceh_daily.zarr/YYYY-MM (or YYYY_MM)
 
    with model daily history files:
        <runs-root>/<RUN_CASE>/history/iceh*.nc
 
-   Files whose YYYY_MM group is absent from the zarr archive are treated as
+   Files whose monthly group is absent from the zarr archive are treated as
    unprocessed / not analysed.
 
 4. With --send-to-archive, stage unprocessed history files to:
-       <archive-root>/<EXPERIMENT_NAME>/history/daily/
+       <archive-root>/<EXPERIMENT_GROUP>/<EXPERIMENT_NAME>/history/daily/
 
    By default history files are copied.
    With --move-history-files, history files are moved instead.
@@ -42,10 +42,10 @@ Primary tasks
        ice*
 
    to:
-       <archive-root>/<EXPERIMENT_NAME>/run_metadata/<RUN_CASE>/
+       <archive-root>/<EXPERIMENT_GROUP>/<EXPERIMENT_NAME>/run_metadata/<RUN_CASE>/
 
 6. With --send-to-archive, copy the latest restart file to:
-       <archive-root>/<EXPERIMENT_NAME>/restart/last/<RUN_CASE>/
+       <archive-root>/<EXPERIMENT_GROUP>/<EXPERIMENT_NAME>/restart/last/<RUN_CASE>/
 
 7. With --clean-cice-run-dirs, clean the CICE run directory by deleting:
        cice.runlog*
@@ -80,7 +80,8 @@ from pathlib import Path
 # User-editable configuration
 ###########################################################################
 
-DEFAULT_RUNS_ROOT    = "/g/data/gv90/da1339/cice-dirs/runs"
+DEFAULT_RUNS_ROOT    = "/g/data/gv90/da1339/src/CICE_free-slip"
+DEFAULT_EXPERIMENT_GROUP = "lateral-drag"
 DEFAULT_ARCHIVE_ROOT = "/g/data/gv90/da1339/afim_output"
 
 # Explicit CICE run case -> AFIM archive experiment mapping.
@@ -93,7 +94,7 @@ MAPPED_CASES = {"free-slip"   : "free-slip-no-drag",
 
 D_AVOIDS     = {"CICE_0p25_Cgrid_coords.zarr", "future_work", "paper1", "paper3"}
 DATE_RE      = re.compile(r"(?P<year>[12][0-9]{3})[-_](?P<month>[01][0-9])[-_](?P<day>[0-3][0-9])")
-MONTH_RE     = re.compile(r"^[12][0-9]{3}_[01][0-9]$")
+MONTH_RE     = re.compile(r"^[12][0-9]{3}[-_](?:0[1-9]|1[0-2])$")
 
 ###########################################################################
 def natural_key(text):
@@ -167,7 +168,7 @@ def validate_mapped_cases(run_dirs, archive_names):
 
 def month_key_from_history_file(path):
     """
-    Extract YYYY_MM from a daily CICE history filename.
+    Extract a normalised YYYY_MM key from a daily CICE history filename.
     """
     match = DATE_RE.search(path.name)
     if not match:
@@ -196,7 +197,7 @@ def list_history_files(history_dir):
 
 def archive_processed_months(exp_dir):
     """
-    Read existing YYYY_MM groups from zarr/iceh_daily.zarr.
+    Read existing YYYY-MM (or YYYY_MM) groups from zarr/iceh_daily.zarr.
     """
     zarr_dir = exp_dir / "zarr" / "iceh_daily.zarr"
     months = set()
@@ -204,7 +205,7 @@ def archive_processed_months(exp_dir):
         return months
     for path in zarr_dir.iterdir():
         if path.is_dir() and MONTH_RE.match(path.name):
-            months.add(path.name)
+            months.add(path.name.replace("-", "_"))
     return months
 
 def ensure_parent(path):
@@ -702,6 +703,11 @@ def main():
     )
 
     parser.add_argument(
+        "--experiment-group", "--publication", default=DEFAULT_EXPERIMENT_GROUP,
+        help="Experiment group below the archive root (default: lateral-drag).",
+    )
+
+    parser.add_argument(
         "--send-to-archive",
         action="store_true",
         help="Actually archive files. Default is dry-run.",
@@ -745,12 +751,25 @@ def main():
 
     dry_run = not args.send_to_archive
 
-    archive_dirs = list_archive_experiments(archive_root)
-    archive_names = {path.name for path in archive_dirs} | {str(path.relative_to(archive_root)) for path in archive_dirs}
-
+    group = args.experiment_group.strip()
+    if not group or group in {".", ".."} or "/" in group or "\\" in group:
+        parser.error("--experiment-group must be one directory name")
+    if not MAPPED_CASES:
+        parser.error("MAPPED_CASES is empty")
+    # Resolve deterministic destinations even for brand-new experiments. The
+    # copy helpers create parents only when --send-to-archive is requested.
+    group_root = archive_root if archive_root.name == group else archive_root / group
+    destinations = {}
+    for case, experiment in MAPPED_CASES.items():
+        parts = experiment.split("/")
+        if len(parts) == 2 and parts[0] == group:
+            experiment = parts[1]
+        if not experiment or experiment in {".", ".."} or "/" in experiment or "\\" in experiment:
+            parser.error(f"Invalid mapped experiment {experiment!r} for group {group!r}")
+        destinations[case] = group_root / experiment
+    if len(set(destinations.values())) != len(destinations):
+        parser.error("MAPPED_CASES must use distinct experiment destinations")
     run_dirs = list_run_dirs(runs_root)
-
-    validate_mapped_cases(run_dirs, archive_names)
 
     if dry_run:
         print("Mode: DRY-RUN. No files will be copied, moved, or deleted.")
@@ -770,11 +789,13 @@ def main():
 
     print(f"Runs root   : {runs_root}")
     print(f"Archive root: {archive_root}")
+    print(f"Experiment group: {group}")
+    print(f"Group root  : {group_root}")
     print()
 
     print("MAPPED_CASES:")
     for run_case in sorted(MAPPED_CASES, key=natural_key):
-        print(f"  {run_case} -> {MAPPED_CASES[run_case]}")
+        print(f"  {run_case} -> {destinations[run_case]}")
     print()
 
     rows = []
@@ -791,20 +812,8 @@ def main():
 
             continue
 
-        exp_name = MAPPED_CASES[run_case]
-        candidates = [path for path in archive_dirs if path.name == exp_name or str(path.relative_to(archive_root)) == exp_name]
-        if len(candidates) != 1:
-            print(f"ERROR: mapped experiment {exp_name!r} has {len(candidates)} matches; use publication/experiment in MAPPED_CASES.", file=sys.stderr)
-            continue
-        exp_dir = candidates[0]
-
-        if not exp_dir.is_dir():
-            print(
-                f"ERROR: mapped archive directory does not exist: "
-                f"{run_case} -> {exp_dir}",
-                file=sys.stderr,
-            )
-            continue
+        exp_dir = destinations[run_case]
+        exp_name = exp_dir.name
 
         if args.verbose:
             print(f"{run_case} -> {exp_name}")
@@ -838,7 +847,8 @@ def main():
     if dry_run:
         print()
         print("Dry-run complete. Nothing was copied, moved, or deleted.")
+    return 1 if any(row["errors"] for row in rows) else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

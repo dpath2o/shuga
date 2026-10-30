@@ -52,7 +52,8 @@ HOURLY_ROOT="${HOURLY_ROOT:-/g/data/gv90/da1339/cice-dirs/runs/free-slip-tides/h
 
 # Keep the test stores explicit so this diagnostic does not depend on shuga's
 # default output-root inference.
-ARCHIVE_ROOT="${ARCHIVE_ROOT:-${HOME}/AFIM_archive/${SIM_NAME}}"
+EXPERIMENT_GROUP="${EXPERIMENT_GROUP:-${PUBLICATION:-lateral-drag}}"
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-/g/data/${PROJECT}/${RUN_USER}/afim_output/${EXPERIMENT_GROUP}/${SIM_NAME}}"
 CICE_STORE="${CICE_STORE:-${ARCHIVE_ROOT}/zarr/iceh_hourly.zarr}"
 STATIC_STORE="${STATIC_STORE:-${ARCHIVE_ROOT}/zarr/iceh_static.zarr}"
 
@@ -86,6 +87,7 @@ mkdir -p "${OUT_DIR}" "$(dirname "${CICE_STORE}")" "$(dirname "${STATIC_STORE}")
 
 CMD=(python "${PY_SCRIPT}"
      --sim-name "${SIM_NAME}"
+     --experiment-group "${EXPERIMENT_GROUP}"
      --start-date "${START_DATE}"
      --end-date "${END_DATE}"
      --hemisphere "${HEMISPHERE}"

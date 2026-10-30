@@ -6,7 +6,8 @@ Usage: $0 -s "SIM1 SIM2" -b YYYY-MM-DD -e YYYY-MM-DD -n NSIDC_SIA_STORE [-o OSIS
 USAGE
 }
 OSISAF_SIA_STORE="/g/data/gv90/da1339/observations/OSI-SAF-450/processed/OSI-SAF-450_SH_SIA.zarr"
-OUT_DIR="/g/data/gv90/da1339/GRAPHICAL/AFIM/SIA_comparisons"
+EXPERIMENT_GROUP="${EXPERIMENT_GROUP:-${PUBLICATION:-lateral-drag}}"
+OUT_DIR="/g/data/gv90/da1339/GRAPHICAL/${EXPERIMENT_GROUP}/SIA_comparisons"
 while getopts ":s:b:e:n:o:d:h" opt; do
   case "$opt" in
     s) SIM_NAMES="$OPTARG" ;;
@@ -25,5 +26,5 @@ EXTRA_ARGS="$*"
 : "${START_DATE:?Missing -b START_DATE}"
 : "${END_DATE:?Missing -e END_DATE}"
 : "${NSIDC_SIA_STORE:?Missing -n NSIDC_SIA_STORE}"
-qsub -v SIM_NAMES="${SIM_NAMES}",START_DATE="${START_DATE}",END_DATE="${END_DATE}",NSIDC_SIA_STORE="${NSIDC_SIA_STORE}",OSISAF_SIA_STORE="${OSISAF_SIA_STORE}",OUT_DIR="${OUT_DIR}",EXTRA_ARGS="${EXTRA_ARGS}" \
+qsub -v EXPERIMENT_GROUP="${EXPERIMENT_GROUP}",SIM_NAMES="${SIM_NAMES}",START_DATE="${START_DATE}",END_DATE="${END_DATE}",NSIDC_SIA_STORE="${NSIDC_SIA_STORE}",OSISAF_SIA_STORE="${OSISAF_SIA_STORE}",OUT_DIR="${OUT_DIR}",EXTRA_ARGS="${EXTRA_ARGS}" \
   shuga/scripts/comparisons/SIA_timeseries_tables.pbs

@@ -10,6 +10,7 @@
 #PBS -N sia_ts_cmp
 
 set -euo pipefail
+EXPERIMENT_GROUP="${EXPERIMENT_GROUP:-${PUBLICATION:-lateral-drag}}"
 module use /g/data/xp65/public/modules
 module load conda/analysis3-25.12
 
@@ -18,11 +19,12 @@ module load conda/analysis3-25.12
 : "${END_DATE:?Set END_DATE=YYYY-MM-DD}"
 : "${NSIDC_SIA_STORE:?Set NSIDC_SIA_STORE=/path/to/nsidc_sia.zarr}"
 : "${OSISAF_SIA_STORE:=/g/data/gv90/da1339/observations/OSI-SAF-450/processed/OSI-SAF-450_SH_SIA.zarr}"
-: "${OUT_DIR:=/g/data/gv90/da1339/GRAPHICAL/AFIM/SIA_comparisons}"
+: "${OUT_DIR:=/g/data/gv90/da1339/GRAPHICAL/${EXPERIMENT_GROUP}/SIA_comparisons}"
 : "${SHUGA_ROOT:=/g/data/gv90/da1339/src/mawsons-chest}"
 
 cd "${SHUGA_ROOT}"
 python shuga/scripts/comparisons/SIA_timeseries_tables.py \
+  --experiment-group "${EXPERIMENT_GROUP}" \
   --sim-names ${SIM_NAMES} \
   --start-date "${START_DATE}" \
   --end-date "${END_DATE}" \

@@ -142,7 +142,7 @@ shuga/
 
 | Object | Purpose |
 |---|---|
-| `RunSpec` | Simulation name, publication group, analysis dates, hemisphere, project/user, history frequency. |
+| `RunSpec` | Simulation name, experiment group (default `lateral-drag`), analysis dates, hemisphere, project/user, history frequency. |
 | `ClassificationSpec` | Ice domain, speed/concentration thresholds, classification method/window, and CICE grid reconstruction where relevant. |
 | `MetricsSpec` | Metric selection, groups, scales, diagnostics, and optional observational skill settings. |
 | `ObservationSpec` | Observation roots and product-specific settings. |
@@ -161,16 +161,25 @@ For **SI**, grid type is not part of the physical classification. FI/PI remain g
 A typical standalone experiment lives under:
 
 ```text
-/g/data/<PROJECT>/<USER>/afim_output/<PUBLICATION>/<SIM_NAME>/zarr/
+/g/data/<PROJECT>/<USER>/afim_output/<EXPERIMENT_GROUP>/<SIM_NAME>/zarr/
 ```
 
-Examples of publication groups are `LFI-sensitivity`, `lateral-drag`, and `LFI-waves-dyntens`.
+The experiment group defaults to `lateral-drag`. Other groups, such as
+`LFI-sensitivity` and `LFI-waves-dyntens`, are selected with
+`RunSpec(experiment_group="LFI-sensitivity")` or `--experiment-group LFI-sensitivity`.
+The older `publication=` and `--publication` spellings remain aliases.
+New experiment paths are resolved without requiring their directories to exist.
+No filesystem search selects a different group based on an experiment name.
+Graphics for a run go to `GRAPHICAL/<EXPERIMENT_GROUP>/<SIM_NAME>/`; shared
+comparison tables and time series stay directly under their group.
 The shared `CICE_0p25_Cgrid_coords.zarr` stays directly under `afim_output`.
-Existing simulations are discovered in a unique group. Supply `RunSpec(publication="lateral-drag")`
-or `--publication lateral-drag` for a new simulation or when a name occurs in two groups.
-Graphics for a run go to `GRAPHICAL/<PUBLICATION>/<SIM_NAME>/`.
-The `--afim-output-root` override accepts either the shared `afim_output` directory
-or a specific publication directory.
+The `--afim-output-root` and `--archive-root` overrides accept a shared root,
+a group directory, or an explicit experiment directory. Already scoped paths
+are not given a second group or experiment suffix. For an old flat layout,
+pass the experiment directory explicitly. This change does not move existing data.
+
+See [the Gadi archive workflow](docs/gadi-workflows.md#archiving-cice-runs) for
+staging history, metadata and restarts from CICE case directories.
 
 For FI/PI:
 

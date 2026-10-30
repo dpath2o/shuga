@@ -12,7 +12,7 @@ Supports two layouts:
        cice_pbs_usage.py ~/CICE_free-slip --layout case-dirs
 
 2. AFIM archive metadata layout:
-       <root>/<EXPERIMENT_NAME>/run_metadata/<CICE_RUN_CASE>/*.o*
+       <root>/<EXPERIMENT_GROUP>/<EXPERIMENT_NAME>/run_metadata/<CICE_RUN_CASE>/*.o*
 
    Example:
        cice_pbs_usage.py ~/AFIM_archive --layout archive-metadata
@@ -217,7 +217,7 @@ def find_case_dirs(root):
 def find_archive_metadata_dirs(root):
     """
     Archive layout:
-        <root>/<EXPERIMENT_NAME>/run_metadata/<CICE_RUN_CASE>/
+        <root>/<EXPERIMENT_GROUP>/<EXPERIMENT_NAME>/run_metadata/<CICE_RUN_CASE>/
     """
     metadata_dirs = []
 
@@ -227,14 +227,21 @@ def find_archive_metadata_dirs(root):
         print(f"ERROR: could not scan archive root {root}: {err}", file=sys.stderr)
         sys.exit(1)
 
-    for exp_entry in experiments:
-        if not exp_entry.is_dir():
+    candidates = []
+    for entry in experiments:
+        if not entry.is_dir() or entry.name.endswith(".zarr"):
             continue
+        if os.path.isdir(os.path.join(entry.path, "run_metadata")):
+            candidates.append(entry)  # An explicit group root or old flat layout.
+        else:
+            try:
+                candidates.extend(child for child in os.scandir(entry.path)
+                                  if child.is_dir() and not child.name.endswith(".zarr"))
+            except OSError as err:
+                print(f"WARNING: could not scan {entry.path}: {err}", file=sys.stderr)
 
-        experiment = exp_entry.name
-
-        if experiment in ARCHIVE_AVOID_DIRS:
-            continue
+    for exp_entry in candidates:
+        experiment = os.path.relpath(exp_entry.path, root)
 
         run_metadata = os.path.join(exp_entry.path, "run_metadata")
 
@@ -268,26 +275,7 @@ def detect_layout(root):
     Return 'archive-metadata' if root contains any */run_metadata/* directories;
     otherwise return 'case-dirs'.
     """
-    for entry in os.scandir(root):
-        if not entry.is_dir():
-            continue
-
-        if entry.name in ARCHIVE_AVOID_DIRS:
-            continue
-
-        run_metadata = os.path.join(entry.path, "run_metadata")
-
-        if not os.path.isdir(run_metadata):
-            continue
-
-        try:
-            for child in os.scandir(run_metadata):
-                if child.is_dir():
-                    return "archive-metadata"
-        except OSError:
-            continue
-
-    return "case-dirs"
+    return "archive-metadata" if find_archive_metadata_dirs(root) else "case-dirs"
 
 
 def iter_pbs_sources(root, layout, group_by):
@@ -441,10 +429,10 @@ def main():
     parser.add_argument(
         "root",
         nargs="?",
-        default=os.path.expanduser("~/AFIM_archive"),
+        default="/g/data/gv90/da1339/afim_output",
         help=(
             "Root directory to scan. For archive layout, use ~/AFIM_archive. "
-            "For legacy layout, use ~/CICE_free-slip. Default: ~/AFIM_archive"
+            "For legacy layout, use ~/CICE_free-slip. Default: /g/data/gv90/da1339/afim_output"
         ),
     )
 

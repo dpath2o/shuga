@@ -35,7 +35,7 @@ class SeaIceObservations:
                  logger = None) -> None:
         self.run_cfg = run_cfg
         self.obs_cfg = obs_cfg or ObservationSpec()
-        self.pth_cfg = pth_cfg or ShugaPaths(run_cfg = run_cfg, classify = None, obs_cfg = self.obs_cfg)  # type: ignore[arg-type]
+        self.pth_cfg = pth_cfg or ShugaPaths(run_cfg = run_cfg, cls_cfg = None, obs_cfg = self.obs_cfg)  # type: ignore[arg-type]
         self.chunks  = chunks or {"time": 31}
         self.logger  = logger or build_file_logger("shuga.observations.legacy", Path.home() / "logs" / "observations" / "shuga_observations_legacy.log")
         self.nsidc   = NSIDCObservations(run_cfg = self.run_cfg,
