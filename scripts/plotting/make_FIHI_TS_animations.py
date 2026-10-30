@@ -81,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--base-dir",
-        default=str(ShugaPaths().graphics_root_path / "lateral-drag"),
+        default=str(ShugaPaths().experiment_group_graphics_root),
         help="Base working directory containing simulation subdirectories.",
     )
     parser.add_argument(

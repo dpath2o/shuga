@@ -132,7 +132,8 @@ def _resolve_run_context(run_cfg: RunSpec | None = None, *,
                       project        = project_eff,
                       user           = user_eff,
                       iceh_frequency = iceh_frequency_eff,
-                      publication    = (run_cfg.publication if run_cfg is not None and sim_name_eff == run_cfg.sim_name else None))
+                      experiment_group = (run_cfg.experiment_group if run_cfg is not None else "lateral-drag"),
+                      publication    = (run_cfg.publication if run_cfg is not None else None))
     return run_eff, dt0_eff, dtN_eff, hemisphere_eff
 
 def _resolve_classify_context(cls_cfg: ClassificationSpec | None = None, *,
@@ -173,6 +174,10 @@ def _build_paths(*, run_cfg: RunSpec,
                  static_store       : str | Path | None = None,
                  classification_root: str | Path | None = None) -> ShugaPaths:
     LOGGER.info("Building ShugaPaths.")
+    if pth_cfg is not None and pth_cfg.run_cfg is not None:
+        pth_cfg = pth_cfg.for_sim(run_cfg.sim_name)
+        if run_cfg.experiment_group == "lateral-drag" and run_cfg.publication is None:
+            run_cfg = replace(run_cfg, experiment_group=pth_cfg.experiment_group_name)
     base_cls_cfg = cls_cfg or (pth_cfg.cls_cfg if pth_cfg is not None else ClassificationSpec())
     return ShugaPaths(run_cfg             = run_cfg,
                       cls_cfg             = base_cls_cfg,

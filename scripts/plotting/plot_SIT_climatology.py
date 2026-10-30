@@ -23,6 +23,7 @@ def parse_experiments(value):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--experiment-group", "--publication", dest="experiment_group", default="lateral-drag")
     ap.add_argument("--model-start-date", required=True)
     ap.add_argument("--model-end-date", required=True)
     ap.add_argument("--hemisphere", choices=("SH","NH"), default="SH")
@@ -36,7 +37,7 @@ def main():
     ap.add_argument("--y-max", type=float, default=4.0)
     args = ap.parse_args()
     exps = parse_experiments(args.experiments)
-    run_cfg = RunSpec(sim_name="SIT-comparison", start_date=args.model_start_date,
+    run_cfg = RunSpec(experiment_group=args.experiment_group, sim_name="SIT-comparison", start_date=args.model_start_date,
                       end_date=args.model_end_date, hemisphere=args.hemisphere)
     cls_cfg = ClassificationSpec(ice_type="SI", methods=("raw",))
     obs_cfg = ObservationSpec()
@@ -53,7 +54,7 @@ def main():
     }
 
     for sim_name, label in exps.items():
-        sim_run = RunSpec(sim_name=sim_name, start_date=args.model_start_date,
+        sim_run = RunSpec(experiment_group=args.experiment_group, sim_name=sim_name, start_date=args.model_start_date,
                           end_date=args.model_end_date, hemisphere=args.hemisphere)
         sim_cls = ClassificationSpec(ice_type="SI", methods=("raw",))
         sim_paths = ShugaPaths(run_cfg=sim_run, cls_cfg=sim_cls, afim_output_root=args.data_root)

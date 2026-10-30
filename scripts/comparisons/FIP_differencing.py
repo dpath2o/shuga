@@ -27,7 +27,7 @@ AF2020_MAX = pd.Timestamp("2018-02-15")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute and plot continuous/categorical FIP differences: simulation - AF2020.")
     p.add_argument("-s", "--sim-name", required=True)
-    p.add_argument("--publication", default=None)
+    p.add_argument("--experiment-group", "--publication", dest="experiment_group", default=None)
     p.add_argument("-b", "--start-date", required=True, help="Simulation run/context start date.")
     p.add_argument("-e", "--end-date", required=True, help="Simulation run/context end date.")
     p.add_argument("--fip-start", default=None, help="FIP comparison start. Defaults to max(start-date, AF2020_MIN).")
@@ -43,6 +43,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--project", default="gv90")
     p.add_argument("--user", default="da1339")
     p.add_argument("--af2020-store", default="/g/data/gv90/da1339/SeaIce/FI_obs/AF-FI-2020db_common-5km_pyresample.zarr")
+    p.add_argument("--afim-output-root", default=None)
+    p.add_argument("--static-store", default=None)
     p.add_argument("--out-store", default=None)
     p.add_argument("--out-root", default=None)
     p.add_argument("--plot-root", default=None)
@@ -66,10 +68,8 @@ def _comparison_window(args: argparse.Namespace) -> tuple[str, str]:
         raise ValueError(f"No overlap with AF2020 period: requested {req0.date()}..{req1.date()}")
     return use0.strftime("%Y-%m-%d"), use1.strftime("%Y-%m-%d")
 
-def _open_static_grid(sim_name: str) -> xr.Dataset:
-    path = Path.home() / "AFIM_archive" / "CICE_0p25_Cgrid_coords.zarr"
-    if not path.exists():
-        raise FileNotFoundError(path)
+def _open_static_grid(paths: ShugaPaths) -> xr.Dataset:
+    path = paths.cice_static_store_path
     ds = xr.open_zarr(path, consolidated=False)
     return ds[["TLON", "TLAT"]]
 
@@ -132,7 +132,7 @@ def main() -> None:
                                  hemisphere = args.hemisphere,
                                  project    = args.project,
                                  user       = args.user,
-                                 publication = args.publication)
+                                 experiment_group = args.experiment_group or "lateral-drag")
     cls_cfg            = ClassificationSpec(ice_type     = args.ice_type,
                                             grid_type    = args.grid_type,
                                             ispd_thresh  = args.ispd_thresh,
@@ -143,7 +143,7 @@ def main() -> None:
     met_cfg            = MetricsSpec(methods = (args.classification,))
     plt_cfg            = PlottingSpec()
     obs_cfg            = ObservationSpec()
-    pth_cfg            = ShugaPaths(run_cfg = run_cfg, cls_cfg = cls_cfg, met_cfg = met_cfg, plt_cfg = plt_cfg, obs_cfg = obs_cfg)
+    pth_cfg            = ShugaPaths(run_cfg = run_cfg, cls_cfg = cls_cfg, met_cfg = met_cfg, plt_cfg = plt_cfg, obs_cfg = obs_cfg, afim_output_root=args.afim_output_root, static_store=args.static_store)
     af_store           = Path(args.af2020_store).expanduser()
     af                 = xr.open_zarr(af_store, consolidated = False, chunks = {"time": args.chunks_time})
     if "FIC" not in af:
@@ -155,7 +155,7 @@ def main() -> None:
     if sim_fip_native.ndim != 2:
         raise ValueError(f"Expected 2-D simulation FIP for resampling, got dims={sim_fip_native.dims}, shape={sim_fip_native.shape}")
     _fip_range("simulation native sim_fip", sim_fip_native)
-    cice           = _open_static_grid(args.sim_name)
+    cice           = _open_static_grid(pth_cfg)
     area_def       = area_definition_from_xy(af["x"], af["y"], pixel_size = float(args.pixel_size_m), area_id = "AF2020_common_for_FIP_diff")
     mod_fip        = resample_swath_to_area(sim_fip_native, cice["TLAT"].values, cice["TLON"].values + float(args.cice_lon_shift_deg), area_def,
                                             radius     = float(args.radius_of_influence_m),

@@ -17,7 +17,7 @@ from shuga.core.logging import build_file_logger
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Convert daily CICE iceh NetCDF history files to grouped monthly Zarr.")
     p.add_argument("--sim-name", required=True)
-    p.add_argument("--publication", default=None)
+    p.add_argument("--experiment-group", "--publication", dest="experiment_group", default=None)
     p.add_argument("--start-date", default=None)
     p.add_argument("--end-date", default=None)
     p.add_argument("--hemisphere", default="SH")
@@ -70,7 +70,7 @@ def main() -> None:
         hemisphere=args.hemisphere,
         project=args.project,
         user=args.user,
-        publication=args.publication,
+        experiment_group=args.experiment_group or "lateral-drag",
         iceh_frequency=args.iceh_frequency,
     )
     classify = ClassificationSpec(

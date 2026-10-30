@@ -24,11 +24,64 @@ Individual production scripts may pin a newer `analysis3` module where required;
 
 ```text
 ~/AFIM_archive -> /g/data/gv90/da1339/afim_output
-~/AFIM_archive/<PUBLICATION>/<SIM_NAME>/zarr/iceh_daily.zarr
-~/AFIM_archive/<PUBLICATION>/<SIM_NAME>/zarr/iceh_hourly.zarr
+~/AFIM_archive/<EXPERIMENT_GROUP>/<SIM_NAME>/zarr/iceh_daily.zarr
+~/AFIM_archive/<EXPERIMENT_GROUP>/<SIM_NAME>/zarr/iceh_hourly.zarr
 ~/AFIM_archive/CICE_0p25_Cgrid_coords.zarr
-/g/data/gv90/da1339/GRAPHICAL/<PUBLICATION>/<SIM_NAME>/
+/g/data/gv90/da1339/GRAPHICAL/<EXPERIMENT_GROUP>/<SIM_NAME>/
 ```
+
+The default experiment group is `lateral-drag`. Set `--experiment-group NAME`
+on the Python entrypoints and classification/metrics wrappers, or
+`EXPERIMENT_GROUP=NAME` when submitting PBS/batch scripts. `--publication` and
+`PUBLICATION` remain compatibility aliases. The default archive root is the
+shared `/g/data/<project>/<user>/afim_output` directory, not a separate home tree.
+If `~/AFIM_archive` is a symlink to that directory, either spelling accesses the
+same files. An independent archive can be selected with `--archive-root`.
+
+## Archiving CICE runs
+
+From the shuga repository root:
+
+```bash
+# Inspect source files and destinations. No files are written.
+python scripts/admin/archive.py --verbose
+
+# After the run segment has finished, copy history, metadata and latest restart.
+python scripts/admin/archive.py --send-to-archive --verbose
+```
+
+Defaults:
+
+- CICE case root: `/g/data/gv90/da1339/src/CICE_free-slip`.
+- Archive root: `/g/data/gv90/da1339/afim_output`.
+- Experiment group: `lateral-drag`.
+
+The explicit case mapping in `scripts/admin/archive.py` is:
+
+| Case directory | Experiment name |
+|---|---|
+| `free-slip` | `free-slip-no-drag` |
+| `free-slip01` | `Cs-high-ktens-zero` |
+| `free-slip02` | `no-slip-LFI-match` |
+
+The destination for each experiment contains `history/daily/`,
+`run_metadata/<CASE>/` and `restart/last/<CASE>/`. New destination directories
+are created during staging; a dry run leaves them absent. Existing files are
+skipped unless `--overwrite` is supplied. History is copied by default.
+Processed-month detection accepts both `YYYY-MM` and `YYYY_MM` Zarr group names;
+it is a staging check, not a validation of daily data completeness.
+
+Archive staging does not itself convert NetCDF files to Zarr. For example:
+
+```bash
+python scripts/conversion/nc2zarr.py \
+  --sim-name free-slip-no-drag --experiment-group lateral-drag \
+  --start-date 1995-01-01 --end-date 2005-12-31
+```
+
+Check the script's `--help` for the available conversion and static-grid options.
+The shared coordinate store and observational inputs remain outside experiment
+groups. Existing data are not automatically migrated from old flat directories.
 
 ## Classification
 
@@ -257,7 +310,7 @@ See [`WHACS_wave_forcing.md`](WHACS_wave_forcing.md) before interpreting native-
 
 ```bash
 qstat -u $USER
-find ~/AFIM_archive/<SIM_NAME>/zarr -maxdepth 8 \( -name data.zarr -o -name mets.zarr \)
+find ~/AFIM_archive/<EXPERIMENT_GROUP>/<SIM_NAME>/zarr -maxdepth 8 \( -name data.zarr -o -name mets.zarr \)
 ```
 
 Static-grid check:

@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     p.add_argument("-s", "--sim-name", required=True)
-    p.add_argument("--publication", default=None)
+    p.add_argument("--experiment-group", "--publication", dest="experiment_group", default=None)
     p.add_argument("-b", "--start-date", default="2000-03-01")
     p.add_argument("-e", "--end-date", default="2031-12-31")
     p.add_argument("--classification", default="binary-days")
@@ -61,7 +61,7 @@ def main() -> None:
         hemisphere=args.hemisphere,
         project=args.project,
         user=args.user,
-        publication=args.publication,
+        experiment_group=args.experiment_group or "lateral-drag",
     )
     classify = ClassificationSpec(
         ice_type=args.ice_type,

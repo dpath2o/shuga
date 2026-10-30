@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SIM_NAME=""
-PUBLICATION=""
+PUBLICATION="${EXPERIMENT_GROUP:-${PUBLICATION:-lateral-drag}}"
 START_DATE="1993-01-01"
 END_DATE="1999-12-31"
 HEMISPHERE="SH"
@@ -51,7 +51,7 @@ Usage: ./classify_pbs_wrapper.sh -s SIM_NAME [-b START_DATE] [-e END_DATE] [-H H
           [--overwrite-history] [--overwrite-static] [--delete-original]
           [--netcdf-engine ENGINE]
           [--afim-output-root DIR] [--cice-store DIR] [--static-store DIR]
-          [--publication NAME]
+          [--experiment-group NAME] (default: lateral-drag; --publication is an alias)
           [--classification-root DIR] [--archive-root DIR] [--logs-root DIR]
 
 Short flags:
@@ -83,7 +83,7 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -s) SIM_NAME="$2"; shift 2 ;;
-        --publication) PUBLICATION="$2"; shift 2 ;;
+        --experiment-group|--publication) PUBLICATION="$2"; shift 2 ;;
         -b) START_DATE="$2"; shift 2 ;;
         -e) END_DATE="$2"; shift 2 ;;
         -H) HEMISPHERE="$2"; shift 2 ;;

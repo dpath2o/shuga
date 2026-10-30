@@ -21,6 +21,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
+    p.add_argument("--experiment-group", "--publication", dest="experiment_group", default="lateral-drag")
     p.add_argument(
         "sim_names",
         nargs="+",
@@ -261,6 +262,7 @@ def _classification_spec(args: argparse.Namespace) -> ClassificationSpec:
 
 def _metrics_for_sim(args: argparse.Namespace, sim_name: str) -> pd.DataFrame:
     run = RunSpec(
+        experiment_group=args.experiment_group,
         sim_name=sim_name,
         start_date=args.start_date or "1900-01-01",
         end_date=args.end_date or "2100-12-31",
@@ -273,17 +275,17 @@ def _metrics_for_sim(args: argparse.Namespace, sim_name: str) -> pd.DataFrame:
     metrics = MetricsSpec()
 
     paths = ShugaPaths(
-        run=run,
-        classify=classify,
-        metrics=metrics,
+        run_cfg=run,
+        cls_cfg=classify,
+        met_cfg=metrics,
         afim_output_root=args.afim_output_root,
     )
 
     reporter = CICEMetrics(
-        run=run,
-        classify=classify,
-        metrics=metrics,
-        paths=paths,
+        run_cfg=run,
+        cls_cfg=classify,
+        met_cfg=metrics,
+        pth_cfg=paths,
         chunks={"time": 31},
     )
 

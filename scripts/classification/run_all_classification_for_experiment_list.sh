@@ -51,7 +51,7 @@ DRY_RUN="false"
 
 # Optional roots. Leave empty to let classify_pbs_wrapper.sh / classify.pbs defaults apply.
 AFIM_OUTPUT_ROOT=""
-PUBLICATION="${PUBLICATION:-lateral-drag}"
+PUBLICATION="${EXPERIMENT_GROUP:-${PUBLICATION:-lateral-drag}}"
 CICE_STORE=""
 STATIC_STORE=""
 CLASSIFICATION_ROOT=""

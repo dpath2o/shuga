@@ -25,6 +25,7 @@ RETREAT_MONTHS = (11, 12, 1)
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description = ("Build AF2020/simulation FIA statistics and simulation-minus-AF2020 "
                                                "difference tables for the circum-Antarctic domain and eight Antarctic sectors."))
+    p.add_argument("--experiment-group", "--publication", dest="experiment_group", default="lateral-drag")
     p.add_argument("-s", "--sim-name", action="append", dest="sim_name", default=[])
     p.add_argument("--sim-names", default=None, dest="sim_names", help="Optional comma/space separated simulation names.")
     p.add_argument("-b", "--start-date", required=True)
@@ -40,7 +41,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--project", default="gv90")
     p.add_argument("--user", default="da1339")
     p.add_argument("--af2020-fia-store", default="/g/data/gv90/da1339/SeaIce/FI_obs/AF-FI-2020db_FIA_from_original_dataset.zarr")
-    p.add_argument("--table-root", default="/g/data/gv90/da1339/GRAPHICAL/lateral-drag/tables")
+    p.add_argument("--table-root", default=None)
+    p.add_argument("--afim-output-root", default=None)
     p.add_argument("--tag", default=None)
     p.add_argument("--min-edge-trim-days", type=int, default=None,
                    help="Days trimmed from both ends before computing minimum FIA. Default: bin_window//2 for binary-days, else 0.")
@@ -97,7 +99,7 @@ def _open_af2020_fia(path: Path, start_date: str, end_date: str, chunks_time: in
     return _region_order_present(da).transpose("time", "region")
 
 def _open_sim_fia(sim_name: str, args: argparse.Namespace) -> xr.DataArray:
-    run_cfg = RunSpec(sim_name   = sim_name,
+    run_cfg = RunSpec(experiment_group=args.experiment_group, sim_name   = sim_name,
                       start_date = args.start_date,
                       end_date   = args.end_date,
                       hemisphere = args.hemisphere,
@@ -113,7 +115,7 @@ def _open_sim_fia(sim_name: str, args: argparse.Namespace) -> xr.DataArray:
     met_cfg = MetricsSpec(methods = (args.classification,))
     plt_cfg = PlottingSpec()
     obs_cfg = ObservationSpec()
-    pth_cfg = ShugaPaths(run_cfg = run_cfg, cls_cfg = cls_cfg, met_cfg = met_cfg, plt_cfg = plt_cfg, obs_cfg = obs_cfg)
+    pth_cfg = ShugaPaths(run_cfg = run_cfg, cls_cfg = cls_cfg, met_cfg = met_cfg, plt_cfg = plt_cfg, obs_cfg = obs_cfg, afim_output_root=args.afim_output_root)
     ds      = load_metrics(run_cfg        = run_cfg,
                            cls_cfg        = cls_cfg,
                            met_cfg        = met_cfg,
@@ -281,7 +283,8 @@ def main() -> None:
     else:
         min_edge_trim_days = int(args.min_edge_trim_days)
     af_path = Path(args.af2020_fia_store).expanduser()
-    table_root = Path(args.table_root).expanduser()
+    paths = ShugaPaths(run_cfg=RunSpec("FIA-comparison", args.start_date, args.end_date, project=args.project, user=args.user, experiment_group=args.experiment_group), afim_output_root=args.afim_output_root)
+    table_root = Path(args.table_root).expanduser() if args.table_root else paths.ld_pub_tables_root_path
     table_root.mkdir(parents=True, exist_ok=True)
     tag          = args.tag or f"{args.classification}_{args.grid_type}_{args.start_date}_{args.end_date}"
     tag          = _safe_tag(tag)

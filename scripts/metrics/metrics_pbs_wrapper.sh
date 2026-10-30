@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SIM_NAME=""
-PUBLICATION=""
+PUBLICATION="${EXPERIMENT_GROUP:-${PUBLICATION:-lateral-drag}}"
 START_DATE="1993-01-01"
 END_DATE="1999-12-31"
 HEMISPHERE="SH"
@@ -52,7 +52,7 @@ Usage: $0 -s SIM_NAME [options]
 
 Core options:
   -s, --sim-name NAME             Simulation name (required)
-      --publication NAME          Publication group below afim_output
+      --experiment-group NAME     Experiment group (default: lateral-drag; alias: --publication)
   -b, --start-date DATE           Start date (default: 1993-01-01)
   -e, --end-date DATE             End date (default: 1999-12-31)
   -H, --hemisphere SH|NH          Hemisphere (default: SH)
@@ -112,7 +112,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -s|--sim-name)
             require_value "$1" "${2:-}"; SIM_NAME="$2"; shift 2 ;;
-        --publication)
+        --experiment-group|--publication)
             require_value "$1" "${2:-}"; PUBLICATION="$2"; shift 2 ;;
         -b|--start-date)
             require_value "$1" "${2:-}"; START_DATE="$2"; shift 2 ;;
@@ -234,27 +234,16 @@ if [[ -z "$AFIM_OUTPUT_ROOT" ]]; then
 fi
 
 if [[ -z "$CICE_STORE" ]]; then
-    if [[ -n "$PUBLICATION" ]]; then
-        if [[ "${AFIM_OUTPUT_ROOT##*/}" == "$PUBLICATION" ]]; then
-            SIM_ROOT="${AFIM_OUTPUT_ROOT}/${SIM_NAME}"
-        else
-            SIM_ROOT="${AFIM_OUTPUT_ROOT}/${PUBLICATION}/${SIM_NAME}"
-        fi
+    AFIM_OUTPUT_ROOT="${AFIM_OUTPUT_ROOT%/}"
+    if [[ "${AFIM_OUTPUT_ROOT##*/}" == "$SIM_NAME" ]]; then
+        SIM_ROOT="$AFIM_OUTPUT_ROOT"
+    elif [[ "${AFIM_OUTPUT_ROOT##*/}" == "$PUBLICATION" ]]; then
+        SIM_ROOT="${AFIM_OUTPUT_ROOT}/${SIM_NAME}"
+    elif [[ "${AFIM_OUTPUT_ROOT%/*}" == */afim_output ]]; then
+        PUBLICATION="${AFIM_OUTPUT_ROOT##*/}"
+        SIM_ROOT="${AFIM_OUTPUT_ROOT}/${SIM_NAME}"
     else
-        matches=()
-        for candidate in "${AFIM_OUTPUT_ROOT}"/*/"${SIM_NAME}"; do
-            [[ -d "$candidate" ]] && matches+=("$candidate")
-        done
-        if (( ${#matches[@]} > 1 )); then
-            echo "Multiple publication groups contain ${SIM_NAME}; pass --publication." >&2
-            exit 1
-        elif (( ${#matches[@]} == 1 )); then
-            SIM_ROOT="${matches[0]}"
-            PUBLICATION="${SIM_ROOT%/${SIM_NAME}}"
-            PUBLICATION="${PUBLICATION##*/}"
-        else
-            SIM_ROOT="${AFIM_OUTPUT_ROOT}/${SIM_NAME}"
-        fi
+        SIM_ROOT="${AFIM_OUTPUT_ROOT}/${PUBLICATION}/${SIM_NAME}"
     fi
     CICE_STORE="${SIM_ROOT}/zarr/${CICE_STORE_NAME}"
 fi

@@ -54,7 +54,7 @@ class ShugaPaths:
         else:
             self.logs_root = Path(self.logs_root).expanduser()
         if self.archive_root is None:
-            self.archive_root = Path.home() / "AFIM_archive"
+            self.archive_root = self.afim_output_root
         else:
             self.archive_root = Path(self.archive_root).expanduser()
         if self.static_store is not None:
@@ -127,39 +127,43 @@ class ShugaPaths:
 
     @property
     def publication_name(self) -> str | None:
-        """Explicit publication, or the unique group containing this simulation."""
-        if self.run_cfg is None:
-            return None
+        """Compatibility alias for the resolved experiment group."""
+        return self.experiment_group_name
+
+    @property
+    def experiment_group_name(self) -> str:
+        """Use the configured group, accepting an explicitly group-scoped root.
+
+        No filesystem discovery: an experiment with the same name in another
+        group must never silently redirect a reader or a writer.
+        """
+        group = self.run_cfg.experiment_group if self.run_cfg is not None else "lateral-drag"
         base = Path(self.afim_output_root).expanduser()
-        sim = self.run_cfg.sim_name
-        if base.name == sim:
-            return base.parent.name if base.parent.name != "afim_output" else None
-        if base.parent.name == "afim_output" and base.name != "afim_output":
-            if self.run_cfg.publication and self.run_cfg.publication != base.name:
-                raise ValueError(f"publication={self.run_cfg.publication!r} conflicts with output root {base}")
+        if self.run_cfg is not None and base.name == self.run_cfg.sim_name:
+            base = base.parent
+        if base.parent.name in {"afim_output", "AFIM_archive"}:
+            if group != "lateral-drag" and group != base.name:
+                raise ValueError(f"experiment_group={group!r} conflicts with output root {base}")
             return base.name
-        if self.run_cfg.publication:
-            return self.run_cfg.publication
-        matches = sorted(p.name for p in base.iterdir() if p.is_dir() and (p / sim).is_dir()) if base.is_dir() else []
-        if len(matches) > 1:
-            raise ValueError(f"Simulation {sim!r} occurs in multiple publications: {matches}. Set publication explicitly.")
-        return matches[0] if matches else None
+        return group
+
+    def _group_root(self, base: Path) -> Path:
+        group = self.experiment_group_name
+        if self.run_cfg is not None and base.name == self.run_cfg.sim_name:
+            return base.parent
+        if base.name == group:
+            return base
+        if base.parent.name in {"afim_output", "AFIM_archive", "GRAPHICAL"}:
+            raise ValueError(f"experiment_group={group!r} conflicts with root {base}")
+        return base / group
 
     @property
     def publication_output_root(self) -> Path:
-        base = Path(self.afim_output_root).expanduser()
-        if self.run_cfg is not None and base.name == self.run_cfg.sim_name:
-            return base.parent
-        if base.parent.name == "afim_output" and base.name != "afim_output":
-            return base
-        publication = self.publication_name
-        if publication:
-            return base / publication
-        if self.run_cfg is not None and (base / self.run_cfg.sim_name).is_dir():
-            return base  # Existing flat-layout simulation only.
-        if self.run_cfg is not None:
-            raise ValueError(f"Cannot locate {self.run_cfg.sim_name!r} below {base}; set RunSpec(publication='...') for a new simulation")
-        return base
+        return self._group_root(Path(self.afim_output_root).expanduser())
+
+    @property
+    def experiment_group_output_root(self) -> Path:
+        return self.publication_output_root
 
     @property
     def zarr_root(self) -> Path:
@@ -171,12 +175,12 @@ class ShugaPaths:
 
     @property
     def archive_root_path(self) -> Path:
-        base = Path(self.archive_root).expanduser() if self.archive_root is not None else Path.home() / "AFIM_archive"
+        base = Path(self.archive_root).expanduser()
         if self.run_cfg is None:
             return base
         if base.name == self.run_cfg.sim_name:
             return base
-        return base / self.run_cfg.sim_name
+        return self._group_root(base) / self.run_cfg.sim_name
 
     @property
     def default_cice_static_store_path(self) -> Path:
@@ -187,9 +191,9 @@ class ShugaPaths:
         by AF2020 comparison, plotting, regridding, and other workflows.
 
         Expected default:
-            ~/AFIM_archive/CICE_0p25_Cgrid_coords.zarr
+            /g/data/<project>/<user>/afim_output/CICE_0p25_Cgrid_coords.zarr
         """
-        return Path.home() / "AFIM_archive" / "CICE_0p25_Cgrid_coords.zarr"
+        return self.gdata_root / "afim_output" / "CICE_0p25_Cgrid_coords.zarr"
 
 
     @property
@@ -213,9 +217,24 @@ class ShugaPaths:
 
     @property
     def publication_graphics_root(self) -> Path:
-        base = self.graphics_root_path
-        publication = self.publication_name
-        return base if not publication or base.name == publication else base / publication
+        return self._group_root(self.graphics_root_path)
+
+    @property
+    def experiment_group_graphics_root(self) -> Path:
+        return self.publication_graphics_root
+
+    def for_sim(self, sim_name: str, **run_overrides) -> "ShugaPaths":
+        """Switch experiments within this group without carrying leaf overrides."""
+        run = self._require_run("for_sim")
+        if sim_name == run.sim_name:
+            return replace(self, run_cfg=replace(run, **run_overrides))
+        other = replace(run, sim_name=sim_name, publication=None,
+                        experiment_group=self.experiment_group_name, **run_overrides)
+        return replace(self, run_cfg=other,
+                       afim_output_root=self.publication_output_root,
+                       archive_root=self._group_root(Path(self.archive_root)),
+                       graphics_root=self.publication_graphics_root,
+                       cice_store=None, classification_root=None)
 
     @property
     def logs_root_path(self) -> Path:
@@ -523,7 +542,7 @@ class ShugaPaths:
         store_name = self.iceh_store_name
         archive_target = self.archive_zarr_root_path / store_name
         output_target  = self.zarr_root / store_name
-        # For archive-driven workflows, write beside ~/AFIM_archive/SIM_NAME/history/*
+        # For archive-driven workflows, write beside afim_output/GROUP/SIM_NAME/history/*
         # when that source tree exists. Otherwise preserve the /g/data output default.
         archive_history = self.archive_root_path / "history" / self.iceh_frequency
         if archive_history.exists() or archive_target.exists():
@@ -583,7 +602,11 @@ class ShugaPaths:
         candidates: list[Path] = []
         if self.static_store is not None:
             candidates.append(Path(self.static_store).expanduser())
-        shared_root = (self.afim_output_root.parent if self.afim_output_root.parent.name == "afim_output" else self.afim_output_root)
+        shared_root = Path(self.afim_output_root)
+        if self.run_cfg is not None and shared_root.name == self.run_cfg.sim_name:
+            shared_root = shared_root.parent
+        if shared_root.name == self.experiment_group_name:
+            shared_root = shared_root.parent
         candidates.extend([shared_root / "CICE_0p25_Cgrid_coords.zarr",
                            self.default_cice_static_store_path,
                            Path.home() / "AFIM_archive" / "CICE_0p25_Cgrid_coords.zarr",
@@ -634,8 +657,7 @@ class ShugaPaths:
     def figure_root(self, region: str | None = None, *, sim_name: str | None = None) -> Path:
         sim   = sim_name or self._require_run("figure_root").sim_name
         if sim_name is not None and self.run_cfg is not None and sim_name != self.run_cfg.sim_name:
-            other = replace(self.run_cfg, sim_name=sim_name, publication=None)
-            root = replace(self, run_cfg=other).publication_graphics_root
+            root = self.for_sim(sim_name).publication_graphics_root
         else:
             root = self.publication_graphics_root
         parts = [root, sim]
@@ -765,7 +787,7 @@ class ShugaPaths:
         This is intentionally searched under the simulation output root first,
         because AFIM commonly preserves ice_diag.d beside the simulation archive:
 
-            /g/data/<project>/<user>/afim_output/<sim_name>/ice_diag.d
+            /g/data/<project>/<user>/afim_output/<experiment_group>/<sim_name>/ice_diag.d
         """
         spec = self.G_cice_cfg or CICEGridSpec()
         explicit = getattr(spec, "ice_diag_file", None)

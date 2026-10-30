@@ -34,6 +34,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description     = ("Compare daily-vector fast-ice classification with hourly-derived "
                                                    "mobility diagnostics using shuga hourly Zarr stores."),
                                 formatter_class = argparse.ArgumentDefaultsHelpFormatter)
+    p.add_argument("--experiment-group", "--publication", dest="experiment_group", default="lateral-drag")
     p.add_argument("--sim-name", required=True)
     p.add_argument("--start-date", required=True, help="Inclusive start date, YYYY-MM-DD")
     p.add_argument("--end-date", required=True, help="Inclusive end date, YYYY-MM-DD")
@@ -103,7 +104,7 @@ def setup_logging(args: argparse.Namespace) -> tuple[logging.Logger, Path]:
     return logger, log_file
 
 def build_shuga_paths(args: argparse.Namespace) -> tuple[RunSpec, ClassificationSpec, ShugaPaths]:
-    run = RunSpec(sim_name       = args.sim_name,
+    run = RunSpec(experiment_group=args.experiment_group, sim_name       = args.sim_name,
                   start_date     = args.start_date,
                   end_date       = args.end_date,
                   hemisphere     = args.hemisphere,
@@ -123,15 +124,15 @@ def build_shuga_paths(args: argparse.Namespace) -> tuple[RunSpec, Classification
                              f2_file         = args.f2_file,
                              gridcpl_file    = args.gridcpl_file,
                              ice_in_file     = args.ice_in_file)
-    paths = ShugaPaths(run                 = run,
-                       classify            = classify,
+    paths = ShugaPaths(run_cfg             = run,
+                       cls_cfg             = classify,
                        afim_output_root    = args.afim_output_root,
                        cice_store          = args.cice_store,
                        static_store        = args.static_store,
                        classification_root = args.classification_root,
                        archive_root        = args.archive_root,
                        logs_root           = args.logs_root,
-                       cice_grid           = cice_grid)
+                       G_cice_cfg          = cice_grid)
     return run, classify, paths
 
 

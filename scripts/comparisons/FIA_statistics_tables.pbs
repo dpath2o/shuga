@@ -9,6 +9,7 @@
 #PBS -N FIA_TABLES
 
 set -euo pipefail
+EXPERIMENT_GROUP="${EXPERIMENT_GROUP:-${PUBLICATION:-lateral-drag}}"
 
 cd "${PBS_O_WORKDIR:-$PWD}"
 
@@ -25,9 +26,10 @@ module load conda/analysis3-25.12
 : "${PROJECT:=gv90}"
 : "${USER_NAME:=da1339}"
 : "${AF2020_FIA_STORE:=/g/data/gv90/da1339/SeaIce/FI_obs/AF-FI-2020db_FIA_from_original_dataset.zarr}"
-: "${TABLE_ROOT:=/g/data/gv90/da1339/GRAPHICAL/lateral-drag/tables}"
+: "${TABLE_ROOT:=/g/data/gv90/da1339/GRAPHICAL/${EXPERIMENT_GROUP:-lateral-drag}/tables}"
 
 args=(FIA_statistics_tables.py
+      --experiment-group "${EXPERIMENT_GROUP}"
       --sim-names "${SIM_NAMES}"
       --start-date "${START_DATE}"
       --end-date "${END_DATE}"

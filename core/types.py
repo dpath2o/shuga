@@ -15,6 +15,7 @@ class RunSpec:
     user          : str                 = "da1339"
     iceh_frequency: IcehFrequency | str = "daily"
     publication   : str | None           = None
+    experiment_group: str               = "lateral-drag"
     def __post_init__(self) -> None:
         token   = str(self.iceh_frequency).strip().lower().replace("_", "-")
         aliases = {"d"            : "daily",
@@ -29,11 +30,18 @@ class RunSpec:
         if token not in aliases:
             raise ValueError(f"Unsupported iceh_frequency={self.iceh_frequency!r}. Use 'daily' or 'hourly'.")
         self.iceh_frequency = aliases[token]
-        if self.publication is not None:
-            name = str(self.publication).strip()
+        for value in (self.experiment_group, self.publication):
+            if value is None:
+                continue
+            name = str(value).strip()
             if not name or name in {".", ".."} or "/" in name or "\\" in name:
-                raise ValueError("publication must be one directory name")
-            self.publication = name
+                raise ValueError("experiment_group/publication must be one directory name")
+        self.experiment_group = str(self.experiment_group).strip()
+        if self.publication is not None:
+            self.publication = str(self.publication).strip()
+            if self.experiment_group not in {"lateral-drag", self.publication}:
+                raise ValueError("experiment_group conflicts with publication alias")
+            self.experiment_group = self.publication
 
 @dataclass(slots=True)
 class ClassificationSpec:
