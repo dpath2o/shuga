@@ -13,7 +13,7 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3
+module load conda/analysis3-26.08
 
 : "${START_DATE:?Set START_DATE=YYYY-MM-DD}"
 : "${END_DATE:?Set END_DATE=YYYY-MM-DD}"
@@ -21,7 +21,7 @@ module load conda/analysis3
 : "${RAW_DIR:=/g/data/gv90/da1339/SeaIce/OSI-SAF-450/raw}"
 : "${DATASET_ID:=OSISAF-GLO-SEAICE_CONC_TIMESERIES-SH-LA-OBS}"
 : "${OVERWRITE:=}"
-: "${SHUGA_ROOT:=/g/data/gv90/da1339/src/mawsons-chest}"
+: "${SHUGA_ROOT:=$HOME/src/shuga}"
 : "${OSISAF_VENV:=/g/data/gv90/da1339/venvs/osisaf450}"
 
 export PYTHONNOUSERSITE=1
@@ -29,7 +29,7 @@ export PYTHONNOUSERSITE=1
 source "${OSISAF_VENV}/bin/activate"
 
 cd "${SHUGA_ROOT}"
-export PYTHONPATH="${SHUGA_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="$(dirname -- "$PWD")${PYTHONPATH:+:$PYTHONPATH}"
 
 # processed-dir is not used during a download-only invocation, but the
 # current CLI still declares it as required.

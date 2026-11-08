@@ -15,18 +15,18 @@ shuga/waves/cawcr.py
 The production entry points are:
 
 ```text
-shuga/scripts/waves/whacs_regrid.py
-shuga/scripts/waves/whacs_regrid.pbs
-shuga/scripts/waves/whacs_regrid_wrapper.sh
+scripts/waves/whacs_regrid.py
+scripts/waves/whacs_regrid.pbs
+scripts/waves/whacs_regrid_wrapper.sh
 ```
 
 Daily PyGMT QC plotting is handled separately under:
 
 ```text
 shuga/plotting/cawcr.py
-shuga/scripts/plotting/plot_whacs_daily.py
-shuga/scripts/plotting/plot_whacs_daily.pbs
-shuga/scripts/plotting/plot_whacs_daily_wrapper.sh
+scripts/plotting/plot_whacs_daily.py
+scripts/plotting/plot_whacs_daily.pbs
+scripts/plotting/plot_whacs_daily_wrapper.sh
 ```
 
 ## Scientific purpose
@@ -412,7 +412,7 @@ A single January-1995 pilot can be submitted as a normal PBS job:
 qsub \
   -P au88 \
   -v START_YEAR=1995,END_YEAR=1995 \
-  shuga/scripts/waves/whacs_regrid.pbs
+  scripts/waves/whacs_regrid.pbs
 ```
 
 When no `PBS_ARRAY_INDEX` is present, the PBS worker defaults to index 0, corresponding to January of `START_YEAR`.
@@ -420,13 +420,13 @@ When no `PBS_ARRAY_INDEX` is present, the PBS worker defaults to index 0, corres
 The production wrapper is:
 
 ```bash
-shuga/scripts/waves/whacs_regrid_wrapper.sh
+scripts/waves/whacs_regrid_wrapper.sh
 ```
 
 A multi-year submission uses one PBS array element per month, for example:
 
 ```bash
-./shuga/scripts/waves/whacs_regrid_wrapper.sh 1995 2005
+./scripts/waves/whacs_regrid_wrapper.sh 1995 2005
 ```
 
 Important distinction:

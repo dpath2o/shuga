@@ -36,7 +36,7 @@ The package now supports four main analysis streams:
    - SIT climatologies using ESA-CCI, AWI, CMEMS, and CICE6;
    - FIP/FIC maps and differencing;
    - regional and time-series diagnostics;
-   - figure-generation scripts and PBS controls under `shuga/scripts/`.
+   - figure-generation scripts and PBS controls under `scripts/`.
 
 ## High-level workflow
 
@@ -404,7 +404,7 @@ longitude = 540
 Classification:
 
 ```bash
-cd ~/AFIM/src/mawsons-chest/shuga/scripts/classification
+cd ~/src/shuga/scripts/classification
 
 ./classify_CMEMS_pbs_wrapper.sh \
     -b 2002-01-01 \
@@ -416,7 +416,7 @@ cd ~/AFIM/src/mawsons-chest/shuga/scripts/classification
 Metrics:
 
 ```bash
-cd ~/AFIM/src/mawsons-chest/shuga/scripts/metrics
+cd ~/src/shuga/scripts/metrics
 
 ./metrics_CMEMS_pbs_wrapper.sh \
     -b 2002-01-01 \
@@ -445,8 +445,8 @@ NSIDC supports hemispheric SIA/SIE comparison and is used as one of the primary 
 Current downloading is handled through:
 
 ```text
-shuga/scripts/downloading/download_ESA_CCI.py
-shuga/scripts/downloading/download_ESA_CCI.pbs
+scripts/downloading/download_ESA_CCI.py
+scripts/downloading/download_ESA_CCI.pbs
 ```
 
 The downloader is product-aware and uses declarative THREDDS roots rather than recursively traversing obsolete product versions.
@@ -487,14 +487,14 @@ The drift-aware thickness product is NH-only.
 Download:
 
 ```bash
-qsub shuga/scripts/downloading/download_ESA_CCI.pbs
+qsub scripts/downloading/download_ESA_CCI.pbs
 ```
 
 Dry run:
 
 ```bash
 qsub -v DRY_RUN=true \
-    shuga/scripts/downloading/download_ESA_CCI.pbs
+    scripts/downloading/download_ESA_CCI.pbs
 ```
 
 Existing complete files are skipped and partial `.part` downloads are resumed where supported.
@@ -504,8 +504,8 @@ Existing complete files are skipped and partial `.part` downloads are resumed wh
 AWI SIT downloading is handled through:
 
 ```text
-shuga/scripts/downloading/download_AWI_SIT.py
-shuga/scripts/downloading/download_AWI_SIT.pbs
+scripts/downloading/download_AWI_SIT.py
+scripts/downloading/download_AWI_SIT.pbs
 ```
 
 The downloader skips files already present and resumes partial downloads.
@@ -574,7 +574,7 @@ Run:
 
 ```bash
 qsub -v HEMISPHERE=SH,OVERWRITE=true \
-    shuga/scripts/observations/process_SIT.pbs
+    scripts/observations/process_SIT.pbs
 ```
 
 The old `continuous/SIT_timeseries.zarr` splice is no longer the preferred publication input.
@@ -599,7 +599,7 @@ export END_DATE=1999-12-31
 export OUTPUT=/g/data/gv90/da1339/GRAPHICAL/LFI-sensitivity/SIA_SH_climatology_1994-1999.png
 export EXPERIMENTS="AOM2-ERA5=ACCESS-OM2-ERA5,notensnogi=notens-nogi,ry93=ry93,elps-min=elps-min"
 
-qsub -V shuga/scripts/plotting/plot_SIA_climatology.pbs
+qsub -V scripts/plotting/plot_SIA_climatology.pbs
 ```
 
 ## Paper2
@@ -611,7 +611,7 @@ export END_DATE=2005-12-31
 export OUTPUT=/g/data/gv90/da1339/GRAPHICAL/lateral-drag/SIA_SH_climatology_2000-2005.png
 export EXPERIMENTS="no-slip-LFI=LFI rheology without lateral drag,Cs-high=static high Cs,Cq-high=quadratic high Cq"
 
-qsub -V shuga/scripts/plotting/plot_SIA_climatology.pbs
+qsub -V scripts/plotting/plot_SIA_climatology.pbs
 ```
 
 ## Paper3
@@ -623,7 +623,7 @@ export END_DATE=2005-12-31
 export OUTPUT=/g/data/gv90/da1339/GRAPHICAL/LFI-waves-dyntens/SIA_SH_climatology_2000-2005.png
 export EXPERIMENTS="LD-tides=LD tides"
 
-qsub -V shuga/scripts/plotting/plot_SIA_climatology.pbs
+qsub -V scripts/plotting/plot_SIA_climatology.pbs
 ```
 
 For experiment definitions containing commas and spaces, exporting variables and using `qsub -V` is safer than putting everything directly into `qsub -v`.
@@ -665,7 +665,7 @@ p10-p90
 Run with the paper2 defaults:
 
 ```bash
-qsub shuga/scripts/plotting/plot_SIT_climatology.pbs
+qsub scripts/plotting/plot_SIT_climatology.pbs
 ```
 
 Expected plotting order/style:
@@ -687,9 +687,9 @@ The satellite SIT climatology is intended as a broad hemispheric reference, not 
 from pathlib import Path
 import sys
 
-repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+package_parent = Path.home() / "src"
+if str(package_parent) not in sys.path:
+    sys.path.insert(0, str(package_parent))
 
 from shuga import (
     RunSpec,
@@ -747,17 +747,17 @@ Publication notebooks should define experiments, scientific windows, and final f
 
 # Gadi workflow guidance
 
-Primary environment:
+Run repository-relative commands from `~/src/shuga`. Load the Gadi environment with:
 
 ```bash
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 ```
 
 PBS entry points live under:
 
 ```text
-shuga/scripts/
+scripts/
 ```
 
 with `copyq` used for download/mirror jobs and `normalbw` for most analysis jobs.

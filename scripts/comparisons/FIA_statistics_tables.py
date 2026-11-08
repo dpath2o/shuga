@@ -8,9 +8,9 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 import xarray as xr
-repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+package_parent = Path(__file__).resolve().parents[3]
+if str(package_parent) not in sys.path:
+    sys.path.insert(0, str(package_parent))
 from shuga.core.regions import ANTARCTIC_8_REGIONS
 from shuga.core.types   import ClassificationSpec, MetricsSpec, ObservationSpec, PlottingSpec, RunSpec
 from shuga.core.paths   import ShugaPaths

@@ -81,6 +81,6 @@ PY
 find shuga -type d -name "__pycache__" -prune -exec rm -rf {} +
 find shuga -type f \( -name "*.pyc" -o -name "*.pyo" -o -name ".#*" \) -delete
 find shuga -type d -name ".ipynb_checkpoints" -prune -exec rm -rf {} +
-find shuga/scripts -type f \( -name "*.o[0-9]*" -o -name "*.e[0-9]*" -o -name "*.log" -o -name "*.out" -o -name "*.err" \) -delete
+find scripts -type f \( -name "*.o[0-9]*" -o -name "*.e[0-9]*" -o -name "*.log" -o -name "*.out" -o -name "*.err" \) -delete
 git status --short
 ```

@@ -13,9 +13,9 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
-REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+REPO="${REPO:-$HOME/src/shuga}"
 DEST="${DEST:-/g/data/gv90/da1339/SeaIce/ESA/CCI}"
 
 PRODUCTS="${PRODUCTS:-thickness,concentration,thickness_drift_aware}"
@@ -27,11 +27,11 @@ LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
 cd "$REPO"
 
-export PYTHONPATH="$REPO"
+export PYTHONPATH="$(dirname -- "$PWD")"
 export PYTHONNOUSERSITE=1
 
 CMD=(
-  python -u shuga/scripts/downloading/download_ESA_CCI.py
+  python -u scripts/downloading/download_ESA_CCI.py
   --dest "$DEST"
   --products "$PRODUCTS"
   --hemispheres "$HEMISPHERES"

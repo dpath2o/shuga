@@ -14,7 +14,7 @@ cd "${PBS_O_WORKDIR:-$PWD}"
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-25.12
+module load conda/analysis3-26.08
 
 : "${SIM_NAME:?Set SIM_NAME, e.g. qsub -v SIM_NAME=LD-blend-base FIP_differencing.pbs}"
 : "${START_DATE:=2000-01-01}"

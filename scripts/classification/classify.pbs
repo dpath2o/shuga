@@ -12,7 +12,7 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
 #------------------------------------------------------------------------
 # DEFAULTS
@@ -48,10 +48,10 @@ ICE_IN_FILE="${ICE_IN_FILE:-}"
 PERSIST_GRID_ASSETS="${PERSIST_GRID_ASSETS:-false}"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 METHODS="${METHODS//|/,}"
-REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest}"
-PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/shuga/scripts/classification/classify.py}"
+REPO_ROOT="${REPO_ROOT:-$HOME/src/shuga}"
+PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/scripts/classification/classify.py}"
 
-export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="$(dirname -- "${REPO_ROOT}")${PYTHONPATH:+:$PYTHONPATH}"
 export DASK_TEMPORARY_DIRECTORY="/scratch/${PROJECT}/${RUN_USER}/dask_tmp/${PBS_JOBID}"
 export TMPDIR="/scratch/${PROJECT}/${RUN_USER}/tmp/${PBS_JOBID}"
 

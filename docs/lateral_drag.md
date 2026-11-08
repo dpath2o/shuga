@@ -1,6 +1,6 @@
 # Lateral-drag form-factor generation in `shuga`
 
-**Target file:** `shuga/docs/lateral_drag.md`
+**Target file:** `docs/lateral_drag.md`
 **Primary module:** `shuga/grid/lateral_drag.py`
 **Primary class:** `FormFactors`
 **CICE consumer:** `cicecore/cicedyn/infrastructure/ice_grid.F90` in `CICE_free-slip`
@@ -65,7 +65,7 @@ The workflow uses the standard `shuga` analysis environment plus geospatial pack
 - `netCDF4` for robust NetCDF writing
 - `pygmt` for figure generation
 
-On Gadi this is intended to run within the configured `analysis3` environment used by the broader `mawsons-chest`/`shuga` workflow.
+On Gadi this runs under `conda/analysis3-26.08`.
 
 ### CICE grid inputs
 
@@ -507,9 +507,9 @@ from IPython.display import Image, display
 xr.set_options(keep_attrs=True)
 warnings.filterwarnings('default')
 
-repo_root = Path.home() / 'AFIM' / 'src' / 'mawsons-chest'
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+package_parent = Path.home() / 'src'
+if str(package_parent) not in sys.path:
+    sys.path.insert(0, str(package_parent))
 ```
 
 ### Configure paths and shuga objects
@@ -680,10 +680,10 @@ After copying:
 to:
 
 ```text
-shuga/docs/figs/
+docs/figs/
 ```
 
-the following relative links should resolve from `shuga/docs/lateral_drag.md`.
+the following relative links should resolve from `docs/lateral_drag.md`.
 
 | Product | Region | Figure link |
 |---|---:|---|

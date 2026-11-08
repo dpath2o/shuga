@@ -2,12 +2,9 @@
 from __future__ import annotations
 import argparse, logging, sys
 from pathlib import Path
-#####################################################################
-# make sure this reflects the correct location of mawsons-chest repo
-repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
-#####################################################################
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+package_parent = Path(__file__).resolve().parents[3]
+if str(package_parent) not in sys.path:
+    sys.path.insert(0, str(package_parent))
 from shuga.forcing.era5 import ERA5Config, write_month
 from shuga.core.logging import build_file_logger
 

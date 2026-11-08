@@ -15,9 +15,9 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
-cd /home/581/da1339/AFIM/src/mawsons-chest/shuga/scripts/forcing
+cd "$HOME/src/shuga/scripts/forcing"
 
 YEAR="${YEAR:?YEAR not set}"
 MONTH="${MONTH:?MONTH not set}"

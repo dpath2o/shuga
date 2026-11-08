@@ -65,19 +65,19 @@ ORAS support is planned. Likely use cases include SST/SSS comparison or forcing 
 Atmospheric forcing scripts live primarily in:
 
 ```text
-shuga/scripts/forcing/
+scripts/forcing/
 ```
 
 WHACS wave-forcing production scripts live in:
 
 ```text
-shuga/scripts/waves/
+scripts/waves/
 ```
 
 and associated QC plotting scripts live in:
 
 ```text
-shuga/scripts/plotting/
+scripts/plotting/
 ```
 
 Scripts should remain thin wrappers around package code.

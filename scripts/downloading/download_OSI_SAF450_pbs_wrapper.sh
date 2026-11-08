@@ -55,4 +55,5 @@ echo "  Raw directory : ${RAW_DIR}"
 echo "  Dataset       : ${DATASET_ID}"
 echo "  Overwrite     : ${OVERWRITE:-0}"
 
-qsub -v "${QSUB_VARS}" ./download_OSI_SAF450.pbs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+qsub -v "${QSUB_VARS}" "${SCRIPT_DIR}/download_OSI_SAF450.pbs"

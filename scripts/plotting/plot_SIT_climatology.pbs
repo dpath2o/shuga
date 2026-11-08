@@ -12,10 +12,10 @@
 set -euo pipefail
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
 ROOT="/g/data/gv90/da1339"
-REPO="${ROOT}/src/mawsons-chest"
+REPO="${ROOT}/src/shuga"
 DATA_ROOT="${DATA_ROOT:-${ROOT}/afim_output}"
 MODEL_START_DATE="${MODEL_START_DATE:-2000-01-01}"
 MODEL_END_DATE="${MODEL_END_DATE:-2005-12-31}"
@@ -27,10 +27,10 @@ CMEMS_STORE="${CMEMS_STORE:-${ROOT}/SeaIce/CMEMS/0p083/daily/${HEMISPHERE}/SI/me
 OUTPUT="${OUTPUT:-${ROOT}/GRAPHICAL/${EXPERIMENT_GROUP:-lateral-drag}/timeseries/SIT_${HEMISPHERE}_climatology_2000-2005.png}"
 
 cd "$REPO"
-export PYTHONPATH="$REPO"
+export PYTHONPATH="$(dirname -- "$PWD")"
 export PYTHONNOUSERSITE=1
 
-CMD=(python -u shuga/scripts/plotting/plot_SIT_climatology.py
+CMD=(python -u scripts/plotting/plot_SIT_climatology.py
      --data-root "$DATA_ROOT"
      --model-start-date "$MODEL_START_DATE"
      --model-end-date "$MODEL_END_DATE"

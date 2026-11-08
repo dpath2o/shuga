@@ -14,7 +14,7 @@ cd "${PBS_O_WORKDIR:-$PWD}"
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-25.12
+module load conda/analysis3-26.08
 
 : "${START_DATE:=2000-03-01}"
 : "${END_DATE:=2018-02-15}"

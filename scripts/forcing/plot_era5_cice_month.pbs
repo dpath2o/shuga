@@ -16,9 +16,9 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
-cd /home/581/da1339/AFIM/src/mawsons-chest
+cd "$HOME/src/shuga"
 
 FILE="${FILE:?FILE not set}"
 HOURS="${HOURS:-48}"
@@ -87,6 +87,6 @@ if [[ -n "${VARIABLES}" ]]; then
   done
 fi
 
-python shuga/scripts/forcing/plot_era5_cice_month.py "${args[@]}"
+python scripts/forcing/plot_era5_cice_month.py "${args[@]}"
 
 echo "Finished at $(date)"

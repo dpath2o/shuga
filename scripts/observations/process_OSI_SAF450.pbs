@@ -14,7 +14,7 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3
+module load conda/analysis3-26.08
 
 : "${START_DATE:?Set START_DATE=YYYY-MM-DD}"
 : "${END_DATE:?Set END_DATE=YYYY-MM-DD}"
@@ -23,10 +23,10 @@ module load conda/analysis3
 : "${PROCESSED_DIR:=/g/data/gv90/da1339/SeaIce/OSI-SAF-450/processed}"
 : "${CHUNKS_TIME:=8}"
 : "${OVERWRITE:=}"
-: "${SHUGA_ROOT:=/g/data/gv90/da1339/src/mawsons-chest}"
+: "${SHUGA_ROOT:=$HOME/src/shuga}"
 
 cd "${SHUGA_ROOT}"
-export PYTHONPATH="${SHUGA_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="$(dirname -- "$PWD")${PYTHONPATH:+:$PYTHONPATH}"
 
 python - <<'PY'
 import shuga.observations.OSI_SAF450 as module

@@ -29,7 +29,7 @@ export COPERNICUSMARINE_SERVICE_PASSWORD='your_password'
 From the repository root:
 
 ```bash
-python shuga/scripts/downloading/download_OSI_SAF450.py \
+python scripts/downloading/download_OSI_SAF450.py \
   --raw-dir /g/data/gv90/da1339/observations/OSI-SAF-450/raw \
   --processed-dir /g/data/gv90/da1339/observations/OSI-SAF-450/processed \
   --start-date 2000-01-01 \
@@ -56,8 +56,8 @@ The reduction uses a 15% concentration threshold and sums fractional ice-covered
 ## Gadi copyq usage
 
 ```bash
-cd /g/data/gv90/da1339/src/mawsons-chest
-shuga/scripts/downloading/download_OSI_SAF450_pbs_wrapper.sh \
+cd ~/src/shuga
+scripts/downloading/download_OSI_SAF450_pbs_wrapper.sh \
   -b 2000-01-01 \
   -e 2005-12-31 \
   -r /g/data/gv90/da1339/observations/OSI-SAF-450/raw \

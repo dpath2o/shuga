@@ -12,13 +12,13 @@
 set -euo pipefail
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
-REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+REPO="${REPO:-$HOME/src/shuga}"
 cd "$REPO"
-export PYTHONPATH="$REPO"
+export PYTHONPATH="$(dirname -- "$PWD")"
 
-python -u shuga/scripts/downloading/download_AWI_SIT.py \
+python -u scripts/downloading/download_AWI_SIT.py \
   --dest "${DEST:-/g/data/gv90/da1339/SeaIce/AWI}" \
   --hemispheres "${HEMISPHERES:-nh,sh}" \
   --levels "${LEVELS:-l2p_release,l3cp_release}" \

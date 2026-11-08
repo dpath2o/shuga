@@ -11,12 +11,12 @@
 set -euo pipefail
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
-REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+module load conda/analysis3-26.08
+REPO="${REPO:-$HOME/src/shuga}"
 cd "$REPO"
-export PYTHONPATH="$REPO"
+export PYTHONPATH="$(dirname -- "$PWD")"
 export PYTHONNOUSERSITE=1
-CMD=(python -u shuga/scripts/observations/process_SIT.py
+CMD=(python -u scripts/observations/process_SIT.py
      --hemisphere "${HEMISPHERE:-SH}"
      --sources "${SOURCES:-ESA,AWI}")
 [[ "${OVERWRITE:-false}" == "true" ]] && CMD+=(--overwrite)

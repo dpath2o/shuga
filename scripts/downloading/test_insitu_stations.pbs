@@ -13,17 +13,17 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
-REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+REPO="${REPO:-$HOME/src/shuga}"
 ROOT="${ROOT:-/g/data/gv90/da1339/SeaIce/InSitu/raw}"
 
 cd "$REPO"
 
-export PYTHONPATH="$REPO"
+export PYTHONPATH="$(dirname -- "$PWD")"
 export PYTHONNOUSERSITE=1
 
-python -u shuga/scripts/downloading/download_insitu_thickness.py \
+python -u scripts/downloading/download_insitu_thickness.py \
     --root "$ROOT" \
     --sources "stations" \
     --dry-run \

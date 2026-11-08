@@ -34,14 +34,14 @@ TP_MAX="${TP_MAX:-}"
 DPI="${DPI:-300}"
 OVERWRITE="${OVERWRITE:-false}"
 
-SCRIPT_ROOT="${SCRIPT_ROOT:-/home/581/da1339/src/mawsons-chest}"
-PY_SCRIPT="${PY_SCRIPT:-${SCRIPT_ROOT}/shuga/scripts/plotting/plot_whacs_daily.py}"
+SCRIPT_ROOT="${SCRIPT_ROOT:-$HOME/src/shuga}"
+PY_SCRIPT="${PY_SCRIPT:-${SCRIPT_ROOT}/scripts/plotting/plot_whacs_daily.py}"
 
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.01
+module load conda/analysis3-26.08
 
 export PYTHONUNBUFFERED=1
-export PYTHONPATH="${SCRIPT_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="$(dirname -- "${SCRIPT_ROOT}")${PYTHONPATH:+:$PYTHONPATH}"
 
 ARGS=(
     "${YEAR}" "${MONTH}"

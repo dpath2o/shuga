@@ -18,7 +18,7 @@ echo "PBS_O_WORKDIR: ${PBS_O_WORKDIR:-unknown}"
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.01
+module load conda/analysis3-26.08
 
 export PYTHONNOUSERSITE=1
 export OMP_NUM_THREADS=1
@@ -29,10 +29,10 @@ export NUMEXPR_NUM_THREADS=1
 PROJECT="${PROJECT:-gv90}"
 RUN_USER="${RUN_USER:-da1339}"
 
-REPO_ROOT="${REPO_ROOT:-${HOME}/AFIM/src/mawsons-chest}"
-PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/shuga/scripts/tides_analysis/hourly_vs_daily_fast_ice_diagnostics.py}"
+REPO_ROOT="${REPO_ROOT:-$HOME/src/shuga}"
+PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/scripts/tides_analysis/hourly_vs_daily_fast_ice_diagnostics.py}"
 
-export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="$(dirname -- "${REPO_ROOT}")${PYTHONPATH:+:$PYTHONPATH}"
 export DASK_TEMPORARY_DIRECTORY="/scratch/${PROJECT}/${RUN_USER}/dask_tmp/${PBS_JOBID}"
 export TMPDIR="/scratch/${PROJECT}/${RUN_USER}/tmp/${PBS_JOBID}"
 mkdir -p "${DASK_TEMPORARY_DIRECTORY}" "${TMPDIR}"

@@ -12,7 +12,7 @@
 set -euo pipefail
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3
+module load conda/analysis3-26.08
 : "${START_DATE:?Set START_DATE=YYYY-MM-DD}"
 : "${END_DATE:?Set END_DATE=YYYY-MM-DD}"
 : "${SEAICE_ROOT:=/g/data/gv90/da1339/SeaIce}"
@@ -22,10 +22,10 @@ module load conda/analysis3
 : "${CHUNKS_TIME:=31}"
 : "${OUTPUT_STORE:=}"
 : "${OVERWRITE:=}"
-: "${SHUGA_ROOT:=/g/data/gv90/da1339/src/mawsons-chest}"
+: "${SHUGA_ROOT:=$HOME/src/shuga}"
 cd "${SHUGA_ROOT}"
-export PYTHONPATH="${SHUGA_ROOT}:${PYTHONPATH:-}"
-CMD=(python -u shuga/scripts/observations/process_NSIDC_SIA_SIE.py
+export PYTHONPATH="$(dirname -- "$PWD")${PYTHONPATH:+:$PYTHONPATH}"
+CMD=(python -u scripts/observations/process_NSIDC_SIA_SIE.py
      --start-date "${START_DATE}" --end-date "${END_DATE}" --hemisphere "${HEMISPHERE}"
      --seaice-root "${SEAICE_ROOT}" --nsidc-version "${NSIDC_VERSION}"
      --threshold "${THRESHOLD}" --chunks-time "${CHUNKS_TIME}")

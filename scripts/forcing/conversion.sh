@@ -15,7 +15,7 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
 # ---------------------------------------------------------------------
 # User controls

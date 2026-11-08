@@ -69,20 +69,20 @@ No arbitrary 1980 cutoff is applied.
 ## Dry test
 
 ```bash
-qsub shuga/scripts/observations/test_insitu_BEPSII.pbs
+qsub scripts/observations/test_insitu_BEPSII.pbs
 ```
 
 ## Process
 
 ```bash
 qsub -v OVERWRITE=true \
-    shuga/scripts/observations/insitu_thickness.pbs
+    scripts/observations/insitu_thickness.pbs
 ```
 
 ## Inspect
 
 ```bash
-qsub shuga/scripts/observations/inspect_insitu_BEPSII.pbs
+qsub scripts/observations/inspect_insitu_BEPSII.pbs
 ```
 
 The fast-ice Zarr is the primary BEPSII input for the later CICE matchup

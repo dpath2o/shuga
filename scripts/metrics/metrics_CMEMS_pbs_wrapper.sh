@@ -54,8 +54,8 @@ if [[ -z "$METRIC_GROUPS" && -z "$METRIC_NAMES" ]]; then
     METRIC_GROUPS="cmems_core"
 fi
 
-REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest}"
-PBS_SCRIPT="${REPO_ROOT}/shuga/scripts/metrics/metrics_CMEMS.pbs"
+REPO_ROOT="${REPO_ROOT:-$HOME/src/shuga}"
+PBS_SCRIPT="${REPO_ROOT}/scripts/metrics/metrics_CMEMS.pbs"
 
 GROUPS_PBS="${METRIC_GROUPS//,/|}"
 NAMES_PBS="${METRIC_NAMES//,/|}"

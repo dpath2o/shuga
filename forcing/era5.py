@@ -7,14 +7,8 @@ writes monthly CICE-ready NetCDF files. It keeps monthly files as the primary
 forcing product rather than concatenating into very large yearly files.
 """
 from __future__ import annotations
-import calendar, logging, os, sys
+import calendar, logging, os
 from pathlib    import Path
-#####################################################################
-# make sure this reflects the correct location of mawsons-chest repo
-repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
-#####################################################################
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
 import numpy          as np
 import xarray         as xr
 import xesmf          as xe

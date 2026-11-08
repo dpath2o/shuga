@@ -283,7 +283,7 @@ def download_with_copernicusmarine(output_dir: str | Path,
         raise ImportError("The Python package 'copernicusmarine' is required for OSI-SAF-450 "
                           "downloads. Try:\n\n"
                           "    module use /g/data/xp65/public/modules\n"
-                          "    module load conda/analysis3-26.02\n"
+                          "    module load conda/analysis3-26.08\n"
                           "    python -c \"import copernicusmarine; print(copernicusmarine.__version__)\"\n\n"
                           "If that fails, install it in your user environment with:\n\n"
                           "    python -m pip install --user copernicusmarine\n") from exc

@@ -10,9 +10,9 @@ shuga/observations/NSIDC.py
 shuga/observations/__init__.py
 shuga/regridder/__init__.py
 shuga/regridder/pyresample.py
-shuga/scripts/comparisons/build_af2020_fip_fic_common_grid.py
-shuga/scripts/comparisons/plot_fic_pair_from_common_grid.py
-shuga/scripts/comparisons/README_AF2020_pyresample.md
+scripts/comparisons/build_af2020_fip_fic_common_grid.py
+scripts/comparisons/plot_fic_pair_from_common_grid.py
+scripts/comparisons/README_AF2020_pyresample.md
 ```
 
 After this, remove or retire:
@@ -76,7 +76,7 @@ The build script does **not** write full daily circum-Antarctic FIC fields by de
 ## Example: FIP difference plus selected AMJ FIC dates
 
 ```bash
-python shuga/scripts/comparisons/build_af2020_fip_fic_common_grid.py \
+python scripts/comparisons/build_af2020_fip_fic_common_grid.py \
   -s LD-blend-base \
   -b 2000-04-01 \
   -e 2003-06-30 \
@@ -108,7 +108,7 @@ Outputs default to:
 ## Quick-look FIC plot
 
 ```bash
-python shuga/scripts/comparisons/plot_fic_pair_from_common_grid.py \
+python scripts/comparisons/plot_fic_pair_from_common_grid.py \
   ~/AFIM_archive/LD-blend-base/zarr/comparisons/af2020_pyresample_LD-blend-base_binary-days_2000-04-01_2003-06-30_FIC_samples.zarr \
   --date 2000-04-01 \
   --region 97.5 142.5 -67.5 -63 \

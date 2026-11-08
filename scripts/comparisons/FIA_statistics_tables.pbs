@@ -15,7 +15,7 @@ cd "${PBS_O_WORKDIR:-$PWD}"
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-25.12
+module load conda/analysis3-26.08
 
 : "${SIM_NAMES:?Set SIM_NAMES, e.g. qsub -v SIM_NAMES='LD-blend-base LD-static-Cs1e-3' FIA_statistics_tables.pbs}"
 : "${START_DATE:=2000-01-01}"

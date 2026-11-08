@@ -9,9 +9,9 @@ from pathlib             import Path
 from math                import ceil
 xr.set_options(keep_attrs=True)
 warnings.filterwarnings("default")
-repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+package_parent = Path(__file__).resolve().parents[3]
+if str(package_parent) not in sys.path:
+    sys.path.insert(0, str(package_parent))
 import shuga
 from shuga.plotting.cice import CICEPlotter
 from shuga               import configs

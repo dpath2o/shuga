@@ -5,8 +5,8 @@ This page gives a minimal end-to-end `shuga` workflow: load CICE history, classi
 ## 1. Put the repo on `PYTHONPATH`
 
 ```bash
-cd ~/AFIM/src/mawsons-chest
-export PYTHONPATH="$PWD:$PYTHONPATH"
+cd ~/src/shuga
+export PYTHONPATH="$HOME/src${PYTHONPATH:+:$PYTHONPATH}"
 ```
 
 For notebooks:
@@ -14,9 +14,9 @@ For notebooks:
 ```python
 from pathlib import Path
 import sys
-repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+package_parent = Path.home() / "src"
+if str(package_parent) not in sys.path:
+    sys.path.insert(0, str(package_parent))
 ```
 
 ## 2. Define specs
@@ -62,7 +62,7 @@ print(ds)
 ## 4. Convert NetCDF to grouped Zarr, if needed
 
 ```bash
-python shuga/scripts/conversion/nc2zarr.py \
+python scripts/conversion/nc2zarr.py \
   --sim-name LD-blend-base \
   --start-date 2000-01-01 \
   --end-date 2003-12-31 \
@@ -79,7 +79,7 @@ CICEClassifier(run=run, classify=classify, paths=paths).run_methods(overwrite=Fa
 or:
 
 ```bash
-python shuga/scripts/classification/classify.py \
+python scripts/classification/classify.py \
   --sim-name LD-blend-base \
   --start-date 2000-04-01 \
   --end-date 2003-06-30 \
@@ -105,7 +105,7 @@ runner.compute_metrics("binary-days", metric_groups=["fi_core", "fi_spatial", "f
 or:
 
 ```bash
-python shuga/scripts/metrics/metrics.py \
+python scripts/metrics/metrics.py \
   --sim-name LD-blend-base \
   --start-date 2000-04-01 \
   --end-date 2003-06-30 \
@@ -135,10 +135,10 @@ plotter.plot_timeseries("FIA", method="binary-days", region="total")
 
 ```bash
 qsub -v SIM_NAME=LD-blend-base,START_DATE=2000-04-01,END_DATE=2003-06-30,SKIP_HISTORY_CONVERSION=true \
-  shuga/scripts/classification/classify.pbs
+  scripts/classification/classify.pbs
 ```
 
 ```bash
 qsub -v SIM_NAME=LD-blend-base,START_DATE=2000-04-01,END_DATE=2003-06-30,METRIC_GROUPS=fi_core\|fi_spatial\|fi_regional \
-  shuga/scripts/metrics/metrics.pbs
+  scripts/metrics/metrics.pbs
 ```

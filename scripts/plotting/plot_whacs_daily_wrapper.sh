@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
-SCRIPT_ROOT="${SCRIPT_ROOT:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
+SCRIPT_ROOT="${SCRIPT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 PBS_SCRIPT="${PBS_SCRIPT:-${SCRIPT_DIR}/plot_whacs_daily.pbs}"
 
 usage() {

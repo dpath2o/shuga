@@ -79,7 +79,7 @@ print(result)
 Daily:
 
 ```bash
-python shuga/scripts/conversion/nc2zarr.py \
+python scripts/conversion/nc2zarr.py \
   --sim-name LD-blend-base \
   --start-date 2000-01-01 \
   --end-date 2003-12-31 \
@@ -89,7 +89,7 @@ python shuga/scripts/conversion/nc2zarr.py \
 Hourly:
 
 ```bash
-python shuga/scripts/conversion/nc2zarr.py \
+python scripts/conversion/nc2zarr.py \
   --sim-name LD-blend-base \
   --start-date 2000-01-01 \
   --end-date 2000-01-31 \

@@ -12,7 +12,7 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
 RUN_USER="${RUN_USER:-da1339}"
 ROOT="${ROOT:-/g/data/gv90/da1339/SeaIce/CMEMS/0p083/daily}"
@@ -34,9 +34,9 @@ LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
 METHODS="${METHODS//|/,}"
 
-REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest}"
-PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/shuga/scripts/classification/classify_CMEMS.py}"
-export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+REPO_ROOT="${REPO_ROOT:-$HOME/src/shuga}"
+PY_SCRIPT="${PY_SCRIPT:-${REPO_ROOT}/scripts/classification/classify_CMEMS.py}"
+export PYTHONPATH="$(dirname -- "${REPO_ROOT}")${PYTHONPATH:+:$PYTHONPATH}"
 
 export DASK_TEMPORARY_DIRECTORY="/scratch/gv90/${RUN_USER}/dask_tmp/${PBS_JOBID}"
 export TMPDIR="/scratch/gv90/${RUN_USER}/tmp/${PBS_JOBID}"

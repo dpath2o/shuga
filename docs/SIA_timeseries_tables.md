@@ -1,6 +1,6 @@
 # CICE / NSIDC / OSI-SAF SIA comparison
 
-`shuga/scripts/comparisons/SIA_timeseries_tables.py` creates a multi-experiment Antarctic sea-ice area comparison against two observational products:
+`scripts/comparisons/SIA_timeseries_tables.py` creates a multi-experiment Antarctic sea-ice area comparison against two observational products:
 
 - `NSIDC`: plotted as a solid black line.
 - `OSI-SAF-450`: plotted as a dashed black line.
@@ -36,7 +36,7 @@ If your local store differs, pass a template containing `{sim_name}`:
 ## Interactive usage
 
 ```bash
-python shuga/scripts/comparisons/SIA_timeseries_tables.py \
+python scripts/comparisons/SIA_timeseries_tables.py \
   --sim-names LD-NIL Cs-high-ktens-high Cq-high Cl-mid \
   --start-date 2000-01-01 \
   --end-date 2005-12-31 \
@@ -48,8 +48,8 @@ python shuga/scripts/comparisons/SIA_timeseries_tables.py \
 ## PBS usage
 
 ```bash
-cd /g/data/gv90/da1339/src/mawsons-chest
-shuga/scripts/comparisons/SIA_timeseries_tables_pbs_wrapper.sh \
+cd ~/src/shuga
+scripts/comparisons/SIA_timeseries_tables_pbs_wrapper.sh \
   -s "LD-NIL Cs-high-ktens-high Cq-high Cl-mid" \
   -b 2000-01-01 \
   -e 2005-12-31 \
@@ -61,7 +61,7 @@ shuga/scripts/comparisons/SIA_timeseries_tables_pbs_wrapper.sh \
 Additional script arguments can be passed after the wrapper options:
 
 ```bash
-shuga/scripts/comparisons/SIA_timeseries_tables_pbs_wrapper.sh \
+scripts/comparisons/SIA_timeseries_tables_pbs_wrapper.sh \
   -s "LD-NIL Cs-high-ktens-high" \
   -b 2000-01-01 -e 2005-12-31 \
   -n /path/nsidc.zarr \

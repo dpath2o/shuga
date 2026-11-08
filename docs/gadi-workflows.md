@@ -1,24 +1,29 @@
 # Gadi workflows
 
-This page describes how `shuga/scripts/*` connect package code to NCI Gadi PBS jobs. Scripts should remain thin: parse arguments, build runtime specs, construct `ShugaPaths`, call package code, and log outputs.
+This page describes how `scripts/*` connect package code to NCI Gadi PBS jobs. Scripts should remain thin: parse arguments, build runtime specs, construct `ShugaPaths`, call package code, and log outputs.
 
 ## Environment
+
+The default checkout is `~/src/shuga`. Run the examples from that directory.
+Python imports `shuga` from the checkout's parent directory (`~/src`).
 
 Typical PBS setup:
 
 ```bash
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-25.12
+module load conda/analysis3-26.08
 
-REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest}"
-export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+REPO_ROOT="${REPO_ROOT:-$HOME/src/shuga}"
+export PYTHONPATH="$(dirname -- "${REPO_ROOT}")${PYTHONPATH:+:$PYTHONPATH}"
 export DASK_TEMPORARY_DIRECTORY="/scratch/${PROJECT}/${RUN_USER}/dask_tmp/${PBS_JOBID}"
 export TMPDIR="/scratch/${PROJECT}/${RUN_USER}/tmp/${PBS_JOBID}"
 mkdir -p "$DASK_TEMPORARY_DIRECTORY" "$TMPDIR"
 ```
 
-Individual production scripts may pin a newer `analysis3` module where required; check the PBS header before submission.
+If you use a different checkout, point the job's checkout variable (such as
+`REPO_ROOT`, `SHUGA_ROOT`, or `SCRIPT_ROOT`) at the directory containing
+`pyproject.toml` and `scripts/`.
 
 ## Common roots
 
@@ -88,7 +93,7 @@ groups. Existing data are not automatically migrated from old flat directories.
 Python entry point:
 
 ```text
-shuga/scripts/classification/classify.py
+scripts/classification/classify.py
 ```
 
 Responsibilities:
@@ -102,7 +107,7 @@ Responsibilities:
 Example:
 
 ```bash
-python shuga/scripts/classification/classify.py \
+python scripts/classification/classify.py \
   --sim-name LD-blend-base \
   --start-date 2000-04-01 \
   --end-date 2003-06-30 \
@@ -122,7 +127,7 @@ PBS:
 
 ```bash
 qsub -v SIM_NAME=LD-blend-base,START_DATE=2000-04-01,END_DATE=2003-06-30,SKIP_HISTORY_CONVERSION=true \
-  shuga/scripts/classification/classify.pbs
+  scripts/classification/classify.pbs
 ```
 
 ## Metrics
@@ -130,7 +135,7 @@ qsub -v SIM_NAME=LD-blend-base,START_DATE=2000-04-01,END_DATE=2003-06-30,SKIP_HI
 Python entry point:
 
 ```text
-shuga/scripts/metrics/metrics.py
+scripts/metrics/metrics.py
 ```
 
 Responsibilities:
@@ -143,7 +148,7 @@ Responsibilities:
 Example:
 
 ```bash
-python shuga/scripts/metrics/metrics.py \
+python scripts/metrics/metrics.py \
   --sim-name LD-blend-base \
   --start-date 2000-04-01 \
   --end-date 2003-06-30 \
@@ -160,13 +165,13 @@ PBS uses `|` as a safe delimiter for comma lists:
 
 ```bash
 qsub -v SIM_NAME=LD-blend-base,START_DATE=2000-04-01,END_DATE=2003-06-30,METRIC_GROUPS=fi_core\|fi_spatial\|fi_regional \
-  shuga/scripts/metrics/metrics.pbs
+  scripts/metrics/metrics.pbs
 ```
 
 ## Conversion
 
 ```text
-shuga/scripts/conversion/nc2zarr.py
+scripts/conversion/nc2zarr.py
 ```
 
 Daily output:
@@ -184,7 +189,7 @@ iceh_hourly.zarr/YYYY_MM_DD
 Example:
 
 ```bash
-python shuga/scripts/conversion/nc2zarr.py \
+python scripts/conversion/nc2zarr.py \
   --sim-name LD-blend-base \
   --start-date 2000-01-01 \
   --end-date 2003-12-31 \
@@ -197,9 +202,9 @@ python shuga/scripts/conversion/nc2zarr.py \
 Current scripts include:
 
 ```text
-shuga/scripts/observations/build_af2020_fip_fic_common_grid.py
-shuga/scripts/comparisons/FIP_differencing.py
-shuga/scripts/plotting/plot_FIC_side_by_side.py
+scripts/observations/build_af2020_fip_fic_common_grid.py
+scripts/comparisons/FIP_differencing.py
+scripts/plotting/plot_FIC_side_by_side.py
 ```
 
 Guiding rules:
@@ -214,13 +219,13 @@ Guiding rules:
 Atmospheric forcing scripts live primarily in:
 
 ```text
-shuga/scripts/forcing/
+scripts/forcing/
 ```
 
 Wave-forcing production scripts live in:
 
 ```text
-shuga/scripts/waves/
+scripts/waves/
 ```
 
 Package capability is described in [`forcing.md`](forcing.md). The WHACS-specific scientific and technical workflow is documented in [`WHACS_wave_forcing.md`](WHACS_wave_forcing.md).
@@ -245,7 +250,7 @@ A January-1995 pilot is submitted as a normal job:
 qsub \
   -P au88 \
   -v START_YEAR=1995,END_YEAR=1995 \
-  shuga/scripts/waves/whacs_regrid.pbs
+  scripts/waves/whacs_regrid.pbs
 ```
 
 The PBS worker defaults to index 0 when `PBS_ARRAY_INDEX` is absent, so this processes January of `START_YEAR`.
@@ -253,7 +258,7 @@ The PBS worker defaults to index 0 when `PBS_ARRAY_INDEX` is absent, so this pro
 A multi-year run uses the wrapper:
 
 ```bash
-./shuga/scripts/waves/whacs_regrid_wrapper.sh 1995 2005
+./scripts/waves/whacs_regrid_wrapper.sh 1995 2005
 ```
 
 Operational defaults:
@@ -299,9 +304,9 @@ completed   = true
 Daily PyGMT regridding QC scripts live in:
 
 ```text
-shuga/scripts/plotting/plot_whacs_daily.py
-shuga/scripts/plotting/plot_whacs_daily.pbs
-shuga/scripts/plotting/plot_whacs_daily_wrapper.sh
+scripts/plotting/plot_whacs_daily.py
+scripts/plotting/plot_whacs_daily.pbs
+scripts/plotting/plot_whacs_daily_wrapper.sh
 ```
 
 See [`WHACS_wave_forcing.md`](WHACS_wave_forcing.md) before interpreting native-versus-regridded plots: once production uses all five source sets, a `GRID`-only native panel is not a complete before/after comparison.

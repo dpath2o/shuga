@@ -26,5 +26,6 @@ EXTRA_ARGS="$*"
 : "${START_DATE:?Missing -b START_DATE}"
 : "${END_DATE:?Missing -e END_DATE}"
 : "${NSIDC_SIA_STORE:?Missing -n NSIDC_SIA_STORE}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 qsub -v EXPERIMENT_GROUP="${EXPERIMENT_GROUP}",SIM_NAMES="${SIM_NAMES}",START_DATE="${START_DATE}",END_DATE="${END_DATE}",NSIDC_SIA_STORE="${NSIDC_SIA_STORE}",OSISAF_SIA_STORE="${OSISAF_SIA_STORE}",OUT_DIR="${OUT_DIR}",EXTRA_ARGS="${EXTRA_ARGS}" \
-  shuga/scripts/comparisons/SIA_timeseries_tables.pbs
+  "${SCRIPT_DIR}/SIA_timeseries_tables.pbs"

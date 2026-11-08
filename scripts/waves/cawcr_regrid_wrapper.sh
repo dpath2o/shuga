@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-PBS_SCRIPT="${PBS_SCRIPT:-/home/581/da1339/AFIM/src/mawsons-chest/shuga/scripts/waves/cawcr_regrid.pbs}"
+PBS_SCRIPT="${PBS_SCRIPT:-$HOME/src/shuga/scripts/waves/cawcr_regrid.pbs}"
 
 usage() {
   cat <<EOF

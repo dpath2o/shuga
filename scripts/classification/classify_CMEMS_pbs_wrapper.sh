@@ -47,8 +47,8 @@ done
 
 [[ -n "$START_DATE" && -n "$END_DATE" ]] || { usage; exit 2; }
 
-REPO_ROOT="${REPO_ROOT:-$HOME/AFIM/src/mawsons-chest}"
-PBS_SCRIPT="${REPO_ROOT}/shuga/scripts/classification/classify_CMEMS.pbs"
+REPO_ROOT="${REPO_ROOT:-$HOME/src/shuga}"
+PBS_SCRIPT="${REPO_ROOT}/scripts/classification/classify_CMEMS.pbs"
 
 METHODS_PBS="${METHODS//,/|}"
 

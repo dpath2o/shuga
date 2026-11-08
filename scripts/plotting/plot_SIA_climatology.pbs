@@ -14,10 +14,10 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-25.12
+module load conda/analysis3-26.08
 
 ROOT="/g/data/gv90/da1339"
-REPO="${ROOT}/src/mawsons-chest"
+REPO="${ROOT}/src/shuga"
 SEAICE_ROOT="${ROOT}/SeaIce"
 
 # ------------------------------------------------------------------
@@ -42,10 +42,10 @@ Y_MAX="${Y_MAX:-18}"
 cd "${REPO}"
 
 export PYTHONNOUSERSITE=1
-export PYTHONPATH="${REPO}"
+export PYTHONPATH="$(dirname -- "$PWD")"
 
 CMD=(
-  python -u shuga/scripts/plotting/plot_SIA_climatology.py
+  python -u scripts/plotting/plot_SIA_climatology.py
   --paper-root "${PAPER_ROOT}"
   --seaice-root "${SEAICE_ROOT}"
   --nsidc-store "${NSIDC_STORE}"

@@ -30,8 +30,8 @@ OW_NC="${OW_NC:-false}"
 OW_WGT="${OW_WGT:-false}"
 OW_SIC_WGT="${OW_SIC_WGT:-false}"
 
-SCRIPT_ROOT="${SCRIPT_ROOT:-/home/581/da1339/AFIM/src/mawsons-chest}"
-PY_SCRIPT="${PY_SCRIPT:-${SCRIPT_ROOT}/shuga/scripts/waves/cawcr_regrid.py}"
+SCRIPT_ROOT="${SCRIPT_ROOT:-$HOME/src/shuga}"
+PY_SCRIPT="${PY_SCRIPT:-${SCRIPT_ROOT}/scripts/waves/cawcr_regrid.py}"
 
 echo "YEAR=${YEAR}"
 echo "MONTH=${MONTH}"
@@ -57,10 +57,10 @@ if [[ "${OW_NC}" != "true" && -s "${OUTFILE}" ]]; then
 fi
 
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.01
+module load conda/analysis3-26.08
 
 export PYTHONUNBUFFERED=1
-export PYTHONPATH="${SCRIPT_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="$(dirname -- "${SCRIPT_ROOT}")${PYTHONPATH:+:$PYTHONPATH}"
 
 PY_ARGS=(
   "${YEAR}"

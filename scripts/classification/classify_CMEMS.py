@@ -6,9 +6,9 @@ import logging
 import sys
 from pathlib import Path
 
-repo_root = Path.home() / "AFIM" / "src" / "mawsons-chest"
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+package_parent = Path(__file__).resolve().parents[3]
+if str(package_parent) not in sys.path:
+    sys.path.insert(0, str(package_parent))
 
 from shuga.classify.cmems import CMEMSClassifier
 

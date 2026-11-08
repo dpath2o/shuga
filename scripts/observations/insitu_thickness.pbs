@@ -13,9 +13,9 @@ set -euo pipefail
 
 module purge
 module use /g/data/xp65/public/modules
-module load conda/analysis3-26.02
+module load conda/analysis3-26.08
 
-REPO="${REPO:-$HOME/AFIM/src/mawsons-chest}"
+REPO="${REPO:-$HOME/src/shuga}"
 
 INPUT="${INPUT:-/g/data/gv90/da1339/SeaIce/InSitu/raw/Zenodo/BEPSII_TS/DATA/BEPSII_TS_v1.0.nc}"
 
@@ -25,11 +25,11 @@ HEMISPHERE="${HEMISPHERE:-SH}"
 
 cd "$REPO"
 
-export PYTHONPATH="$REPO"
+export PYTHONPATH="$(dirname -- "$PWD")"
 export PYTHONNOUSERSITE=1
 
 CMD=(
-    python -u shuga/scripts/observations/insitu_thickness.py
+    python -u scripts/observations/insitu_thickness.py
     --input "$INPUT"
     --output-root "$OUTPUT_ROOT"
     --hemisphere "$HEMISPHERE"
